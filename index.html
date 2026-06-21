@@ -6418,6 +6418,25 @@ function renderChallengeLibrary() {
     }).join('');
 }
 
+// Build a checklist for challenges that have no real published prompt list:
+//  • books / default  → one numbered slot per target book ("Book 1" … "Book N")
+//  • genres           → one slot per genre to collect
+//  • pages            → 1,000-page milestone slots ("Reach 1,000 pages" …)
+function generateChallengeSlots(c) {
+    var n, arr = [], i;
+    if (c.goalType === 'pages') {
+        n = Math.max(1, Math.round((c.target || 0) / 1000));
+        for (i = 1; i <= n; i++) arr.push('Reach ' + (i * 1000).toLocaleString() + ' pages');
+    } else if (c.goalType === 'genres') {
+        n = Math.max(1, c.target || 1);
+        for (i = 1; i <= n; i++) arr.push('A book in a new genre (#' + i + ')');
+    } else {
+        n = Math.max(1, c.target || 1);
+        for (i = 1; i <= n; i++) arr.push('Book ' + i);
+    }
+    return arr;
+}
+
 function startLibraryChallenge(libId) {
     const library = getChallengeLibrary();
     const c = library.find(ch => ch.id === libId);
@@ -6426,14 +6445,17 @@ function startLibraryChallenge(libId) {
 
     const endDate = new Date();
     endDate.setFullYear(endDate.getFullYear(), 11, 31);
-    const hasPrompts = Array.isArray(c.prompts) && c.prompts.length > 0;
+    // Every library challenge is now a checklist: use its real prompt list when it has
+    // one, otherwise auto-generate slots from its target (books / genres / pages).
+    const prompts = (Array.isArray(c.prompts) && c.prompts.length > 0) ? c.prompts.slice() : generateChallengeSlots(c);
     app.challenges.push({
         id: Date.now(), libId: c.id, name: c.name, emoji: c.emoji,
-        goalType: hasPrompts ? 'prompts' : c.goalType,
-        target: hasPrompts ? c.prompts.length : c.target,
+        goalType: 'prompts',
+        target: prompts.length,
         current: 0, reward: c.reward, badge: c.badge,
-        promptDone: hasPrompts ? c.prompts.map(function(){ return false; }) : undefined,
-        promptBook: hasPrompts ? c.prompts.map(function(){ return null; }) : undefined,
+        prompts: prompts,
+        promptDone: prompts.map(function(){ return false; }),
+        promptBook: prompts.map(function(){ return null; }),
         startDate: new Date().toISOString().split('T')[0],
         endDate: endDate.toISOString().split('T')[0],
         completed: false, type: 'library'
@@ -10635,7 +10657,7 @@ function renderActiveChallengesWithTBR() {
                 ${tbrSuggestions.map(b => `<div style="font-size:11px;color:#3D5A80;padding:2px 0;cursor:pointer;" onclick="openBookModal(${b.id})" title="Click to view">• ${b.title}${b.pages ? ' (' + b.pages + 'p)' : ''}</div>`).join('')}
             </div>` : ''}
             <div style="display:flex;gap:5px;margin-top:8px;flex-wrap:wrap;">
-                ${ch.goalType === 'prompts' ? `<button class="btn btn-primary" style="flex:1;font-size:11px;padding:4px 8px;" onclick="openChallengePrompts(${idx})">📋 Prompts</button>` : ''}
+                ${ch.goalType === 'prompts' ? `<button class="btn btn-primary" style="flex:1;font-size:11px;padding:4px 8px;" onclick="openChallengePrompts(${idx})">📋 Checklist</button>` : ''}
                 ${completed ? `<button class="btn btn-primary" style="flex:1;font-size:11px;padding:4px 8px;" onclick="shareChallenge(${idx})">📤 Share</button>` : ''}
                 <button class="btn btn-secondary" style="flex:1;font-size:11px;padding:4px 8px;" onclick="removeChallenge(${idx})">Remove</button>
             </div>
@@ -10648,8 +10670,9 @@ function renderActiveChallengesWithTBR() {
 // state lives on the active challenge instance (promptDone[] / promptBook[]).
 function getChallengePrompts(ch) {
     if (!ch) return [];
+    if (ch.prompts && ch.prompts.length) return ch.prompts; // instance list (real or generated)
     var lib = getChallengeLibrary().find(function(c){ return c.id === ch.libId; });
-    return (lib && lib.prompts) || ch.prompts || [];
+    return (lib && lib.prompts) || [];
 }
 
 function openChallengePrompts(idx) {
@@ -10684,7 +10707,7 @@ function openChallengePrompts(idx) {
     modal.innerHTML = '<div class="modal-content" style="max-width:560px;">'
         + '<div class="modal-header"><h2 style="font-family:Quicksand,sans-serif;color:#3D5A80;margin:0;">' + (ch.emoji || '🏆') + ' ' + String(ch.name || 'Challenge').replace(/</g, '&lt;') + '</h2>'
         + '<button onclick="closeModal(\'challengePromptsModal\')" style="background:none;border:none;font-size:22px;cursor:pointer;color:#8B7E74;">✕</button></div>'
-        + '<div style="font-size:13px;color:#8B7E74;margin-bottom:14px;">✅ ' + doneCount + ' / ' + prompts.length + ' done · check a prompt and link a book.</div>'
+        + '<div style="font-size:13px;color:#8B7E74;margin-bottom:14px;">✅ ' + doneCount + ' / ' + prompts.length + ' done · check off an item and link a book.</div>'
         + '<div style="display:flex;flex-direction:column;gap:8px;">' + rows + '</div>'
         + '<button class="btn btn-primary" style="width:100%;margin-top:16px;" onclick="closeModal(\'challengePromptsModal\')">Done</button>'
         + '</div>';
