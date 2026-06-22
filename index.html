@@ -3626,18 +3626,9 @@
 
                     <!-- Challenge filter chips -->
                     <div id="spinnerChallengeFilter" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;"></div>
-                    <!-- Breakdown dimension picker (genre / author / publisher) -->
-                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
-                        <label style="font-size:11px;font-weight:700;color:#8B7E74;letter-spacing:.04em;">BREAK DOWN BY</label>
-                        <select id="spinnerDimension" onchange="setSpinnerDimension(this.value)" style="padding:6px 14px;border:1.5px solid #E8DFD5;border-radius:14px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-weight:600;font-size:13px;cursor:pointer;">
-                            <option value="genre">📚 Genre</option>
-                            <option value="author">✍️ Author</option>
-                            <option value="publisher">🏢 Publisher</option>
-                        </select>
-                    </div>
-                    <!-- Facet filter chips (built from the chosen dimension) -->
+                    <!-- Genre filter chips -->
                     <div id="spinnerGenreFilter" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px;">
-                        <button class="spinner-genre-chip active" data-spinner-genre="all" onclick="setSpinnerGenre('all')">All</button>
+                        <button class="spinner-genre-chip active" data-spinner-genre="all" onclick="setSpinnerGenre('all')">All Genres</button>
                     </div>
 
                     <!-- Spinner layout -->
@@ -4837,7 +4828,6 @@ function renderDashboard() {
                         <div style="font-weight:700;color:#3D5A80;">${book.title}</div>
                         <div style="font-size:13px;color:#8B7E74;margin-bottom:6px;">${book.author}</div>
                         ${cardProgressHTML(book)}
-                        ${dashReadingEditor(book)}
                     </div>
                 </div>`;
             }).join('');
@@ -5243,80 +5233,6 @@ function cardProgressHTML(book) {
         <div style="font-size:11px;color:#7D9B76;font-weight:700;margin-bottom:3px;">📖 ${detail}</div>
         <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
     </div>`;
-}
-
-// ── Reading date helpers (Goodreads-style start/finish) ───────────────────────
-// Convert a stored ISO timestamp (or YYYY-MM-DD) to a value for <input type="date">
-function toDateInputValue(v) {
-    if (!v) return '';
-    var s = String(v);
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-    var d = new Date(s);
-    if (isNaN(d.getTime())) return '';
-    var m = String(d.getMonth() + 1).padStart(2, '0');
-    var day = String(d.getDate()).padStart(2, '0');
-    return d.getFullYear() + '-' + m + '-' + day; // local components, year-stable
-}
-// Convert a date-input value (YYYY-MM-DD) to a stored ISO string (local noon = year-stable)
-function dateInputToISO(v) {
-    if (!v) return null;
-    var d = new Date(v + 'T12:00:00');
-    if (isNaN(d.getTime())) return null;
-    return d.toISOString();
-}
-
-// Compact inline progress + date editor shown on each dashboard "Currently Reading" card.
-// Uses dash-prefixed unique IDs (per book) to avoid colliding with the book modal's editBook* IDs.
-function dashReadingEditor(book) {
-    var pages = parseInt(book.pages) || 0;
-    var audio = book.format === 'Audiobook';
-    var pct = Math.max(0, Math.min(100, book.progressPercentage || 0));
-    var inStyle = 'width:72px;padding:5px 8px;border:1.5px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;text-align:center;';
-    var dateStyle = 'margin-left:4px;padding:3px 6px;border:1.5px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:11px;';
-    var progInput;
-    if (audio || pages <= 0) {
-        progInput = '<input type="number" min="0" max="100" value="' + pct + '" id="dashPct_' + book.id + '" onclick="event.stopPropagation()" onchange="updateDashProgress(' + book.id + ')" style="' + inStyle + '"><span style="color:#3D5A80;font-size:13px;">%</span>';
-    } else {
-        var curPage = (book.currentPage != null && !isNaN(book.currentPage)) ? book.currentPage : Math.round((pct / 100) * pages);
-        progInput = '<span style="color:#3D5A80;font-size:13px;">Page</span> <input type="number" min="0" max="' + pages + '" value="' + curPage + '" id="dashPage_' + book.id + '" onclick="event.stopPropagation()" onchange="updateDashProgress(' + book.id + ')" style="' + inStyle + '"> <span style="color:#8B7E74;font-size:13px;">of ' + pages + '</span>';
-    }
-    return '<div onclick="event.stopPropagation()" style="margin-top:6px;padding:8px 10px;background:rgba(125,155,118,0.08);border-radius:8px;">'
-        + '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' + progInput + '</div>'
-        + '<div style="display:flex;gap:10px;margin-top:6px;flex-wrap:wrap;">'
-        + '<label style="font-size:10px;color:#8B7E74;font-weight:700;">Started<input type="date" id="dashStart_' + book.id + '" value="' + toDateInputValue(book.dateStarted) + '" onclick="event.stopPropagation()" onchange="updateDashDates(' + book.id + ')" style="' + dateStyle + '"></label>'
-        + '<label style="font-size:10px;color:#8B7E74;font-weight:700;">Finished<input type="date" id="dashFinish_' + book.id + '" value="' + toDateInputValue(book.dateFinished) + '" onclick="event.stopPropagation()" onchange="updateDashDates(' + book.id + ')" style="' + dateStyle + '"></label>'
-        + '</div></div>';
-}
-
-function updateDashProgress(id) {
-    var book = app.books.find(function(b){ return b.id === id; });
-    if (!book) return;
-    var pages = parseInt(book.pages) || 0;
-    var audio = book.format === 'Audiobook';
-    if (audio || pages <= 0) {
-        var pct = parseInt(document.getElementById('dashPct_' + id)?.value) || 0;
-        pct = Math.max(0, Math.min(100, pct));
-        book.progressPercentage = pct;
-        book.currentPage = pages > 0 ? Math.round((pct / 100) * pages) : null;
-    } else {
-        var cp = parseInt(document.getElementById('dashPage_' + id)?.value) || 0;
-        cp = Math.max(0, Math.min(cp, pages));
-        book.currentPage = cp;
-        book.progressPercentage = Math.round((cp / pages) * 100);
-    }
-    app.saveData();
-    renderDashboard();
-    if (typeof applyLibraryFilters === 'function') applyLibraryFilters();
-}
-
-function updateDashDates(id) {
-    var book = app.books.find(function(b){ return b.id === id; });
-    if (!book) return;
-    var s = document.getElementById('dashStart_' + id);
-    var f = document.getElementById('dashFinish_' + id);
-    if (s) book.dateStarted = s.value ? dateInputToISO(s.value) : null;
-    if (f) book.dateFinished = f.value ? dateInputToISO(f.value) : (book.status === 'read' ? book.dateFinished : null);
-    app.saveData();
 }
 
 function renderLibraryBooksFiltered(books) {
@@ -5769,8 +5685,6 @@ function openBookModal(bookId) {
 
     document.getElementById('bookModalBody').innerHTML = `
         ${book.description ? `<div id="descDiv_${book.id}" style="background:rgba(125,155,118,0.1);border-left:3px solid #7D9B76;padding:12px 16px;border-radius:0 10px 10px 0;margin-bottom:16px;font-size:14px;color:#8B7E74;font-style:italic;"><span id="descText_${book.id}">${book.description.length > 100 ? book.description.substring(0, 100) + '...' : book.description}</span>${book.description.length > 100 ? `<button onclick="toggleDescription(${book.id})" style="background:none;border:none;color:#7D9B76;cursor:pointer;font-weight:700;margin-left:8px;padding:0;text-decoration:underline;">show more</button>` : ''}</div>` : ''}
-        ${(book.status==='reading'||book.status==='read'||book.status==='dnf') ? renderReadingBox(book) : ''}
-        <div style="font-family:Quicksand,sans-serif;font-weight:700;color:#3D5A80;font-size:15px;margin-bottom:10px;">📚 Book Info</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
             <div><label style="font-size:12px;color:#8B7E74;font-weight:700;">AUTHOR</label><input type="text" id="editBookAuthor" value="${(book.author||'').replace(/"/g,'&quot;')}" style="${iStyle}"></div>
             <div><label style="font-size:12px;color:#8B7E74;font-weight:700;">GENRE</label><input type="text" id="editBookGenre" value="${(book.genre||'').replace(/"/g,'&quot;')}" style="${iStyle}"></div>
@@ -5793,6 +5707,7 @@ function openBookModal(bookId) {
             ${['Physical','Digital','Audio'].map(fmt => `<label style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;border:2px solid ${(book.ownershipFormat||[]).includes(fmt)?'#7D9B76':'#E8DFD5'};background:${(book.ownershipFormat||[]).includes(fmt)?'rgba(125,155,118,0.1)':'#FFF8F0'};cursor:pointer;font-size:13px;color:#3D5A80;"><input type="checkbox" class="ownershipFmt" value="${fmt}" ${(book.ownershipFormat||[]).includes(fmt)?'checked':''} onchange="handleOwnershipChange(this)" style="accent-color:#7D9B76;"> ${fmt === 'Physical' ? '📖' : fmt === 'Digital' ? '📱' : '🎧'} ${fmt}</label>`).join('')}
             <label style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;border:2px solid ${(book.ownershipFormat||[]).includes('Do Not Own')?'#F43F5E':'#E8DFD5'};background:${(book.ownershipFormat||[]).includes('Do Not Own')?'rgba(244,63,94,0.1)':'#FFF8F0'};cursor:pointer;font-size:13px;color:${(book.ownershipFormat||[]).includes('Do Not Own')?'#F43F5E':'#3D5A80'};"><input type="checkbox" class="ownershipFmt" value="Do Not Own" ${(book.ownershipFormat||[]).includes('Do Not Own')?'checked':''} onchange="handleDoNotOwnChange(this)" style="accent-color:#F43F5E;"> 🚫 Do Not Own</label>
         </div></div>
+        ${book.status==='reading' ? renderEditProgress(book) : ''}
         <div style="margin-top:10px;"><label style="font-size:12px;color:#8B7E74;font-weight:700;">RATING</label><div id="editBookRating" style="font-size:24px;cursor:pointer;">${[1,2,3,4,5].map(i => `<span onclick="setBookRating(${i})" style="cursor:pointer;">${i <= (book.rating||0) ? '⭐' : '☆'}</span>`).join('')}</div></div>
         ${book.shelfLocation ? `<div style="margin-top:10px;background:rgba(212,167,106,0.1);border-radius:10px;padding:10px 14px;display:flex;align-items:center;gap:10px;cursor:pointer;" onclick="closeModal('bookModal');showShelfLocation(${book.shelfPhotoIdx})"><span style="font-size:20px;">📍</span><div><div style="font-size:12px;color:#8B7E74;font-weight:700;">SHELF LOCATION</div><div style="color:#3D5A80;font-weight:600;">${book.shelfLocation}</div><div style="font-size:11px;color:#D4A76A;">Click to view shelf photo</div></div></div>` : ''}
         <div style="margin-top:10px;"><label style="font-size:12px;color:#8B7E74;font-weight:700;">NOTES</label><textarea id="editBookNotes" style="${iStyle}resize:vertical;min-height:70px;">${book.notes||''}</textarea></div>
@@ -5882,22 +5797,6 @@ function handleAddOwnership(checkbox) {
     }
 }
 
-// Reading Progress box for the book modal — keeps progress (% / pages) + reading
-// start & finish dates visually separate from the Book Info fields. The % / pages
-// control sits at the TOP of the box; dates below.
-function renderReadingBox(book) {
-    var showProgress = (book.status === 'reading' || book.status === 'dnf');
-    var iStyle = 'padding:10px;border-radius:10px;border:2px solid #E8DFD5;background:#FFF8F0;color:#3D5A80;width:100%;font-family:Nunito,sans-serif;';
-    var labelStyle = 'font-size:12px;color:#8B7E74;font-weight:700;';
-    return '<div style="margin-bottom:16px;padding:16px;border:2px solid #7D9B76;border-radius:14px;background:rgba(125,155,118,0.07);">'
-        + '<div style="font-family:Quicksand,sans-serif;font-weight:700;color:#3D5A80;font-size:15px;margin-bottom:10px;">📖 Reading Progress</div>'
-        + (showProgress ? renderEditProgress(book) : '')
-        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px;">'
-        + '<div><label style="' + labelStyle + '">STARTED</label><input type="date" id="editStartDate" value="' + toDateInputValue(book.dateStarted) + '" style="' + iStyle + '"></div>'
-        + '<div><label style="' + labelStyle + '">FINISHED</label><input type="date" id="editFinishDate" value="' + toDateInputValue(book.dateFinished) + '" style="' + iStyle + '"></div>'
-        + '</div></div>';
-}
-
 // Progress control for the book modal: page number for print/ebook, % for audiobooks
 function renderEditProgress(book) {
     const pages = parseInt(book.pages) || 0;
@@ -5949,12 +5848,12 @@ function syncEditProgressFromPercent() {
 function saveBookChanges(bookId) {
     const book = app.books.find(b => b.id === bookId);
     if (!book) return;
-    const wasStatus = book.status;
     // Reads from the dynamic Edit Book modal's `editBook*` IDs.
     // (The static Add Book modal uses `book*` IDs — different namespace to avoid the
     //  duplicate-ID collision that previously made getElementById return the wrong input.)
     const newStatus = document.getElementById('editBookStatus')?.value || book.status;
     if (newStatus === 'read' && book.status !== 'read') {
+        book.dateFinished = new Date().toISOString();
         app.addXP(50);
         showNotification('Book finished! +50 XP 🎉', 2000);
         addActivity('finished', `Finished "${book.title}"`);
@@ -6001,19 +5900,6 @@ function saveBookChanges(bookId) {
             book.progressPercentage = pct;
             book.currentPage = pages > 0 ? Math.round((pct / 100) * pages) : null;
         }
-    }
-
-    // Reading dates from the Reading Progress box (Goodreads-style start/finish).
-    const startEl = document.getElementById('editStartDate');
-    const finishEl = document.getElementById('editFinishDate');
-    if (startEl) book.dateStarted = startEl.value ? dateInputToISO(startEl.value) : null;
-    if (finishEl) {
-        if (finishEl.value) book.dateFinished = dateInputToISO(finishEl.value);
-        else if (newStatus === 'read' && wasStatus !== 'read') book.dateFinished = new Date().toISOString();
-        else if (newStatus !== 'read') book.dateFinished = null;
-        // (read book with field left blank keeps its existing finish date)
-    } else if (newStatus === 'read' && wasStatus !== 'read' && !book.dateFinished) {
-        book.dateFinished = new Date().toISOString();
     }
 
     app.saveData();
@@ -6287,11 +6173,11 @@ let challengeCatFilter = 'all';
 function getChallengeLibrary() {
     return [
         // 📚 QUANTITY CHALLENGES
-        { id: 'cl_52books', cat: 'quantity', name: '52 Books in 52 Weeks', emoji: '📚', goalType: 'books', target: 52, desc: "The 52 Book Club's 2026 challenge — 52 themed prompts, one per week.", reward: 500, badge: '📚', prompts: ["Set in an ancient civilization","Kangaroo word on the cover","Written without quotation marks","Has a dust jacket","Featuring a conspiracy","Title starts with the letter O","Title starts with the letter P","A three-syllable word in the title","Featuring a natural disaster","Spans a decade or more","Requires suspension of disbelief","A genre-defining read","Bookface","Includes a character list","Subtitle with a comma","Deus Ex Machina","Author's bio mentions their dog","Provokes strong emotion","A nosy neighbour character","Day of the week in the title","Written in the 1800s","Spotted in a TV series or movie","Grumpy sunshine trope","Uneven number of chapters","Includes a red herring","Title in a serif font","Two or more authors, one pseudonym","From a series at least eight books long","Set in the Arctic or Antarctic","Author related to another author","Author related to author in prompt 30","Publisher starting with the letter B","A standalone fantasy novel","Inspired by the top-grossing movie the year you were born","Character with a secret identity","Award-winning book from last year","Started on the 26th of the month","Domestic fiction","A book that cost you nothing","Author's first and last name start with the same letter","A guide to...","Includes a handwritten interior font","A Goodreads recommendation for you","Literary device: personification","Biographical fiction","Non-fiction about the character in prompt 45","A diacritical mark on the cover","Related to the word Nemesis","From the 800s of the Dewey Decimal System","Set in a castle","Includes a map","Published in 2026"] },
-        { id: 'cl_26books', cat: 'quantity', name: 'Read Harder 2026 (24 Tasks)', emoji: '💪', goalType: 'books', target: 24, desc: "Book Riot's 2026 Read Harder Challenge — 24 tasks to stretch your reading.", reward: 300, badge: '💪', prompts: ["Read a microhistory","Read a book featured on a 'best book covers' list","Read a YA book by a Latine author","Read a novel with a main character who uses they/them pronouns","Read a nonfiction book about resistance","Read a gothic novel published in the last ten years","Read a sports book by a woman, trans, or nonbinary writer","Read a classic from the Zero to Well-Read Podcast","Read a romantasy book with a queer and/or BIPOC main character","Read a book recently adapted for film, TV, or musical","Read a book by a d/Deaf author","Read or try a recipe from a cookbook about a culture whose food you've never eaten","Read a nonfiction comic","Read a work of magical realism or fabulism","Read a book by a librarian","Read a queer picture book","Read a book about a cult or cults","Read a nonfiction book about AI or social media","Read a book by an intersex author","Read a book set in space","Read a genre (SFF, horror, mystery, romance) book in translation","Read a nonviolent true crime book","Read a book by an African author","Pick a challenge from any of the previous years' challenges to repeat"] },
+        { id: 'cl_52books', cat: 'quantity', name: '52 Books in 52 Weeks', emoji: '📚', goalType: 'books', target: 52, desc: 'The classic challenge — one book per week for a year.', reward: 500, badge: '📚' },
+        { id: 'cl_26books', cat: 'quantity', name: 'Read Harder (26 Books)', emoji: '💪', goalType: 'books', target: 26, desc: 'Inspired by Book Riot — 26 books that push your comfort zone.', reward: 300, badge: '💪' },
         { id: 'cl_100books', cat: 'quantity', name: 'Century Club', emoji: '💯', goalType: 'books', target: 100, desc: 'The ultimate goal — 100 books in one year!', reward: 1000, badge: '💯' },
         { id: 'cl_12books', cat: 'quantity', name: 'Book a Month', emoji: '📅', goalType: 'books', target: 12, desc: 'Perfect for busy readers — just one book per month.', reward: 150, badge: '📅' },
-        { id: 'cl_popsugar', cat: 'quantity', name: 'PopSugar 40', emoji: '🍭', goalType: 'books', target: 40, desc: "PopSugar's 2026 Reading Challenge — the 40 official prompts.", reward: 400, badge: '🍭', prompts: ["A book where gardening or a garden is central to the plot","A book that features a platonic friendship between a man and woman","A book you meant to read in 2025","A book that starts with the letter 'Z'","A book about women astronauts","A book with an overweight main character whose story isn't about losing weight","A book about a granny hobby","A book about a sexless marriage","A book with a 'type C' character","A book about a horse or with a horse on the cover","A book with a dad as the primary caregiver","A book with 'pop' or 'sugar' in the title","A book featuring a character with a hidden past","A book set in Michigan or written by an author from Michigan","A book about new beginnings","A book less than 260 pages","A book about your favorite event in the Winter Olympics","A love story that defies social boundaries","A book about teen angst","A book with a character who does Pilates or Lagree","A book about a bachelorette trip","A book about a book club","A book you were hoping would fit into a prompt but doesn't","A book about postpartum","A book that explores influencer culture","A book with a character who navigates infertility","A book with a character who has curly hair","A book about debt","A book that takes place during harvesting season","A travel ghost story","A book that makes you feel FOMO","A book with an underwater civilization","A book about college","A book with a trans or nonbinary protagonist","A book that makes you want to travel to Italy","A book about a mob (fiction or nonfiction)","A book about a pop star","A book with any type of fruit on the cover or in the title","A book with a character who runs a marathon","A book outside your comfort zone"] },
+        { id: 'cl_popsugar', cat: 'quantity', name: 'PopSugar 40', emoji: '🍭', goalType: 'books', target: 40, desc: 'Inspired by the PopSugar Reading Challenge — 40 diverse prompts.', reward: 400, badge: '🍭' },
 
         // 📄 PAGE CHALLENGES
         { id: 'cl_5kpages', cat: 'pages', name: 'Page Turner 5K', emoji: '📄', goalType: 'pages', target: 5000, desc: 'Read 5,000 pages total — about 15 average novels.', reward: 200, badge: '📄' },
@@ -6303,7 +6189,7 @@ function getChallengeLibrary() {
         // 🌍 GENRE EXPLORATION
         { id: 'cl_genrehop', cat: 'genre', name: 'Genre Explorer', emoji: '🌍', goalType: 'genres', target: 10, desc: 'Read books in 10 different genres this year.', reward: 300, badge: '🌍' },
         { id: 'cl_romance', cat: 'genre', name: 'Romanceopoly', emoji: '💕', goalType: 'books', target: 12, desc: 'Inspired by the popular romance challenge — read 12 romance novels.', reward: 200, badge: '💕' },
-        { id: 'cl_horror', cat: 'genre', name: 'Horror Bingo', emoji: '👻', goalType: 'books', target: 13, desc: 'Read 13 horror/thriller books — one for each unlucky number.', reward: 200, badge: '👻', prompts: ["A haunted house","A slasher or killer","A classic monster (vampire/werewolf)","A ghost story","Cosmic / Lovecraftian horror","A possession or demon","Folk horror","A creepy small town","Body horror","A psychological thriller","Horror by a woman author","A horror anthology","Published before 1990"] },
+        { id: 'cl_horror', cat: 'genre', name: 'Horror Bingo', emoji: '👻', goalType: 'books', target: 13, desc: 'Read 13 horror/thriller books — one for each unlucky number.', reward: 200, badge: '👻' },
         { id: 'cl_mystery', cat: 'genre', name: 'Cloak & Dagger', emoji: '🔍', goalType: 'books', target: 10, desc: 'Read 10 mystery/suspense/thriller/crime books.', reward: 200, badge: '🔍' },
         { id: 'cl_scifi', cat: 'genre', name: 'Sci-Fi Frontier', emoji: '🚀', goalType: 'books', target: 8, desc: 'Explore 8 science fiction worlds.', reward: 200, badge: '🚀' },
         { id: 'cl_fantasy', cat: 'genre', name: 'Fantasy Realm', emoji: '🐉', goalType: 'books', target: 8, desc: 'Read 8 fantasy novels — portals, magic, and dragons await.', reward: 200, badge: '🐉' },
@@ -6326,10 +6212,10 @@ function getChallengeLibrary() {
         { id: 'cl_graphic', cat: 'format', name: 'Graphic Novel Binge', emoji: '🎨', goalType: 'books', target: 8, desc: 'Read 8 graphic novels or manga volumes.', reward: 150, badge: '🎨' },
 
         // 🔥 BOOKTOK & TRENDING
-        { id: 'cl_booktok', cat: 'trending', name: 'BookTok Bingo', emoji: '📲', goalType: 'books', target: 10, desc: 'Read 10 BookTok-recommended titles.', reward: 200, badge: '📲', prompts: ["A viral romantasy","An enemies-to-lovers romance","A morally grey character","A book with a map","A spicy romance","A dark academia read","A tearjerker everyone cried at","A series everyone binged","A standalone fantasy","A gorgeous special edition"] },
-        { id: 'cl_buzzword', cat: 'trending', name: 'Buzzword Readathon', emoji: '🐝', goalType: 'books', target: 12, desc: 'Each month, read a book with a specific word in the title.', reward: 250, badge: '🐝', prompts: ["A color word in the title","A name in the title","A place in the title","A number in the title","An animal in the title","A body part in the title","A season or month in the title","A family word (mother, sister...)","A time word (night, day...)","A weather word in the title","Starts with 'The'","A food or drink in the title"] },
-        { id: 'cl_abc', cat: 'trending', name: 'ABC Challenge', emoji: '🔤', goalType: 'books', target: 26, desc: 'Read a book starting with each letter A through Z.', reward: 400, badge: '🔤', prompts: ["Title starts with A","Title starts with B","Title starts with C","Title starts with D","Title starts with E","Title starts with F","Title starts with G","Title starts with H","Title starts with I","Title starts with J","Title starts with K","Title starts with L","Title starts with M","Title starts with N","Title starts with O","Title starts with P","Title starts with Q","Title starts with R","Title starts with S","Title starts with T","Title starts with U","Title starts with V","Title starts with W","Title starts with X","Title starts with Y","Title starts with Z"] },
-        { id: 'cl_rainbow', cat: 'trending', name: 'Rainbow Reads', emoji: '🌈', goalType: 'books', target: 7, desc: 'Read books with covers in each color of the rainbow.', reward: 150, badge: '🌈', prompts: ["A red cover","An orange cover","A yellow cover","A green cover","A blue cover","An indigo cover","A violet cover"] },
+        { id: 'cl_booktok', cat: 'trending', name: 'BookTok Bingo', emoji: '📲', goalType: 'books', target: 10, desc: 'Read 10 BookTok-recommended titles.', reward: 200, badge: '📲' },
+        { id: 'cl_buzzword', cat: 'trending', name: 'Buzzword Readathon', emoji: '🐝', goalType: 'books', target: 12, desc: 'Each month, read a book with a specific word in the title.', reward: 250, badge: '🐝' },
+        { id: 'cl_abc', cat: 'trending', name: 'ABC Challenge', emoji: '🔤', goalType: 'books', target: 26, desc: 'Read a book starting with each letter A through Z.', reward: 400, badge: '🔤' },
+        { id: 'cl_rainbow', cat: 'trending', name: 'Rainbow Reads', emoji: '🌈', goalType: 'books', target: 7, desc: 'Read books with covers in each color of the rainbow.', reward: 150, badge: '🌈' },
         { id: 'cl_tbr', cat: 'trending', name: 'TBR Takedown', emoji: '📚', goalType: 'books', target: 15, desc: 'Finally read 15 books from your To Be Read pile!', reward: 250, badge: '✅' },
 
         // 🧘 ADHD-FRIENDLY / COZY
@@ -6418,25 +6304,6 @@ function renderChallengeLibrary() {
     }).join('');
 }
 
-// Build a checklist for challenges that have no real published prompt list:
-//  • books / default  → one numbered slot per target book ("Book 1" … "Book N")
-//  • genres           → one slot per genre to collect
-//  • pages            → 1,000-page milestone slots ("Reach 1,000 pages" …)
-function generateChallengeSlots(c) {
-    var n, arr = [], i;
-    if (c.goalType === 'pages') {
-        n = Math.max(1, Math.round((c.target || 0) / 1000));
-        for (i = 1; i <= n; i++) arr.push('Reach ' + (i * 1000).toLocaleString() + ' pages');
-    } else if (c.goalType === 'genres') {
-        n = Math.max(1, c.target || 1);
-        for (i = 1; i <= n; i++) arr.push('A book in a new genre (#' + i + ')');
-    } else {
-        n = Math.max(1, c.target || 1);
-        for (i = 1; i <= n; i++) arr.push('Book ' + i);
-    }
-    return arr;
-}
-
 function startLibraryChallenge(libId) {
     const library = getChallengeLibrary();
     const c = library.find(ch => ch.id === libId);
@@ -6445,17 +6312,9 @@ function startLibraryChallenge(libId) {
 
     const endDate = new Date();
     endDate.setFullYear(endDate.getFullYear(), 11, 31);
-    // Every library challenge is now a checklist: use its real prompt list when it has
-    // one, otherwise auto-generate slots from its target (books / genres / pages).
-    const prompts = (Array.isArray(c.prompts) && c.prompts.length > 0) ? c.prompts.slice() : generateChallengeSlots(c);
     app.challenges.push({
-        id: Date.now(), libId: c.id, name: c.name, emoji: c.emoji,
-        goalType: 'prompts',
-        target: prompts.length,
-        current: 0, reward: c.reward, badge: c.badge,
-        prompts: prompts,
-        promptDone: prompts.map(function(){ return false; }),
-        promptBook: prompts.map(function(){ return null; }),
+        id: Date.now(), libId: c.id, name: c.name, emoji: c.emoji, goalType: c.goalType,
+        target: c.target, current: 0, reward: c.reward, badge: c.badge,
         startDate: new Date().toISOString().split('T')[0],
         endDate: endDate.toISOString().split('T')[0],
         completed: false, type: 'library'
@@ -10613,12 +10472,10 @@ function renderActiveChallengesWithTBR() {
 
     grid.innerHTML = app.challenges.map((ch, idx) => {
         let current = 0;
-        if (ch.goalType === 'prompts') current = (ch.promptDone || []).filter(Boolean).length;
-        else if (ch.goalType === 'books') current = app.books.filter(b => b.status === 'read').length;
+        if (ch.goalType === 'books') current = app.books.filter(b => b.status === 'read').length;
         else if (ch.goalType === 'pages') current = app.books.filter(b => b.status === 'read').reduce((s, b) => s + (b.pages || 0), 0);
         else if (ch.goalType === 'genres') current = new Set(app.books.filter(b => b.status === 'read').map(b => b.genre)).size;
         else current = ch.current || 0;
-        if (ch.goalType === 'prompts') ch.current = current;
 
         const pct = Math.min((current / ch.target) * 100, 100);
         const completed = pct >= 100;
@@ -10656,89 +10513,12 @@ function renderActiveChallengesWithTBR() {
                 <div style="font-size:11px;color:#7D9B76;font-weight:700;margin-bottom:4px;">📚 From your TBR:</div>
                 ${tbrSuggestions.map(b => `<div style="font-size:11px;color:#3D5A80;padding:2px 0;cursor:pointer;" onclick="openBookModal(${b.id})" title="Click to view">• ${b.title}${b.pages ? ' (' + b.pages + 'p)' : ''}</div>`).join('')}
             </div>` : ''}
-            <div style="display:flex;gap:5px;margin-top:8px;flex-wrap:wrap;">
-                ${ch.goalType === 'prompts' ? `<button class="btn btn-primary" style="flex:1;font-size:11px;padding:4px 8px;" onclick="openChallengePrompts(${idx})">📋 Checklist</button>` : ''}
+            <div style="display:flex;gap:5px;margin-top:8px;">
                 ${completed ? `<button class="btn btn-primary" style="flex:1;font-size:11px;padding:4px 8px;" onclick="shareChallenge(${idx})">📤 Share</button>` : ''}
                 <button class="btn btn-secondary" style="flex:1;font-size:11px;padding:4px 8px;" onclick="removeChallenge(${idx})">Remove</button>
             </div>
         </div>`;
     }).join('');
-}
-
-// ── Reading-challenge prompts: checklist + book linking ───────────────────────
-// Prompt text lives on the library challenge (by libId); per-prompt done/linked
-// state lives on the active challenge instance (promptDone[] / promptBook[]).
-function getChallengePrompts(ch) {
-    if (!ch) return [];
-    if (ch.prompts && ch.prompts.length) return ch.prompts; // instance list (real or generated)
-    var lib = getChallengeLibrary().find(function(c){ return c.id === ch.libId; });
-    return (lib && lib.prompts) || [];
-}
-
-function openChallengePrompts(idx) {
-    var ch = app.challenges[idx];
-    if (!ch) return;
-    var prompts = getChallengePrompts(ch);
-    if (!prompts.length) { showNotification('No prompts here', 1500); return; }
-    if (!ch.promptDone || ch.promptDone.length !== prompts.length) ch.promptDone = prompts.map(function(){ return false; });
-    if (!ch.promptBook || ch.promptBook.length !== prompts.length) ch.promptBook = prompts.map(function(){ return null; });
-
-    var books = app.books.slice().sort(function(a, b){ return (a.title || '').localeCompare(b.title || ''); });
-    var doneCount = ch.promptDone.filter(Boolean).length;
-
-    var modal = document.getElementById('challengePromptsModal');
-    if (!modal) { modal = document.createElement('div'); modal.id = 'challengePromptsModal'; modal.className = 'modal'; document.body.appendChild(modal); }
-
-    var rows = prompts.map(function(p, i) {
-        var done = ch.promptDone[i];
-        var linkedId = ch.promptBook[i];
-        var opts = '<option value="">— link a book —</option>' + books.map(function(b){
-            return '<option value="' + b.id + '"' + (linkedId === b.id ? ' selected' : '') + '>' + String(b.title || 'Untitled').replace(/</g, '&lt;').replace(/"/g, '&quot;') + '</option>';
-        }).join('');
-        var pText = String(p).replace(/</g, '&lt;');
-        return '<div style="display:flex;flex-direction:column;gap:6px;padding:10px;border:1.5px solid ' + (done ? '#7D9B76' : '#E8DFD5') + ';border-radius:10px;background:' + (done ? 'rgba(125,155,118,0.08)' : '#FFF8F0') + ';">'
-            + '<label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13px;color:#3D5A80;line-height:1.35;">'
-            + '<input type="checkbox" ' + (done ? 'checked' : '') + ' onchange="toggleChallengePrompt(' + idx + ',' + i + ',this.checked)" style="margin-top:2px;width:18px;height:18px;accent-color:#7D9B76;flex-shrink:0;">'
-            + '<span><strong style="color:#8B7E74;">' + (i + 1) + '.</strong> ' + pText + '</span></label>'
-            + '<select onchange="linkChallengePromptBook(' + idx + ',' + i + ',this.value)" style="padding:6px 8px;border:1.5px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:12px;">' + opts + '</select>'
-            + '</div>';
-    }).join('');
-
-    modal.innerHTML = '<div class="modal-content" style="max-width:560px;">'
-        + '<div class="modal-header"><h2 style="font-family:Quicksand,sans-serif;color:#3D5A80;margin:0;">' + (ch.emoji || '🏆') + ' ' + String(ch.name || 'Challenge').replace(/</g, '&lt;') + '</h2>'
-        + '<button onclick="closeModal(\'challengePromptsModal\')" style="background:none;border:none;font-size:22px;cursor:pointer;color:#8B7E74;">✕</button></div>'
-        + '<div style="font-size:13px;color:#8B7E74;margin-bottom:14px;">✅ ' + doneCount + ' / ' + prompts.length + ' done · check off an item and link a book.</div>'
-        + '<div style="display:flex;flex-direction:column;gap:8px;">' + rows + '</div>'
-        + '<button class="btn btn-primary" style="width:100%;margin-top:16px;" onclick="closeModal(\'challengePromptsModal\')">Done</button>'
-        + '</div>';
-    modal.classList.add('active');
-}
-
-function _refreshChallengePrompts(idx) {
-    var ch = app.challenges[idx];
-    if (!ch) return;
-    ch.current = (ch.promptDone || []).filter(Boolean).length;
-    app.saveData();
-    var modal = document.getElementById('challengePromptsModal');
-    var open = modal && modal.classList.contains('active');
-    renderChallenges(); // recomputes ring + fires completion XP/confetti when all prompts done
-    if (open) openChallengePrompts(idx);
-}
-
-function toggleChallengePrompt(idx, i, checked) {
-    var ch = app.challenges[idx];
-    if (!ch || !ch.promptDone) return;
-    ch.promptDone[i] = !!checked;
-    if (!checked && ch.promptBook) ch.promptBook[i] = null;
-    _refreshChallengePrompts(idx);
-}
-
-function linkChallengePromptBook(idx, i, val) {
-    var ch = app.challenges[idx];
-    if (!ch || !ch.promptBook) return;
-    if (val) { ch.promptBook[i] = parseInt(val); ch.promptDone[i] = true; }
-    else { ch.promptBook[i] = null; }
-    _refreshChallengePrompts(idx);
 }
 
 function relocateSections() {
@@ -10811,8 +10591,7 @@ const TBR_GENRE_COLORS = [
 
 let tbrSpinState = {
     books: [],           // current filtered TBR books on the wheel
-    dimension: 'genre',  // breakdown dimension: 'genre' | 'author' | 'publisher'
-    genre: 'all',        // selected facet value within the dimension ('all' or a value)
+    genre: 'all',        // selected genre filter
     challenge: 'none',   // selected challenge filter ('none' or challenge index)
     rotation: 0,         // current canvas rotation
     spinning: false,
@@ -10839,19 +10618,6 @@ function getGenreColorIndex(genre) {
     var hash = 0;
     for (var i = 0; i < genre.length; i++) hash = ((hash << 5) - hash) + genre.charCodeAt(i);
     return Math.abs(hash) % TBR_GENRE_COLORS.length;
-}
-
-// Returns the value of a book for the currently chosen breakdown dimension.
-function bookFacet(book, dim) {
-    if (dim === 'author') return (book.author || '').trim();
-    if (dim === 'publisher') return (book.publisher || '').trim();
-    return (book.genre || '').trim();
-}
-
-function setSpinnerDimension(dim) {
-    tbrSpinState.dimension = dim;
-    tbrSpinState.genre = 'all'; // reset selected facet when switching dimension
-    initTBRSpinner();
 }
 
 function setSpinnerGenre(genre) {
@@ -10935,18 +10701,13 @@ function initTBRSpinner() {
         baseTBR = fullMatched.length > 0 ? fullMatched : allTBR;
     }
 
-    // Build facet chips (genre / author / publisher) from base set
-    var dim = tbrSpinState.dimension || 'genre';
-    var dimSel = document.getElementById('spinnerDimension');
-    if (dimSel) dimSel.value = dim;
-    var facetMap = {};
-    baseTBR.forEach(function(b) { var g = bookFacet(b, dim); if (g) facetMap[g] = (facetMap[g]||0) + 1; });
-    var facets = Object.keys(facetMap).sort();
+    // Build genre chips from base set
+    var genreMap = {};
+    baseTBR.forEach(function(b) { var g = (b.genre||'').trim(); if (g) genreMap[g] = (genreMap[g]||0) + 1; });
+    var genres = Object.keys(genreMap).sort();
     var html = '<button class="spinner-genre-chip' + (tbrSpinState.genre === 'all' ? ' active' : '') + '" data-spinner-genre="all" onclick="setSpinnerGenre(\'all\')">All (' + baseTBR.length + ')</button>';
-    facets.forEach(function(g) {
-        var attr = g.replace(/"/g, '&quot;');
-        var js = g.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        html += '<button class="spinner-genre-chip' + (tbrSpinState.genre === g ? ' active' : '') + '" data-spinner-genre="' + attr + '" onclick="setSpinnerGenre(\'' + js + '\')">' + attr + ' (' + facetMap[g] + ')</button>';
+    genres.forEach(function(g) {
+        html += '<button class="spinner-genre-chip' + (tbrSpinState.genre === g ? ' active' : '') + '" data-spinner-genre="' + g + '" onclick="setSpinnerGenre(\'' + g.replace(/'/g, "\\'") + '\')">' + g + ' (' + genreMap[g] + ')</button>';
     });
     if (filterDiv) filterDiv.innerHTML = html;
 
@@ -10977,13 +10738,12 @@ function prepareTBRWheel() {
         baseTBR = fullMatched.length > 0 ? fullMatched : allTBR;
     }
 
-    // Then apply facet filter (genre / author / publisher)
-    var dim = tbrSpinState.dimension || 'genre';
+    // Then apply genre filter
     var filtered;
     if (tbrSpinState.genre === 'all') {
         filtered = baseTBR.slice();
     } else {
-        filtered = baseTBR.filter(function(b) { return bookFacet(b, dim) === tbrSpinState.genre; });
+        filtered = baseTBR.filter(function(b) { return (b.genre || '').trim() === tbrSpinState.genre; });
     }
 
     // Shuffle and cap at 20 for readability
@@ -11289,11 +11049,9 @@ function getActiveChallenges() {
     return app.challenges.filter(function(ch) {
         // Get completion status
         var current = 0;
-        if (ch.goalType === 'prompts') current = (ch.promptDone || []).filter(Boolean).length;
-        else if (ch.goalType === 'books') current = app.books.filter(function(b) { return b.status === 'read'; }).length;
+        if (ch.goalType === 'books') current = app.books.filter(function(b) { return b.status === 'read'; }).length;
         else if (ch.goalType === 'pages') current = app.books.filter(function(b) { return b.status === 'read'; }).reduce(function(s, b) { return s + (b.pages || 0); }, 0);
         else if (ch.goalType === 'genres') current = new Set(app.books.filter(function(b) { return b.status === 'read'; }).map(function(b) { return b.genre; })).size;
-        else current = ch.current || 0;
         return current < ch.target;
     });
 }
