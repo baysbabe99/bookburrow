@@ -12274,6 +12274,15 @@ function initializeApp() {
 
 // Start the app
 initializeApp();
+
+// Register the service worker for offline support (http/https only; no-op on file://).
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch((err) => {
+            console.warn('Service worker registration failed:', err);
+        });
+    });
+}
     </script>
 </body>
 </html>
