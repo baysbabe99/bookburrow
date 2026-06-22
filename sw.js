@@ -3,7 +3,7 @@
    with a background refresh (stale-while-revalidate) so the app opens
    instantly and offline, while still picking up new deploys. */
 
-const CACHE = 'bookburrow-v3.12.1';
+const CACHE = 'bookburrow-v3.13.0';
 // Scope-relative so it works under GitHub Pages' /bookburrow/ path.
 const SHELL = ['./', './index.html', './sw.js'];
 
