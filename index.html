@@ -4849,6 +4849,37 @@ function updateXPDisplay() {
     if (xpEl) xpEl.textContent = `${app.xp} XP`;
 }
 
+// A unique Cornelius greeting per naming theme, shown under the dashboard welcome.
+const CORNELIUS_PHRASES = {
+    _default: 'Cornelius guards the hoard. Keep reading!',
+    classic: 'Cornelius guards the hoard. Keep reading!',
+    cozy: 'Cornelius has the kettle on — curl up and read. 🫖',
+    fantasy: 'Cornelius sharpens his claws for your next quest. ⚔️',
+    sports: 'Cornelius says game on — go for the reading win! 🏆',
+    scifi: 'Cornelius fires up the warp drive — next chapter, engage! 🚀',
+    detective: 'Cornelius is dusting for clues. The next read awaits. 🔍',
+    garden: 'Cornelius is tending the story-vines. Go grow your shelf. 🌿',
+    pirate: "Cap'n Cornelius spies treasure on the next page! 🏴‍☠️",
+    academia: 'Cornelius lit the study candle. To the stacks! 🕯️',
+    horror: 'Cornelius left the crypt door creaking... read on, if you dare. 👻',
+    romance: 'Cornelius is rooting for your next slow burn. 💕',
+    cottagecore: 'Cornelius picked wildflowers for your reading nook. 🧺',
+    witchy: 'Cornelius stirs the story-cauldron by moonlight. 🌙',
+    cafe: 'Cornelius saved you the cozy corner and a latte. ☕',
+    ocean: 'Cornelius dives deep for your next story. 🐚',
+    camping: 'Cornelius stoked the campfire — story time! 🏕️',
+    space: 'Cornelius is charting a course across the reading cosmos. 🪐',
+    artsy: 'Cornelius is curating your masterpiece shelf. 🎨',
+    music: 'Cornelius drops the needle on your next read. 🎵',
+    anime: 'Cornelius believes in your reading arc, protagonist! ⛩️',
+    royal: 'Cornelius bows — your reading court awaits, royal reader. 👑',
+    steampunk: 'Cornelius winds the gears for your next adventure. ⚙️',
+    disney: 'Cornelius says: once upon a time... turn the page! 🏰',
+    foodie: 'Cornelius plated your next delicious read. 🍰',
+    travel: 'Cornelius packed your bags — every book is a destination. ✈️',
+    dragon: 'Cornelius guards the hoard. Defend your reading streak! 🐉'
+};
+
 function renderDashboard() {
     if (!app) return;
 
@@ -4857,6 +4888,12 @@ function renderDashboard() {
     if (welcome) {
         const name = (app.profile && app.profile.name) ? app.profile.name : 'Reader';
         welcome.textContent = `Welcome back, ${name}!`;
+    }
+    // Unique Cornelius greeting for the active naming theme
+    const welcomeSub = document.querySelector('.welcome-message p');
+    if (welcomeSub) {
+        const nt = (app.profile && app.profile.namingTheme) || 'classic';
+        welcomeSub.textContent = CORNELIUS_PHRASES[nt] || CORNELIUS_PHRASES._default;
     }
 
     const booksRead = app.books.filter(b => b.status === 'read');
@@ -6485,7 +6522,15 @@ function getChallengeLibrary() {
         { id: 'cl_bkday', cat: 'extreme', name: 'Book-a-Day Week', emoji: '🔥', goalType: 'books', target: 7, desc: 'Read 7 books in 7 consecutive days.', reward: 500, badge: '🔥' },
         { id: 'cl_allnight', cat: 'extreme', name: 'All-Nighter', emoji: '🌃', goalType: 'books', target: 1, desc: 'Read an entire book in one sitting.', reward: 100, badge: '🌃' },
         { id: 'cl_streak30', cat: 'extreme', name: '30-Day Streak', emoji: '📆', goalType: 'books', target: 30, desc: 'Read every single day for 30 days straight.', reward: 400, badge: '📆' },
-        { id: 'cl_5star', cat: 'extreme', name: 'Five Star Finder', emoji: '⭐', goalType: 'books', target: 10, desc: 'Find and rate 10 books as 5 stars.', reward: 200, badge: '⭐' }
+        { id: 'cl_5star', cat: 'extreme', name: 'Five Star Finder', emoji: '⭐', goalType: 'books', target: 10, desc: 'Find and rate 10 books as 5 stars.', reward: 200, badge: '⭐' },
+
+        // 🍂 MINI & SEASONAL — short spin-offs of the 52-week idea (each ships with real prompts)
+        { id: 'cl_mini_spring', cat: 'mini', name: 'Spring Mini-Readathon', emoji: '🌷', goalType: 'books', target: 5, desc: 'A 5-prompt seasonal mini for spring.', reward: 120, badge: '🌷', prompts: ["A book with a green or floral cover","A story about a fresh start or new beginning","A book set in spring or featuring a garden","A debut author","A book that's been waiting on your TBR"] },
+        { id: 'cl_mini_summer', cat: 'mini', name: 'Summer Mini-Readathon', emoji: '🌊', goalType: 'books', target: 5, desc: 'A 5-prompt seasonal mini for summer.', reward: 120, badge: '🌊', prompts: ["A beach or vacation read","A book set somewhere hot or by the sea","A swoony romance","A page-turning thriller","A quick read under 250 pages"] },
+        { id: 'cl_mini_fall', cat: 'mini', name: 'Autumn Mini-Readathon', emoji: '🍂', goalType: 'books', target: 5, desc: 'A 5-prompt seasonal mini for autumn.', reward: 120, badge: '🍂', prompts: ["A cozy mystery","A spooky or atmospheric read","A book set at a school or university","A book to pair with a warm drink","A book with an orange, red, or brown cover"] },
+        { id: 'cl_mini_winter', cat: 'mini', name: 'Winter Mini-Readathon', emoji: '❄️', goalType: 'books', target: 5, desc: 'A 5-prompt seasonal mini for winter.', reward: 120, badge: '❄️', prompts: ["A book set in snow or the cold","A heartwarming or hopeful read","A doorstopper (500+ pages)","A comfort re-read","A holiday or festive story"] },
+        { id: 'cl_mini_bingo', cat: 'mini', name: 'Monthly Mini-Bingo', emoji: '🎟️', goalType: 'books', target: 9, desc: 'A 3x3 bingo card — fill all nine.', reward: 200, badge: '🎟️', prompts: ["A one-word title","A sequel or next-in-series","A nonfiction book","A book recommended to you","On your shelf over a year","A new-to-you author","Under 300 pages","A book you hope is 5 stars","A person on the cover"] },
+        { id: 'cl_mini_12in12', cat: 'mini', name: '12 in 12 (Spin-off)', emoji: '🗓️', goalType: 'books', target: 12, desc: 'A gentler spin-off of 52-in-52 — one book a month.', reward: 200, badge: '🗓️', prompts: ["January read","February read","March read","April read","May read","June read","July read","August read","September read","October read","November read","December read"] }
     ];
 }
 
@@ -6498,7 +6543,8 @@ const challengeCategories = {
     format: { label: 'Format', emoji: '🎧' },
     trending: { label: 'Trending', emoji: '🔥' },
     cozy: { label: 'ADHD-Friendly', emoji: '🧘' },
-    extreme: { label: 'Extreme', emoji: '🏆' }
+    extreme: { label: 'Extreme', emoji: '🏆' },
+    mini: { label: 'Mini & Seasonal', emoji: '🍂' }
 };
 
 function renderChallenges() {
@@ -9776,6 +9822,45 @@ const recDB = [
     { title:"Saga: Volume 1", author:"Brian K. Vaughan", pages:160, genre:"Graphic Novel", tropes:["Space Opera","Found Family","Forbidden Love"], mood:"adventurous", content:["Graphic Violence","Sexual Content/Spice"], why:"Epic space opera with heart" },
 ];
 
+// 👍/👎 feedback on a recommendation — records like/dislike (used to weight future recs);
+// a dislike also hides the title.
+function rateRec(title, val) {
+    if (!app.profile) app.profile = {};
+    if (!app.profile.recFeedback) app.profile.recFeedback = {};
+    var t = String(title).toLowerCase();
+    app.profile.recFeedback[t] = val;
+    if (val === 'dislike') {
+        if (!app.profile.recDismissed) app.profile.recDismissed = [];
+        if (app.profile.recDismissed.indexOf(t) < 0) app.profile.recDismissed.push(t);
+    }
+    app.saveData();
+    renderRecommendations();
+    showNotification(val === 'like' ? '👍 More like this' : '👎 Fewer like this', 1200);
+}
+
+// "🚫 Not interested" or "✓ Read it" — hide the rec; if alreadyRead, also add it to the
+// library as Finished (no finish date, so it doesn't inflate this year's goal).
+function dismissRec(title, alreadyRead, author, genre, pages) {
+    if (!app.profile) app.profile = {};
+    if (!app.profile.recDismissed) app.profile.recDismissed = [];
+    var t = String(title).toLowerCase();
+    if (app.profile.recDismissed.indexOf(t) < 0) app.profile.recDismissed.push(t);
+    if (alreadyRead && !app.books.some(function(b){ return b.title.toLowerCase() === t; })) {
+        app.books.push({
+            id: app.getNextId(), title: title, author: author || 'Unknown', genre: genre || '',
+            pages: pages || 0, isbn: '', publisher: '', publicationYear: null, language: 'English',
+            format: '', series: '', description: '', status: 'read', rating: 0,
+            dateAdded: new Date().toISOString(), dateFinished: null,
+            notes: 'Marked already-read from recommendations'
+        });
+    }
+    app.saveData();
+    renderRecommendations();
+    if (typeof populateLibraryDropdowns === 'function') populateLibraryDropdowns();
+    if (typeof applyLibraryFilters === 'function') applyLibraryFilters();
+    showNotification(alreadyRead ? '✓ Marked as read' : '🚫 Hidden', 1200);
+}
+
 function renderRecommendations() {
     const container = document.getElementById('recsContainer');
     if (!container) return;
@@ -9811,6 +9896,20 @@ function renderRecommendations() {
     // Start with all recs, removing books already in library
     let recs = recDB.filter(r => !readTitles.has(r.title.toLowerCase()));
 
+    // Hide recs the reader dismissed ("Not interested" / "Already read")
+    const dismissed = new Set((profile.recDismissed || []).map(t => String(t).toLowerCase()));
+    recs = recs.filter(r => !dismissed.has(r.title.toLowerCase()));
+
+    // Like/dislike signals (👍 / 👎) → liked & disliked genres + authors used in scoring
+    const fb = profile.recFeedback || {};
+    const likedG = new Set(), dislikedG = new Set(), likedA = new Set(), dislikedA = new Set();
+    Object.keys(fb).forEach(t => {
+        const src = recDB.find(r => r.title.toLowerCase() === t);
+        if (!src) return;
+        if (fb[t] === 'like') { likedG.add(src.genre); likedA.add(src.author.toLowerCase()); }
+        else if (fb[t] === 'dislike') { dislikedG.add(src.genre); dislikedA.add(src.author.toLowerCase()); }
+    });
+
     // Apply content-to-avoid filter
     if (hideAvoided && avoidContent.length > 0) {
         recs = recs.filter(r => !r.content.some(c => avoidContent.includes(c)));
@@ -9833,6 +9932,11 @@ function renderRecommendations() {
         const tropeMatches = r.tropes.filter(t => favTropes.includes(t));
         r._score += tropeMatches.length * 2;
         r._tropeMatches = tropeMatches;
+        // Like/dislike feedback weighting
+        if (likedG.has(r.genre)) r._score += 3;
+        if (dislikedG.has(r.genre)) r._score -= 4;
+        if (likedA.has(r.author.toLowerCase())) r._score += 4;
+        if (dislikedA.has(r.author.toLowerCase())) r._score -= 5;
 
         // Build reason
         const reasons = [];
@@ -9916,6 +10020,12 @@ function renderRecommendations() {
                     <div style="display:flex;gap:6px;margin-top:10px;">
                         <button class="btn btn-primary" style="flex:1;font-size:12px;padding:6px 10px;" onclick="addRecommendation('${rec.title.replace(/'/g,"\\'")}','${rec.author.replace(/'/g,"\\'")}','${rec.genre.replace(/'/g,"\\'")}',${rec.pages},'want')">📖 To Be Read</button>
                         <button class="btn btn-secondary" style="flex:1;font-size:12px;padding:6px 10px;" onclick="addRecommendation('${rec.title.replace(/'/g,"\\'")}','${rec.author.replace(/'/g,"\\'")}','${rec.genre.replace(/'/g,"\\'")}',${rec.pages},'buy')">🛒 Want to Buy</button>
+                    </div>
+                    <div style="display:flex;gap:5px;margin-top:6px;align-items:center;">
+                        <button onclick="rateRec('${rec.title.replace(/'/g,"\\'")}','like')" title="More like this" style="padding:5px 9px;border:1.5px solid ${fb[rec.title.toLowerCase()]==='like'?'#7D9B76':'#E8DFD5'};border-radius:8px;background:${fb[rec.title.toLowerCase()]==='like'?'rgba(125,155,118,0.18)':'#FFF8F0'};cursor:pointer;font-size:13px;">👍</button>
+                        <button onclick="rateRec('${rec.title.replace(/'/g,"\\'")}','dislike')" title="Fewer like this" style="padding:5px 9px;border:1.5px solid #E8DFD5;border-radius:8px;background:#FFF8F0;cursor:pointer;font-size:13px;">👎</button>
+                        <button onclick="dismissRec('${rec.title.replace(/'/g,"\\'")}',false)" style="flex:1;padding:5px 6px;border:1.5px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#8B7E74;cursor:pointer;font-size:11px;font-weight:700;font-family:Nunito,sans-serif;">🚫 Not interested</button>
+                        <button onclick="dismissRec('${rec.title.replace(/'/g,"\\'")}',true,'${rec.author.replace(/'/g,"\\'")}','${rec.genre.replace(/'/g,"\\'")}',${rec.pages})" style="flex:1;padding:5px 6px;border:1.5px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#8B7E74;cursor:pointer;font-size:11px;font-weight:700;font-family:Nunito,sans-serif;">✓ Read it</button>
                     </div>
                 </div>
             `).join('')}
