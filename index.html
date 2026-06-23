@@ -2995,6 +2995,9 @@
                         <button class="btn btn-primary" id="openAddBookBtn">+ Add New Book</button>
                     </div>
 
+                    <!-- Upcoming Releases (books in your library with a future release date) -->
+                    <div id="dashReleasesSection"></div>
+
                     <!-- 2. Reading Goals (Day / Week / Month / Year) -->
                     <h2 class="section-header">Reading Goals</h2>
                     <div style="margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
@@ -3287,6 +3290,13 @@
                             <option value="eBook">eBook</option>
                             <option value="Audiobook">Audiobook</option>
                         </select>
+                        <select id="libFilterLength" onchange="applyLibraryFilters()" style="padding:6px 10px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:12px;">
+                            <option value="">Any Length</option>
+                            <option value="short">Short (under 200p)</option>
+                            <option value="medium">Medium (200–400p)</option>
+                            <option value="long">Long (400+)</option>
+                            <option value="epic">Epic (600+)</option>
+                        </select>
                         <select id="libFilterYear" onchange="applyLibraryFilters()" style="padding:6px 10px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:12px;">
                             <option value="">Any Year</option>
                         </select>
@@ -3309,6 +3319,9 @@
                         <button class="btn btn-secondary" style="font-size:13px;padding:6px 14px;" onclick="bulkMarkWant()">📖 Mark To Be Read</button>
                         <button class="btn btn-secondary" style="font-size:13px;padding:6px 14px;" onclick="cancelBulkSelect()">Cancel</button>
                     </div>
+                    <!-- Upcoming releases in your library -->
+                    <div id="libReleasesSection"></div>
+
                     <div class="book-grid" id="libraryGrid"></div>
                     </div><!-- /libraryTab-books -->
 
@@ -4965,8 +4978,53 @@ const CORNELIUS_PHRASES = {
     dragon: 'Cornelius guards the hoard. Defend your reading streak! 🐉'
 };
 
+// ===== Upcoming releases + preference matching (shared by Dashboard + My Library) =====
+function getUpcomingReleases() {
+    return (app.books || [])
+        .filter(function (b) { var d = daysUntilRelease(b.releaseDate); return d !== null && d >= 0; })
+        .sort(function (a, b) { return daysUntilRelease(a.releaseDate) - daysUntilRelease(b.releaseDate); });
+}
+function bookMatchesPrefs(b) {
+    var p = app.profile || {};
+    var fg = p.favoriteGenres || [];
+    var fa = (p.favoriteAuthors || []).map(function (x) { return String(x).toLowerCase(); });
+    var genreHit = b.genre && fg.indexOf(b.genre) >= 0;
+    var authorHit = b.author && fa.some(function (a) { return a && String(b.author).toLowerCase().indexOf(a) >= 0; });
+    return !!(genreHit || authorHit);
+}
+function _releaseCountdownLabel(d) { return d === 0 ? '🎉 TODAY' : (d === 1 ? 'Tomorrow' : 'in ' + d + ' days'); }
+function renderReleasesInto(containerId, opts) {
+    opts = opts || {};
+    var el = document.getElementById(containerId);
+    if (!el) return;
+    var list = getUpcomingReleases();
+    if (opts.matchFirst) {
+        list = list.slice().sort(function (a, b) {
+            var ma = bookMatchesPrefs(a) ? 0 : 1, mb = bookMatchesPrefs(b) ? 0 : 1;
+            if (ma !== mb) return ma - mb;
+            return daysUntilRelease(a.releaseDate) - daysUntilRelease(b.releaseDate);
+        });
+    }
+    if (opts.limit) list = list.slice(0, opts.limit);
+    if (!list.length) { el.innerHTML = ''; return; }
+    var rows = list.map(function (b) {
+        var d = daysUntilRelease(b.releaseDate);
+        var match = bookMatchesPrefs(b);
+        var color = d === 0 ? '#C2705B' : (d <= 7 ? '#D4A76A' : '#7D9B76');
+        return '<div onclick="openBookModal(' + b.id + ')" style="display:flex;align-items:center;gap:10px;background:#FFF8F0;border:1.5px solid ' + (match ? '#7D9B76' : '#E8DFD5') + ';border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer;">'
+            + '<div style="font-size:20px;">📅</div>'
+            + '<div style="flex:1;min-width:0;"><div style="color:#3D5A80;font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + _esc(b.title) + (match ? ' <span title="Matches your reading preferences">⭐</span>' : '') + '</div>'
+            + '<div style="font-size:11px;color:#8B7E74;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + _esc(b.author || '') + (b.genre ? ' · ' + _esc(b.genre) : '') + '</div></div>'
+            + '<div style="font-size:11px;font-weight:700;color:#fff;background:' + color + ';padding:3px 9px;border-radius:12px;white-space:nowrap;">' + _releaseCountdownLabel(d) + '</div></div>';
+    }).join('');
+    var header = opts.header ? '<h2 class="section-header">' + opts.header + '</h2>' : '';
+    el.innerHTML = header + '<div style="margin-bottom:28px;">' + rows + '</div>';
+}
+
 function renderDashboard() {
     if (!app) return;
+
+    try { renderReleasesInto('dashReleasesSection', { header: '📅 Upcoming Releases', matchFirst: true }); } catch (e) {}
 
     // Update welcome message with user's name
     const welcome = document.querySelector('.welcome-message h1');
@@ -5318,6 +5376,7 @@ function applyLibraryFilters() {
     const genreFilter = document.getElementById('libFilterGenre')?.value || '';
     const ratingFilter = document.getElementById('libFilterRating')?.value || '';
     const formatFilter = document.getElementById('libFilterFormat')?.value || '';
+    const lengthFilter = document.getElementById('libFilterLength')?.value || '';
     const yearFilter = document.getElementById('libFilterYear')?.value || '';
     const sortBy = document.getElementById('sortDropdown')?.value || 'title-asc';
     const favOnly = document.getElementById('libFilterFavorite')?.checked || false;
@@ -5354,6 +5413,16 @@ function applyLibraryFilters() {
     // Format filter
     if (formatFilter) books = books.filter(b => b.format === formatFilter);
 
+    // Length filter (by page count)
+    if (lengthFilter) books = books.filter(b => {
+        const p = b.pages || 0;
+        if (lengthFilter === 'short') return p > 0 && p < 200;
+        if (lengthFilter === 'medium') return p >= 200 && p < 400;
+        if (lengthFilter === 'long') return p >= 400;
+        if (lengthFilter === 'epic') return p >= 600;
+        return true;
+    });
+
     // Year filter
     if (yearFilter) books = books.filter(b => String(b.publicationYear) === yearFilter);
 
@@ -5382,11 +5451,13 @@ function applyLibraryFilters() {
     if (genreFilter) filterCount++;
     if (ratingFilter) filterCount++;
     if (formatFilter) filterCount++;
+    if (lengthFilter) filterCount++;
     if (yearFilter) filterCount++;
     if (favOnly) filterCount++;
     const countEl = document.getElementById('libFilterCount');
     if (countEl) countEl.textContent = filterCount > 0 ? `${filterCount} filter${filterCount > 1 ? 's' : ''} active · ${books.length} book${books.length !== 1 ? 's' : ''}` : `${books.length} book${books.length !== 1 ? 's' : ''}`;
 
+    try { renderReleasesInto('libReleasesSection', { header: '📅 Upcoming Releases' }); } catch (e) {}
     renderLibraryBooksFiltered(books);
     renderLibraryStats();
     applyLibraryViewMode();
@@ -5401,6 +5472,8 @@ function clearLibraryFilters() {
     if (rating) rating.value = '';
     const format = document.getElementById('libFilterFormat');
     if (format) format.value = '';
+    const length = document.getElementById('libFilterLength');
+    if (length) length.value = '';
     const year = document.getElementById('libFilterYear');
     if (year) year.value = '';
     const fav = document.getElementById('libFilterFavorite');
@@ -10028,6 +10101,7 @@ function renderRecommendations() {
     const favTropes = profile.favoriteTropes || [];
     const favAuthors = (profile.favoriteAuthors || []).map(a => a.toLowerCase());
     const avoidContent = profile.contentToAvoid || [];
+    const prefPages = profile.preferredPages || [];
     const readTitles = new Set(app.books.map(b => b.title.toLowerCase()));
     const readGenres = [...new Set(app.books.filter(b => b.status === 'read').map(b => b.genre).filter(g => g))];
 
@@ -10091,6 +10165,14 @@ function renderRecommendations() {
         const tropeMatches = r.tropes.filter(t => favTropes.includes(t));
         r._score += tropeMatches.length * 2;
         r._tropeMatches = tropeMatches;
+        // Preferred page length
+        const lenMatch = prefPages.length > 0 && prefPages.some(p =>
+            (p === 'short' && r.pages < 200) ||
+            (p === 'medium' && r.pages >= 200 && r.pages < 400) ||
+            (p === 'long' && r.pages >= 400) ||
+            (p === 'epic' && r.pages >= 600));
+        if (lenMatch) r._score += 2;
+        r._lenMatch = lenMatch;
         // Like/dislike feedback weighting
         if (likedG.has(r.genre)) r._score += 3;
         if (dislikedG.has(r.genre)) r._score -= 4;
@@ -10102,6 +10184,7 @@ function renderRecommendations() {
         if (favAuthors.some(a => r.author.toLowerCase().includes(a))) reasons.push('By a favorite author');
         if (favGenres.includes(r.genre)) reasons.push('Matches your favorite genre');
         if (tropeMatches.length > 0) reasons.push('Tropes you love: ' + tropeMatches.slice(0, 2).join(', '));
+        if (lenMatch) reasons.push('Your preferred length');
         r._reason = reasons.length > 0 ? reasons[0] : (readGenres.includes(r.genre) ? `Popular in ${r.genre}` : `Recommended in ${r.genre}`);
     });
 
@@ -10155,7 +10238,14 @@ function renderRecommendations() {
 
     // Render main recs
     const disG = (profile.dislikedGenres || []);
-    const likeBits = [ (profile.favoriteGenres || []).slice(0, 4).join(', '), (profile.favoriteAuthors || []).slice(0, 3).join(', ') ].filter(Boolean).join(' · ');
+    const _lenLabels = { short: 'short', medium: 'medium', long: 'long', epic: 'epic' };
+    const _prefLenBits = (profile.preferredPages || []).map(p => _lenLabels[p] || p).join('/');
+    const likeBits = [
+        (profile.favoriteGenres || []).slice(0, 4).join(', '),
+        (profile.favoriteAuthors || []).slice(0, 3).join(', '),
+        (profile.favoriteTropes || []).slice(0, 3).join(', '),
+        _prefLenBits ? ('length: ' + _prefLenBits) : ''
+    ].filter(Boolean).join(' · ');
     const avoidBits = [ disG.join(', '), (avoidContent || []).join(', ') ].filter(Boolean).join(' · ');
     const whyPanelHtml = '<div style="background:#FEF3E2;border-radius:12px;padding:14px;margin-bottom:16px;border:2px solid rgba(125,155,118,0.3);">'
         + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;"><h3 style="color:#3D5A80;font-size:14px;margin:0;">💡 Why these picks</h3>'
