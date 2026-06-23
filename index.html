@@ -11033,6 +11033,7 @@ function startCoopChallengePrompt() {
     const gf = document.getElementById('friendGiftForm'); if (gf) gf.style.display = 'none';
     const sf = document.getElementById('friendSuggestForm'); if (sf) sf.style.display = 'none';
     form.style.display = 'block';
+    try { form.scrollIntoView({ behavior: 'smooth', block: 'center' }); document.getElementById('coopTitle').focus(); } catch (e) {}
     document.getElementById('coopTitle').value = '';
     document.getElementById('coopGoalType').value = 'books';
     document.getElementById('coopTarget').value = '3';
@@ -11168,6 +11169,7 @@ function sendGiftPrompt() {
     const cf = document.getElementById('friendCoopForm'); if (cf) cf.style.display = 'none';
     const sf = document.getElementById('friendSuggestForm'); if (sf) sf.style.display = 'none';
     form.style.display = 'block';
+    try { form.scrollIntoView({ behavior: 'smooth', block: 'center' }); document.getElementById('giftTitle').focus(); } catch (e) {}
     document.getElementById('giftTitle').value = '';
     document.getElementById('giftAuthor').value = '';
     document.getElementById('giftNote').value = '';
