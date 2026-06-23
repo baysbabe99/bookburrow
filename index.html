@@ -10092,6 +10092,35 @@ function dismissRec(title, alreadyRead, author, genre, pages) {
     showNotification(alreadyRead ? '✓ Marked as read' : '🚫 Hidden', 1200);
 }
 
+// Curated US publisher per catalog title (mapped to the Preferences publisher chips so
+// "Favorite Publishers" can boost recs). Imprints rolled up to their parent where it matches
+// a chip; titles we're not confident about are omitted (no boost, never wrong data).
+const recPublisherMap = {
+    "Mistborn: The Final Empire":"Tor", "The Goblin Emperor":"Tor", "The House in the Cerulean Sea":"Tor",
+    "Legends & Lattes":"Tor", "All Systems Red":"Tor", "A Psalm for the Wild-Built":"Tor",
+    "The Priory of the Orange Tree":"Bloomsbury", "Piranesi":"Bloomsbury", "A Court of Thorns and Roses":"Bloomsbury",
+    "The Fifth Season":"Orbit", "Children of Time":"Orbit",
+    "Spinning Silver":"Penguin Random House", "A Deadly Education":"Penguin Random House", "The Starless Sea":"Penguin Random House",
+    "The Long Way to a Small, Angry Planet":"HarperCollins",
+    "Klara and the Sun":"Penguin Random House", "The Left Hand of Darkness":"Penguin Random House",
+    "Recursion":"Penguin Random House", "Project Hail Mary":"Penguin Random House", "Station Eleven":"Penguin Random House",
+    "Beach Read":"Berkley", "People We Meet on Vacation":"Berkley", "The Kiss Quotient":"Berkley",
+    "Red, White & Royal Blue":"St. Martin's Press", "The Flatshare":"Macmillan",
+    "Get a Life, Chloe Brown":"HarperCollins", "The Hating Game":"HarperCollins", "The Spanish Love Deception":"Simon & Schuster",
+    "The Maid":"Penguin Random House", "Mexican Gothic":"Penguin Random House", "The Thursday Murder Club":"Penguin Random House",
+    "In the Woods":"Penguin Random House", "The Silent Patient":"Macmillan", "Gone Girl":"Penguin Random House",
+    "The Book Thief":"Penguin Random House", "Pachinko":"Hachette", "The Nightingale":"St. Martin's Press",
+    "Circe":"Hachette", "A Little Life":"Penguin Random House", "Normal People":"Penguin Random House",
+    "The Goldfinch":"Hachette", "Anxious People":"Simon & Schuster",
+    "The Haunting of Hill House":"Penguin Random House", "House of Leaves":"Penguin Random House", "The Only Good Indians":"Simon & Schuster",
+    "Sapiens":"HarperCollins", "The Body Keeps the Score":"Penguin Random House", "Quiet":"Penguin Random House",
+    "Born a Crime":"Penguin Random House", "Atomic Habits":"Penguin Random House", "The Anthropocene Reviewed":"Penguin Random House",
+    "Crying in H Mart":"Penguin Random House", "Becoming":"Penguin Random House", "The Glass Castle":"Simon & Schuster",
+    "The Hunger Games":"Scholastic", "Six of Crows":"Macmillan", "The Hate U Give":"HarperCollins",
+    "Legendborn":"Simon & Schuster", "Heartstopper: Volume 1":"Scholastic",
+    "The Lies of Locke Lamora":"Penguin Random House", "Tomorrow, and Tomorrow, and Tomorrow":"Penguin Random House"
+};
+
 function renderRecommendations() {
     const container = document.getElementById('recsContainer');
     if (!container) return;
@@ -10102,6 +10131,7 @@ function renderRecommendations() {
     const favAuthors = (profile.favoriteAuthors || []).map(a => a.toLowerCase());
     const avoidContent = profile.contentToAvoid || [];
     const prefPages = profile.preferredPages || [];
+    const favPubs = (profile.favoritePublishers || []).map(p => String(p).toLowerCase()).filter(Boolean);
     const readTitles = new Set(app.books.map(b => b.title.toLowerCase()));
     const readGenres = [...new Set(app.books.filter(b => b.status === 'read').map(b => b.genre).filter(g => g))];
 
@@ -10173,6 +10203,11 @@ function renderRecommendations() {
             (p === 'epic' && r.pages >= 600));
         if (lenMatch) r._score += 2;
         r._lenMatch = lenMatch;
+        // Preferred publisher
+        const recPub = (recPublisherMap[r.title] || '').toLowerCase();
+        const pubMatch = !!recPub && favPubs.length > 0 && favPubs.some(fp => recPub.indexOf(fp) >= 0 || fp.indexOf(recPub) >= 0);
+        if (pubMatch) r._score += 2;
+        r._pubMatch = pubMatch;
         // Like/dislike feedback weighting
         if (likedG.has(r.genre)) r._score += 3;
         if (dislikedG.has(r.genre)) r._score -= 4;
@@ -10185,6 +10220,7 @@ function renderRecommendations() {
         if (favGenres.includes(r.genre)) reasons.push('Matches your favorite genre');
         if (tropeMatches.length > 0) reasons.push('Tropes you love: ' + tropeMatches.slice(0, 2).join(', '));
         if (lenMatch) reasons.push('Your preferred length');
+        if (pubMatch) reasons.push('From a publisher you like');
         r._reason = reasons.length > 0 ? reasons[0] : (readGenres.includes(r.genre) ? `Popular in ${r.genre}` : `Recommended in ${r.genre}`);
     });
 
@@ -10244,6 +10280,7 @@ function renderRecommendations() {
         (profile.favoriteGenres || []).slice(0, 4).join(', '),
         (profile.favoriteAuthors || []).slice(0, 3).join(', '),
         (profile.favoriteTropes || []).slice(0, 3).join(', '),
+        (profile.favoritePublishers || []).slice(0, 3).join(', '),
         _prefLenBits ? ('length: ' + _prefLenBits) : ''
     ].filter(Boolean).join(' · ');
     const avoidBits = [ disG.join(', '), (avoidContent || []).join(', ') ].filter(Boolean).join(' · ');
