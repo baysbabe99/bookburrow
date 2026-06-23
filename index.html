@@ -4112,6 +4112,10 @@
                     </div>
                 </div>
 
+                <div style="text-align:right;margin-bottom:16px;">
+                    <button onclick="removeFriend(currentFriendId)" style="background:none;border:1.5px solid #F0C4C4;color:#C2705B;border-radius:8px;padding:7px 14px;font-family:Nunito,sans-serif;font-size:12px;font-weight:700;cursor:pointer;">🗑️ Remove Friend</button>
+                </div>
+
                 <div id="friendSuggestForm" style="margin-bottom:24px;background:linear-gradient(135deg,rgba(125,155,118,0.08),rgba(212,167,106,0.08));border-radius:12px;padding:14px;border:2px dashed rgba(125,155,118,0.3);display:none;">
                     <h3 style="color:#3D5A80;font-weight:600;margin-bottom:10px;font-size:14px;">📬 Suggest a Book</h3>
                     <select id="suggestFromLibrary" onchange="fillSuggestFromLibrary()" style="width:100%;padding:8px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;margin-bottom:8px;">
@@ -10518,6 +10522,17 @@ function renameFriend(id) {
     var el = document.getElementById('friendDetailName');
     if (el) el.textContent = f.name;
     renderFriends();
+}
+
+function removeFriend(friendId) {
+    var f = app.friends.find(function(x){ return x.id === friendId; });
+    if (!f) return;
+    if (!confirm('Remove ' + (f.name || 'this friend') + ' from your friends?')) return;
+    app.friends = app.friends.filter(function(x){ return x.id !== friendId; });
+    app.saveData();
+    closeModal('friendDetailModal');
+    renderFriends();
+    showNotification('Friend removed', 1500);
 }
 
 function openFriendDetail(friendId) {
