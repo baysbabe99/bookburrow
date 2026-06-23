@@ -239,6 +239,10 @@
             animation: fadeIn 0.3s ease;
         }
 
+        .pref-chip { display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border:2px solid #E8DFD5; border-radius:20px; background:#FFF8F0; cursor:pointer; font-size:12px; color:#3D5A80; font-family:'Nunito',sans-serif; }
+        .pref-chip input { accent-color:#7D9B76; }
+        .pref-chip:has(input:checked) { border-color:#7D9B76; background:rgba(125,155,118,0.12); }
+
         .welcome-message {
             margin-bottom: 32px;
             padding: 24px;
@@ -2821,42 +2825,56 @@
                             <input type="text" id="favSeries" placeholder="e.g. Harry Potter, A Court of Thorns and Roses, The Stormlight Archive" style="width:100%;padding:10px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;" onchange="saveProfile()">
                         </div>
 
-                        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px;">
-                            <div>
-                                <label style="font-size:13px;color:#8B7E74;font-weight:700;display:block;margin-bottom:4px;">Preferred Page Range:</label>
-                                <select id="prefPages" style="width:100%;padding:10px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;" onchange="saveProfile()">
-                                    <option value="">Any length</option>
-                                    <option value="short">Short (under 200p)</option>
-                                    <option value="medium">Medium (200-400p)</option>
-                                    <option value="long">Long (400+ pages)</option>
-                                    <option value="epic">Epic (600+ pages)</option>
-                                </select>
+                        <div style="margin-bottom:16px;">
+                            <label style="font-size:13px;color:#8B7E74;font-weight:700;display:block;margin-bottom:6px;">Preferred Page Range (pick any):</label>
+                            <div id="prefPagesChips" style="display:flex;flex-wrap:wrap;gap:8px;">
+                                <label class="pref-chip"><input type="checkbox" class="prefPages-cb" value="short" onchange="saveProfile()"> Short (under 200p)</label>
+                                <label class="pref-chip"><input type="checkbox" class="prefPages-cb" value="medium" onchange="saveProfile()"> Medium (200-400p)</label>
+                                <label class="pref-chip"><input type="checkbox" class="prefPages-cb" value="long" onchange="saveProfile()"> Long (400+)</label>
+                                <label class="pref-chip"><input type="checkbox" class="prefPages-cb" value="epic" onchange="saveProfile()"> Epic (600+)</label>
                             </div>
-                            <div>
-                                <label style="font-size:13px;color:#8B7E74;font-weight:700;display:block;margin-bottom:4px;">Preferred Format:</label>
-                                <select id="prefFormat" style="width:100%;padding:10px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;" onchange="saveProfile()">
-                                    <option value="">Any format</option>
-                                    <option value="Paperback">Paperback</option>
-                                    <option value="Hardcover">Hardcover</option>
-                                    <option value="eBook">eBook</option>
-                                    <option value="Audiobook">Audiobook</option>
-                                </select>
+                        </div>
+                        <div style="margin-bottom:16px;">
+                            <label style="font-size:13px;color:#8B7E74;font-weight:700;display:block;margin-bottom:6px;">Preferred Format (pick any):</label>
+                            <div id="prefFormatChips" style="display:flex;flex-wrap:wrap;gap:8px;">
+                                <label class="pref-chip"><input type="checkbox" class="prefFormat-cb" value="Paperback" onchange="saveProfile()"> Paperback</label>
+                                <label class="pref-chip"><input type="checkbox" class="prefFormat-cb" value="Hardcover" onchange="saveProfile()"> Hardcover</label>
+                                <label class="pref-chip"><input type="checkbox" class="prefFormat-cb" value="eBook" onchange="saveProfile()"> eBook</label>
+                                <label class="pref-chip"><input type="checkbox" class="prefFormat-cb" value="Audiobook" onchange="saveProfile()"> Audiobook</label>
                             </div>
-                            <div>
-                                <label style="font-size:13px;color:#8B7E74;font-weight:700;display:block;margin-bottom:4px;">Reading Pace:</label>
-                                <select id="prefPace" style="width:100%;padding:10px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;" onchange="saveProfile()">
-                                    <option value="">No preference</option>
-                                    <option value="leisurely">Leisurely (a few pages a day)</option>
-                                    <option value="casual">Casual (a chapter or two)</option>
-                                    <option value="steady">Steady (a book a week)</option>
-                                    <option value="voracious">Voracious (multiple books a week)</option>
-                                </select>
+                        </div>
+                        <div style="margin-bottom:16px;">
+                            <label style="font-size:13px;color:#8B7E74;font-weight:700;display:block;margin-bottom:6px;">Reading Pace (pick any):</label>
+                            <div id="prefPaceChips" style="display:flex;flex-wrap:wrap;gap:8px;">
+                                <label class="pref-chip"><input type="checkbox" class="prefPace-cb" value="leisurely" onchange="saveProfile()"> Leisurely</label>
+                                <label class="pref-chip"><input type="checkbox" class="prefPace-cb" value="casual" onchange="saveProfile()"> Casual</label>
+                                <label class="pref-chip"><input type="checkbox" class="prefPace-cb" value="steady" onchange="saveProfile()"> Steady</label>
+                                <label class="pref-chip"><input type="checkbox" class="prefPace-cb" value="voracious" onchange="saveProfile()"> Voracious</label>
                             </div>
+                        </div>
+                        <div style="margin-bottom:16px;">
+                            <label style="font-size:13px;color:#8B7E74;font-weight:700;display:block;margin-bottom:6px;">Favorite Publishers (pick any):</label>
+                            <div id="prefPubChips" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+                                <label class="pref-chip"><input type="checkbox" class="prefPub-cb" value="Penguin Random House" onchange="saveProfile()"> Penguin Random House</label>
+                                <label class="pref-chip"><input type="checkbox" class="prefPub-cb" value="HarperCollins" onchange="saveProfile()"> HarperCollins</label>
+                                <label class="pref-chip"><input type="checkbox" class="prefPub-cb" value="Simon &amp; Schuster" onchange="saveProfile()"> Simon &amp; Schuster</label>
+                                <label class="pref-chip"><input type="checkbox" class="prefPub-cb" value="Macmillan" onchange="saveProfile()"> Macmillan</label>
+                                <label class="pref-chip"><input type="checkbox" class="prefPub-cb" value="Hachette" onchange="saveProfile()"> Hachette</label>
+                                <label class="pref-chip"><input type="checkbox" class="prefPub-cb" value="Tor" onchange="saveProfile()"> Tor</label>
+                                <label class="pref-chip"><input type="checkbox" class="prefPub-cb" value="Orbit" onchange="saveProfile()"> Orbit</label>
+                                <label class="pref-chip"><input type="checkbox" class="prefPub-cb" value="Bloomsbury" onchange="saveProfile()"> Bloomsbury</label>
+                                <label class="pref-chip"><input type="checkbox" class="prefPub-cb" value="Scholastic" onchange="saveProfile()"> Scholastic</label>
+                                <label class="pref-chip"><input type="checkbox" class="prefPub-cb" value="Berkley" onchange="saveProfile()"> Berkley</label>
+                                <label class="pref-chip"><input type="checkbox" class="prefPub-cb" value="St. Martin's Press" onchange="saveProfile()"> St. Martin's Press</label>
+                                <label class="pref-chip"><input type="checkbox" class="prefPub-cb" value="Vintage" onchange="saveProfile()"> Vintage</label>
+                            </div>
+                            <input type="text" id="favPublishers" placeholder="Other publishers, comma separated" style="width:100%;padding:10px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;" onchange="saveProfile()">
                         </div>
 
                         <div style="margin-bottom:16px;">
-                            <label style="font-size:13px;color:#8B7E74;font-weight:700;display:block;margin-bottom:4px;">Favorite Publishers (comma separated):</label>
-                            <input type="text" id="favPublishers" placeholder="e.g. Tor, Penguin" style="width:100%;padding:10px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;" onchange="saveProfile()">
+                            <label style="font-size:13px;color:#8B7E74;font-weight:700;display:block;margin-bottom:6px;">🔔 Release Alerts:</label>
+                            <button class="btn btn-primary" id="prefReleaseAlertsBtn" onclick="toggleReleaseAlerts()" style="font-size:13px;">🔕 Turn On Release Alerts</button>
+                            <div style="font-size:11px;color:#8B7E74;margin-top:6px;">Get a browser notification when a book with a release date drops. Fine-tune the timing (day-of / 1 day / 1 week) in Settings → Import/Export.</div>
                         </div>
 
                         <div style="margin-bottom:16px;">
@@ -4674,10 +4692,10 @@ function checkReleaseAlerts() {
 
 async function toggleReleaseAlerts() {
     if (!app) return;
-    const btn = document.getElementById('toggleReleaseAlertsBtn');
+    const btns = [document.getElementById('toggleReleaseAlertsBtn'), document.getElementById('prefReleaseAlertsBtn')].filter(Boolean);
     if (app.releaseAlertsEnabled) {
         app.releaseAlertsEnabled = false;
-        if (btn) btn.innerHTML = '🔕 Turn On Release Alerts';
+        btns.forEach(b => { b.innerHTML = '🔕 Turn On Release Alerts'; });
         app.saveData();
         showNotification('Release alerts off', 1500);
         return;
@@ -4686,7 +4704,7 @@ async function toggleReleaseAlerts() {
     const perm = await Notification.requestPermission();
     if (perm === 'granted') {
         app.releaseAlertsEnabled = true;
-        if (btn) btn.innerHTML = '🔔 Release Alerts On — Turn Off';
+        btns.forEach(b => { b.innerHTML = '🔔 Release Alerts On — Turn Off'; });
         app.saveData();
         showNotification('Release alerts on! 🔔', 2000);
         checkReleaseAlerts();
@@ -4713,8 +4731,8 @@ function saveReleaseLeadTimes() {
 
 function syncReleaseAlertUI() {
     if (!app) return;
-    const btn = document.getElementById('toggleReleaseAlertsBtn');
-    if (btn) btn.innerHTML = app.releaseAlertsEnabled ? '🔔 Release Alerts On — Turn Off' : '🔕 Turn On Release Alerts';
+    const _raLabel = app.releaseAlertsEnabled ? '🔔 Release Alerts On — Turn Off' : '🔕 Turn On Release Alerts';
+    [document.getElementById('toggleReleaseAlertsBtn'), document.getElementById('prefReleaseAlertsBtn')].forEach(b => { if (b) b.innerHTML = _raLabel; });
     const leads = app.releaseAlertLeadDays || [0];
     const l0 = document.getElementById('releaseLead0'); if (l0) l0.checked = leads.includes(0);
     const l1 = document.getElementById('releaseLead1'); if (l1) l1.checked = leads.includes(1);
@@ -8714,17 +8732,21 @@ function renderProfile() {
     const seriesInput = document.getElementById('favSeries');
     if (seriesInput) seriesInput.value = (profile.favoriteSeries || []).join(', ');
 
-    const pagesSelect = document.getElementById('prefPages');
-    if (pagesSelect) pagesSelect.value = profile.preferredPages || '';
+    // Restore multi-select preference chips (handles legacy string values too)
+    const asArr = v => Array.isArray(v) ? v : (v ? [v] : []);
+    const pagesPrefs = asArr(profile.preferredPages);
+    document.querySelectorAll('.prefPages-cb').forEach(c => { c.checked = pagesPrefs.includes(c.value); });
+    const formatPrefs = asArr(profile.preferredFormat);
+    document.querySelectorAll('.prefFormat-cb').forEach(c => { c.checked = formatPrefs.includes(c.value); });
+    const pacePrefs = asArr(profile.readingPace);
+    document.querySelectorAll('.prefPace-cb').forEach(c => { c.checked = pacePrefs.includes(c.value); });
 
-    const formatSelect = document.getElementById('prefFormat');
-    if (formatSelect) formatSelect.value = profile.preferredFormat || '';
-
-    const paceSelect = document.getElementById('prefPace');
-    if (paceSelect) paceSelect.value = profile.readingPace || '';
-
+    // Publishers: tick known ones; put any extras in the free-text box
+    const pubs = (profile.favoritePublishers || []);
+    const pubChipVals = [...document.querySelectorAll('.prefPub-cb')].map(c => c.value);
+    document.querySelectorAll('.prefPub-cb').forEach(c => { c.checked = pubs.includes(c.value); });
     const pubInput = document.getElementById('favPublishers');
-    if (pubInput) pubInput.value = (profile.favoritePublishers || []).join(', ');
+    if (pubInput) pubInput.value = pubs.filter(p => !pubChipVals.includes(p)).join(', ');
 
     // Favorites section
     const genreSingleInput = document.getElementById('favGenreSingle');
@@ -9449,17 +9471,16 @@ function saveProfile() {
     const seriesInput = document.getElementById('favSeries');
     if (seriesInput) app.profile.favoriteSeries = seriesInput.value.split(',').map(s => s.trim()).filter(s => s);
 
-    const pagesSelect = document.getElementById('prefPages');
-    if (pagesSelect) app.profile.preferredPages = pagesSelect.value;
+    // Multi-select preference chips (page range / format / pace) — stored as arrays
+    app.profile.preferredPages = [...document.querySelectorAll('.prefPages-cb:checked')].map(c => c.value);
+    app.profile.preferredFormat = [...document.querySelectorAll('.prefFormat-cb:checked')].map(c => c.value);
+    app.profile.readingPace = [...document.querySelectorAll('.prefPace-cb:checked')].map(c => c.value);
 
-    const formatSelect = document.getElementById('prefFormat');
-    if (formatSelect) app.profile.preferredFormat = formatSelect.value;
-
-    const paceSelect = document.getElementById('prefPace');
-    if (paceSelect) app.profile.readingPace = paceSelect.value;
-
+    // Publishers: checked pick-list chips + any free-text extras
+    const pubChips = [...document.querySelectorAll('.prefPub-cb:checked')].map(c => c.value);
     const pubInput = document.getElementById('favPublishers');
-    if (pubInput) app.profile.favoritePublishers = pubInput.value.split(',').map(p => p.trim()).filter(p => p);
+    const pubExtra = pubInput ? pubInput.value.split(',').map(p => p.trim()).filter(p => p) : [];
+    app.profile.favoritePublishers = [...new Set(pubChips.concat(pubExtra))];
 
     // Favorites
     const genreSingleInput = document.getElementById('favGenreSingle');
@@ -10955,6 +10976,7 @@ function buildPromptRows(ch, idx) {
             + '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'
             + '<select onchange="linkChallengePromptBook(' + idx + ',' + i + ',this.value)" style="flex:1;min-width:150px;padding:6px 8px;border:1.5px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:12px;">' + opts + '</select>'
             + '<button onclick="cpTypePrompt(' + idx + ',' + i + ')" style="padding:6px 10px;border:1.5px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#8B7E74;font-family:Nunito,sans-serif;font-size:12px;font-weight:700;cursor:pointer;" title="Type your own">✏️ Type</button>'
+            + '<button onclick="cpOnlinePrompt(' + idx + ',' + i + ')" style="padding:6px 10px;border:1.5px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#8B7E74;font-family:Nunito,sans-serif;font-size:12px;font-weight:700;cursor:pointer;" title="Find online (Open Library)">🌐 Online</button>'
             + '</div>'
             + '</div>';
     }).join('');
@@ -11021,6 +11043,46 @@ function cpTypePrompt(idx, i) {
     ch.promptBook[i] = t || null;
     ch.promptDone[i] = !!t;
     _refreshChallengePrompts(idx);
+}
+
+// "🌐 Online" — search Open Library, pick a result, add it to the library and link it.
+function cpOnlinePrompt(idx, i) {
+    var q = prompt('Search online (Open Library) for a book to link:');
+    if (!q || !q.trim()) return;
+    fetch('https://openlibrary.org/search.json?q=' + encodeURIComponent(q.trim()) + '&limit=5&fields=title,author_name,first_publish_year,cover_i,isbn,number_of_pages_median')
+        .then(function(r){ return r.json(); })
+        .then(function(data){
+            var docs = (data.docs || []);
+            if (!docs.length) { showNotification('No results online', 1500); return; }
+            var list = docs.map(function(d, n){ return (n + 1) + ') ' + (d.title || 'Untitled') + (d.author_name && d.author_name[0] ? ' — ' + d.author_name[0] : ''); }).join('\n');
+            var pick = prompt('Type a number to link this prompt:\n\n' + list);
+            if (!pick) return;
+            var n = parseInt(pick) - 1;
+            if (isNaN(n) || n < 0 || n >= docs.length) { showNotification('No book picked', 1200); return; }
+            var d = docs[n];
+            var ch = app.challenges[idx];
+            if (!ch) return;
+            var existing = app.books.find(function(b){ return b.title.toLowerCase() === String(d.title || '').toLowerCase(); });
+            var bookId;
+            if (existing) { bookId = existing.id; }
+            else {
+                bookId = app.getNextId();
+                app.books.push({
+                    id: bookId, title: d.title || 'Untitled', author: (d.author_name && d.author_name[0]) || 'Unknown',
+                    genre: '', pages: d.number_of_pages_median || 0, isbn: (d.isbn && d.isbn[0]) ? String(d.isbn[0]) : '',
+                    publisher: '', publicationYear: d.first_publish_year || null, language: 'English', format: '', series: '',
+                    description: '', status: 'want', rating: 0, coverId: d.cover_i || undefined,
+                    dateAdded: new Date().toISOString(), notes: 'Added from Open Library (challenge prompt)'
+                });
+            }
+            ch.promptBook[i] = bookId;
+            ch.promptDone[i] = true;
+            _refreshChallengePrompts(idx);
+            if (typeof populateLibraryDropdowns === 'function') populateLibraryDropdowns();
+            if (typeof applyLibraryFilters === 'function') applyLibraryFilters();
+            showNotification('Linked from online 🌐', 1500);
+        })
+        .catch(function(){ showNotification('Online search failed', 1500); });
 }
 
 function toggleChallengePrompt(idx, i, checked) {
