@@ -5073,9 +5073,9 @@ function renderGoalCards() {
         const btEl = document.getElementById('goal' + capP + 'BooksText');
         const bbEl = document.getElementById('goal' + capP + 'BooksBar');
 
-        if (ptEl) ptEl.textContent = pagesActual.toLocaleString() + ' / ' + pagesTarget.toLocaleString();
+        if (ptEl) ptEl.textContent = pagesActual.toLocaleString() + ' / ' + pagesTarget.toLocaleString() + ' (' + pagesPct + '%)';
         if (pbEl) pbEl.style.width = pagesPct + '%';
-        if (btEl) btEl.textContent = booksActual + ' / ' + booksTarget;
+        if (btEl) btEl.textContent = booksActual + ' / ' + booksTarget + ' (' + booksPct + '%)';
         if (bbEl) bbEl.style.width = booksPct + '%';
     });
 
@@ -5375,16 +5375,31 @@ function dashReadingEditor(book) {
         + '</div></div>';
 }
 
+// Audiobooks / pageless books have no real page count, so when their % is bumped on a
+// card we credit a share of an assumed 300-page length toward today's reading-goal log.
+function logAudiobookProgress(book, oldPct, newPct) {
+    var pages = parseInt(book.pages) || 0;
+    if (pages > 0) return; // page-based books are tracked by the normal page log
+    var delta = Math.round(((newPct - oldPct) / 100) * 300);
+    if (delta <= 0) return;
+    if (!app.profile) app.profile = {};
+    if (!app.profile.dailyReadingLog) app.profile.dailyReadingLog = {};
+    var today = new Date().toISOString().split('T')[0];
+    app.profile.dailyReadingLog[today] = (app.profile.dailyReadingLog[today] || 0) + delta;
+}
+
 function updateDashProgress(id) {
     var book = app.books.find(function(b){ return b.id === id; });
     if (!book) return;
     var pages = parseInt(book.pages) || 0;
     var audio = book.format === 'Audiobook';
+    var oldPct = book.progressPercentage || 0;
     if (audio || pages <= 0) {
         var pct = parseInt(document.getElementById('dashPct_' + id)?.value) || 0;
         pct = Math.max(0, Math.min(100, pct));
         book.progressPercentage = pct;
         book.currentPage = pages > 0 ? Math.round((pct / 100) * pages) : null;
+        logAudiobookProgress(book, oldPct, pct);
     } else {
         var cp = parseInt(document.getElementById('dashPage_' + id)?.value) || 0;
         cp = Math.max(0, Math.min(cp, pages));
@@ -10802,6 +10817,39 @@ function getChallengePrompts(ch) {
     return (lib && lib.prompts) || [];
 }
 
+function _cpCountText(ch) {
+    var prompts = getChallengePrompts(ch);
+    var doneCount = (ch.promptDone || []).filter(Boolean).length;
+    return '✅ ' + doneCount + ' / ' + prompts.length + ' done · check items, link books, or use Mark all.';
+}
+
+// Build just the prompt rows (used on open AND on in-place refresh, so the modal
+// never has to re-open / re-animate — that re-animation was the "double pop-up").
+function buildPromptRows(ch, idx) {
+    var prompts = getChallengePrompts(ch);
+    var books = app.books.slice().sort(function(a, b){ return (a.title || '').localeCompare(b.title || ''); });
+    return prompts.map(function(p, i) {
+        var done = ch.promptDone[i];
+        var linked = ch.promptBook[i];
+        var linkedIsText = (typeof linked === 'string' && linked);
+        var opts = '<option value="">— link from your library —</option>' + books.map(function(b){
+            return '<option value="' + b.id + '"' + (linked === b.id ? ' selected' : '') + '>' + String(b.title || 'Untitled').replace(/</g, '&lt;').replace(/"/g, '&quot;') + '</option>';
+        }).join('');
+        var pText = String(p).replace(/</g, '&lt;');
+        var typedChip = linkedIsText ? '<div style="font-size:12px;color:#7D9B76;font-weight:700;">✏️ ' + String(linked).replace(/</g, '&lt;') + '</div>' : '';
+        return '<div style="display:flex;flex-direction:column;gap:6px;padding:10px;border:1.5px solid ' + (done ? '#7D9B76' : '#E8DFD5') + ';border-radius:10px;background:' + (done ? 'rgba(125,155,118,0.08)' : '#FFF8F0') + ';">'
+            + '<label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13px;color:#3D5A80;line-height:1.35;">'
+            + '<input type="checkbox" ' + (done ? 'checked' : '') + ' onchange="toggleChallengePrompt(' + idx + ',' + i + ',this.checked)" style="margin-top:2px;width:18px;height:18px;accent-color:#7D9B76;flex-shrink:0;">'
+            + '<span><strong style="color:#8B7E74;">' + (i + 1) + '.</strong> ' + pText + '</span></label>'
+            + typedChip
+            + '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'
+            + '<select onchange="linkChallengePromptBook(' + idx + ',' + i + ',this.value)" style="flex:1;min-width:150px;padding:6px 8px;border:1.5px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:12px;">' + opts + '</select>'
+            + '<button onclick="cpTypePrompt(' + idx + ',' + i + ')" style="padding:6px 10px;border:1.5px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#8B7E74;font-family:Nunito,sans-serif;font-size:12px;font-weight:700;cursor:pointer;" title="Type your own">✏️ Type</button>'
+            + '</div>'
+            + '</div>';
+    }).join('');
+}
+
 function openChallengePrompts(idx) {
     var ch = app.challenges[idx];
     if (!ch) return;
@@ -10810,32 +10858,18 @@ function openChallengePrompts(idx) {
     if (!ch.promptDone || ch.promptDone.length !== prompts.length) ch.promptDone = prompts.map(function(){ return false; });
     if (!ch.promptBook || ch.promptBook.length !== prompts.length) ch.promptBook = prompts.map(function(){ return null; });
 
-    var books = app.books.slice().sort(function(a, b){ return (a.title || '').localeCompare(b.title || ''); });
-    var doneCount = ch.promptDone.filter(Boolean).length;
-
     var modal = document.getElementById('challengePromptsModal');
     if (!modal) { modal = document.createElement('div'); modal.id = 'challengePromptsModal'; modal.className = 'modal'; document.body.appendChild(modal); }
-
-    var rows = prompts.map(function(p, i) {
-        var done = ch.promptDone[i];
-        var linkedId = ch.promptBook[i];
-        var opts = '<option value="">— link a book —</option>' + books.map(function(b){
-            return '<option value="' + b.id + '"' + (linkedId === b.id ? ' selected' : '') + '>' + String(b.title || 'Untitled').replace(/</g, '&lt;').replace(/"/g, '&quot;') + '</option>';
-        }).join('');
-        var pText = String(p).replace(/</g, '&lt;');
-        return '<div style="display:flex;flex-direction:column;gap:6px;padding:10px;border:1.5px solid ' + (done ? '#7D9B76' : '#E8DFD5') + ';border-radius:10px;background:' + (done ? 'rgba(125,155,118,0.08)' : '#FFF8F0') + ';">'
-            + '<label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13px;color:#3D5A80;line-height:1.35;">'
-            + '<input type="checkbox" ' + (done ? 'checked' : '') + ' onchange="toggleChallengePrompt(' + idx + ',' + i + ',this.checked)" style="margin-top:2px;width:18px;height:18px;accent-color:#7D9B76;flex-shrink:0;">'
-            + '<span><strong style="color:#8B7E74;">' + (i + 1) + '.</strong> ' + pText + '</span></label>'
-            + '<select onchange="linkChallengePromptBook(' + idx + ',' + i + ',this.value)" style="padding:6px 8px;border:1.5px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:12px;">' + opts + '</select>'
-            + '</div>';
-    }).join('');
 
     modal.innerHTML = '<div class="modal-content" style="max-width:560px;">'
         + '<div class="modal-header"><h2 style="font-family:Quicksand,sans-serif;color:#3D5A80;margin:0;">' + (ch.emoji || '🏆') + ' ' + String(ch.name || 'Challenge').replace(/</g, '&lt;') + '</h2>'
         + '<button onclick="closeModal(\'challengePromptsModal\')" style="background:none;border:none;font-size:22px;cursor:pointer;color:#8B7E74;">✕</button></div>'
-        + '<div style="font-size:13px;color:#8B7E74;margin-bottom:14px;">✅ ' + doneCount + ' / ' + prompts.length + ' done · check off an item and link a book.</div>'
-        + '<div style="display:flex;flex-direction:column;gap:8px;">' + rows + '</div>'
+        + '<div id="cpCount" style="font-size:13px;color:#8B7E74;margin-bottom:10px;">' + _cpCountText(ch) + '</div>'
+        + '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">'
+        + '<button onclick="cpMarkAll(' + idx + ',true)" style="padding:5px 12px;border:none;border-radius:8px;background:#7D9B76;color:#fff;font-family:Nunito,sans-serif;font-size:12px;font-weight:700;cursor:pointer;">✓ Mark all done</button>'
+        + '<button onclick="cpMarkAll(' + idx + ',false)" style="padding:5px 12px;border:1.5px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#8B7E74;font-family:Nunito,sans-serif;font-size:12px;font-weight:700;cursor:pointer;">Clear all</button>'
+        + '</div>'
+        + '<div id="cpRows" style="display:flex;flex-direction:column;gap:8px;">' + buildPromptRows(ch, idx) + '</div>'
         + '<button class="btn btn-primary" style="width:100%;margin-top:16px;" onclick="closeModal(\'challengePromptsModal\')">Done</button>'
         + '</div>';
     modal.classList.add('active');
@@ -10846,10 +10880,37 @@ function _refreshChallengePrompts(idx) {
     if (!ch) return;
     ch.current = (ch.promptDone || []).filter(Boolean).length;
     app.saveData();
+    renderChallenges(); // updates ring + fires completion XP/confetti when all prompts done
     var modal = document.getElementById('challengePromptsModal');
-    var open = modal && modal.classList.contains('active');
-    renderChallenges(); // recomputes ring + fires completion XP/confetti when all prompts done
-    if (open) openChallengePrompts(idx);
+    if (modal && modal.classList.contains('active')) {
+        // Update contents IN PLACE — do NOT re-open the modal (that re-ran the slide-in
+        // animation on every click, which read as a "double pop-up").
+        var countEl = document.getElementById('cpCount');
+        if (countEl) countEl.textContent = _cpCountText(ch);
+        var rowsEl = document.getElementById('cpRows');
+        if (rowsEl) rowsEl.innerHTML = buildPromptRows(ch, idx);
+    }
+}
+
+function cpMarkAll(idx, val) {
+    var ch = app.challenges[idx];
+    if (!ch) return;
+    var prompts = getChallengePrompts(ch);
+    if (!ch.promptDone || ch.promptDone.length !== prompts.length) ch.promptDone = prompts.map(function(){ return false; });
+    ch.promptDone = ch.promptDone.map(function(){ return !!val; });
+    _refreshChallengePrompts(idx);
+}
+
+function cpTypePrompt(idx, i) {
+    var ch = app.challenges[idx];
+    if (!ch || !ch.promptBook) return;
+    var cur = (typeof ch.promptBook[i] === 'string') ? ch.promptBook[i] : '';
+    var t = prompt('Type the book/title for this prompt:', cur);
+    if (t === null) return;
+    t = t.trim();
+    ch.promptBook[i] = t || null;
+    ch.promptDone[i] = !!t;
+    _refreshChallengePrompts(idx);
 }
 
 function toggleChallengePrompt(idx, i, checked) {
