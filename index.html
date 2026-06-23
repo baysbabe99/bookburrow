@@ -5212,7 +5212,7 @@ function renderActivityFeed() {
         // Generate some activities from existing data
         const recentActivities = [];
         app.books.forEach(b => {
-            if (b.status === 'read') recentActivities.push({ type: 'finished', message: `Finished "${b.title}"`, date: b.dateFinished || b.dateAdded || new Date().toISOString() });
+            if (b.status === 'read') recentActivities.push({ type: 'finished', message: `Read "${b.title}"`, date: b.dateFinished || b.dateAdded || new Date().toISOString() });
             else if (b.status === 'reading') recentActivities.push({ type: 'started', message: `Started reading "${b.title}"`, date: b.dateAdded || new Date().toISOString() });
             else if (b.status === 'want') recentActivities.push({ type: 'added', message: `Added "${b.title}" to wishlist`, date: b.dateAdded || new Date().toISOString() });
         });
@@ -5454,8 +5454,8 @@ function dashReadingEditor(book) {
         + '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' + progInput + '</div>'
         + '<div style="display:flex;gap:10px;margin-top:6px;flex-wrap:wrap;align-items:center;">'
         + '<label style="font-size:10px;color:#8B7E74;font-weight:700;">Started<input type="date" id="dashStart_' + book.id + '" value="' + toDateInputValue(book.dateStarted) + '" onclick="event.stopPropagation()" onchange="updateDashDates(' + book.id + ')" style="' + dateStyle + '"></label>'
-        + '<label style="font-size:10px;color:#8B7E74;font-weight:700;">Finished<input type="date" id="dashFinish_' + book.id + '" value="' + toDateInputValue(book.dateFinished) + '" onclick="event.stopPropagation()" onchange="updateDashDates(' + book.id + ')" style="' + dateStyle + '"></label>'
-        + '<button onclick="event.stopPropagation();markBookFinishedFromDash(' + book.id + ')" style="margin-left:auto;padding:5px 12px;border:none;border-radius:8px;background:#7D9B76;color:#fff;font-family:Nunito,sans-serif;font-size:11px;font-weight:700;cursor:pointer;" title="Mark finished and move to your shelf">✓ Finished</button>'
+        + '<label style="font-size:10px;color:#8B7E74;font-weight:700;">Read<input type="date" id="dashFinish_' + book.id + '" value="' + toDateInputValue(book.dateFinished) + '" onclick="event.stopPropagation()" onchange="updateDashDates(' + book.id + ')" style="' + dateStyle + '"></label>'
+        + '<button onclick="event.stopPropagation();markBookFinishedFromDash(' + book.id + ')" style="margin-left:auto;padding:5px 12px;border:none;border-radius:8px;background:#7D9B76;color:#fff;font-family:Nunito,sans-serif;font-size:11px;font-weight:700;cursor:pointer;" title="Mark read and move to your shelf">✓ Read</button>'
         + '</div></div>';
 }
 
