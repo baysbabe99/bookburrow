@@ -2467,7 +2467,7 @@
     button, .nav-item, .library-tab, a, [onclick] { touch-action: manipulation; }
     html, body { overscroll-behavior-y: none; }
 
-    @media (max-width: 768px) {
+    @media (max-width: 768px), (orientation: portrait) and (max-width: 1024px), (orientation: landscape) and (max-height: 500px) {
       /* dynamic viewport height: mobile browser chrome no longer cuts off content */
       .container { height: 100vh; height: 100dvh; }
       /* notch / status bar at top (the mobile top nav bar) */
@@ -2485,8 +2485,10 @@
     /* ===== Mobile bottom tab bar + phone-app shell (added 2026-06-21) ===== */
     .bb-bottomnav, .bb-sheet-backdrop { display: none; }
 
-    @media (max-width: 768px) {
-      /* Hide the desktop sidebar on phones; the bottom bar drives navigation and
+    /* Phones (any orientation) + tablets in portrait get the bottom tab bar;
+       tablets & desktops in landscape keep the sidebar. */
+    @media (max-width: 768px), (orientation: portrait) and (max-width: 1024px), (orientation: landscape) and (max-height: 500px) {
+      /* Hide the sidebar on these; the bottom bar drives navigation and
          the More sheet carries Log out, so nothing is stranded. */
       .sidebar { display: none !important; }
       /* The level/XP header is now the top bar -- clear the status bar / notch. */
@@ -3222,7 +3224,6 @@
                             <button class="filter-btn" data-filter="want">To Be Read</button>
                             <button class="filter-btn" data-filter="dnf">DNF</button>
                             <button class="filter-btn" data-filter="buy">Want to Buy</button>
-                            <button class="filter-btn" data-filter="loaned">Loaned Out</button>
                         </div>
                         <div class="library-actions">
                             <select class="sort-dropdown" id="sortDropdown" onchange="applyLibraryFilters()">
@@ -3515,8 +3516,9 @@
                     </div>
                     <!-- Loan Stats -->
                     <div id="loanStats" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;"></div>
-                    <div class="loan-columns" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
-                        <div class="loan-column">
+                    <div class="loan-columns" style="display:grid;grid-template-columns:1fr;gap:20px;max-width:540px;">
+                        <!-- Books Loaned Out removed from view 2026-06-22 (kept hidden so loan code keeps its DOM hooks) -->
+                        <div class="loan-column" style="display:none;">
                             <h3 style="color:#3D5A80;margin-bottom:12px;">📤 Books Loaned Out</h3>
                             <button class="btn btn-primary" id="loanOutBtn" style="margin-bottom: 16px;">+ Loan Out a Book</button>
                             <div id="loansOut"></div>
@@ -4052,11 +4054,6 @@
                 <div style="margin-bottom: 24px;">
                     <h3 style="color: #3D5A80; font-weight: 600; margin-bottom: 12px; font-size: 16px;">Interactions</h3>
                     <div class="interaction-grid">
-                        <button class="interaction-btn" onclick="sendBookRecPrompt()">
-                            <span class="int-icon">📚</span>
-                            <span class="int-label">Send Rec</span>
-                            <span class="int-desc">+10 Friendship</span>
-                        </button>
                         <button class="interaction-btn" onclick="friendSuggestBookPrompt()">
                             <span class="int-icon">📬</span>
                             <span class="int-label">Suggest Book</span>
@@ -5468,7 +5465,7 @@ function renderLibraryBooksFiltered(books) {
                 <div style="position:relative;display:inline-block;">
                     <span class="book-status ${book.status === 'reading' ? 'book-status-reading' : ''}" style="background:${statusColors[book.status]+'22' || '#8B7E7422'};color:${statusColors[book.status] || '#8B7E74'};border-color:${statusColors[book.status] || '#8B7E74'};" onclick="event.stopPropagation();toggleQuickStatus(this,${book.id})">${statusEmoji[book.status]||''} ${statusLabels[book.status] || book.status}</span>
                     <div class="quick-status-menu" id="qsm-${book.id}">
-                        ${['reading','read','want','dnf','buy','loaned'].map(s => `<button class="quick-status-opt ${book.status===s?'current':''}" onclick="event.stopPropagation();quickChangeStatus(${book.id},'${s}')">${statusEmoji[s]||''} ${statusLabels[s]}</button>`).join('')}
+                        ${['reading','read','want','dnf','buy'].map(s => `<button class="quick-status-opt ${book.status===s?'current':''}" onclick="event.stopPropagation();quickChangeStatus(${book.id},'${s}')">${statusEmoji[s]||''} ${statusLabels[s]}</button>`).join('')}
                     </div>
                 </div>
                 <button class="btn btn-secondary" style="font-size:10px;padding:4px 10px;border-radius:16px;" onclick="event.stopPropagation();openBookModal(${book.id})">✏️ Edit</button>
@@ -5802,7 +5799,7 @@ function renderLibraryBooks(filter) {
                 <div style="position:relative;display:inline-block;">
                     <span class="book-status ${book.status === 'reading' ? 'book-status-reading' : ''}" style="background:${statusColors[book.status]+'22' || '#8B7E7422'};color:${statusColors[book.status] || '#8B7E74'};border-color:${statusColors[book.status] || '#8B7E74'};" onclick="event.stopPropagation();toggleQuickStatus(this,${book.id})">${statusEmoji[book.status]||''} ${statusLabels[book.status] || book.status}</span>
                     <div class="quick-status-menu" id="qsm2-${book.id}">
-                        ${['reading','read','want','dnf','buy','loaned'].map(s => `<button class="quick-status-opt ${book.status===s?'current':''}" onclick="event.stopPropagation();quickChangeStatus(${book.id},'${s}')">${statusEmoji[s]||''} ${statusLabels[s]}</button>`).join('')}
+                        ${['reading','read','want','dnf','buy'].map(s => `<button class="quick-status-opt ${book.status===s?'current':''}" onclick="event.stopPropagation();quickChangeStatus(${book.id},'${s}')">${statusEmoji[s]||''} ${statusLabels[s]}</button>`).join('')}
                     </div>
                 </div>
                 <button class="btn btn-secondary" style="font-size:10px;padding:4px 10px;border-radius:16px;" onclick="event.stopPropagation();openBookModal(${book.id})">✏️ Edit</button>
@@ -5900,7 +5897,7 @@ function openBookModal(bookId) {
         <div style="margin-top:10px;"><label style="font-size:12px;color:#8B7E74;font-weight:700;">SERIES</label><input type="text" id="editBookSeries" value="${(book.series||'').replace(/"/g,'&quot;')}" placeholder="e.g. Harry Potter #1" style="${iStyle}"></div>
         <div style="margin-top:10px;"><label style="font-size:12px;color:#8B7E74;font-weight:700;">DESCRIPTION</label><textarea id="editBookDescription" style="${iStyle}resize:vertical;min-height:50px;">${book.description||''}</textarea></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">
-            <div><label style="font-size:12px;color:#8B7E74;font-weight:700;">STATUS</label><select id="editBookStatus" style="${iStyle}"><option value="want" ${book.status==='want'?'selected':''}>To Be Read</option><option value="reading" ${book.status==='reading'?'selected':''}>Reading</option><option value="read" ${book.status==='read'?'selected':''}>Finished</option><option value="dnf" ${book.status==='dnf'?'selected':''}>DNF</option><option value="buy" ${book.status==='buy'?'selected':''}>Want to Buy</option><option value="loaned" ${book.status==='loaned'?'selected':''}>Loaned Out</option></select></div>
+            <div><label style="font-size:12px;color:#8B7E74;font-weight:700;">STATUS</label><select id="editBookStatus" style="${iStyle}"><option value="want" ${book.status==='want'?'selected':''}>To Be Read</option><option value="reading" ${book.status==='reading'?'selected':''}>Reading</option><option value="read" ${book.status==='read'?'selected':''}>Finished</option><option value="dnf" ${book.status==='dnf'?'selected':''}>DNF</option><option value="buy" ${book.status==='buy'?'selected':''}>Want to Buy</option></select></div>
             <div><label style="font-size:12px;color:#8B7E74;font-weight:700;">ADDED</label><div style="padding:10px;color:#8B7E74;">${book.dateAdded ? new Date(book.dateAdded).toLocaleDateString() : 'Unknown'}</div></div>
         </div>
         <div style="margin-top:10px;"><label style="font-size:12px;color:#8B7E74;font-weight:700;">I OWN / WANT THIS AS</label>
@@ -6169,9 +6166,13 @@ function setupSearch() {
 }
 
 function searchBooks(query) {
-    fetch(`https://www.loc.gov/books/?q=${encodeURIComponent(query)}&fo=json`)
+    // Open Library search — far better coverage of popular titles than the old
+    // Library of Congress feed, plus covers (cover_i), ISBNs, page counts, authors.
+    const url = 'https://openlibrary.org/search.json?q=' + encodeURIComponent(query) +
+        '&limit=20&fields=title,author_name,first_publish_year,cover_i,isbn,number_of_pages_median,subject,language,publisher';
+    fetch(url)
         .then(r => r.json())
-        .then(data => { lastSearchResults = data.results || []; renderSearchResults(lastSearchResults); })
+        .then(data => { lastSearchResults = (data.docs || []); renderSearchResults(lastSearchResults); })
         .catch(() => {
             document.getElementById('searchResults').innerHTML = '<div style="text-align:center;padding:40px;color:#C2705B;">Unable to connect. Please try again.</div>';
         });
@@ -6182,14 +6183,16 @@ function renderSearchResults(results) {
     if (results.length === 0) { div.innerHTML = '<div style="text-align:center;padding:40px;color:#8B7E74;">No results found. Try a different search.</div>'; return; }
 
     div.innerHTML = results.slice(0, 20).map((r, idx) => {
-        const contributors = Array.isArray(r.contributor) ? r.contributor : (r.contributor ? [r.contributor] : []);
-        const subjects = Array.isArray(r.subject) ? r.subject : [];
+        const authors = Array.isArray(r.author_name) ? r.author_name : [];
+        const subjects = Array.isArray(r.subject) ? r.subject.slice(0, 4) : [];
+        const cover = r.cover_i ? `https://covers.openlibrary.org/b/id/${r.cover_i}-M.jpg` : '';
+        const pages = r.number_of_pages_median ? ' · ' + r.number_of_pages_median + 'p' : '';
         return `
         <div class="search-result">
-            ${r.image_url && r.image_url[0] ? `<img src="${r.image_url[0]}" style="width:60px;height:80px;object-fit:cover;border-radius:6px;float:left;margin-right:12px;margin-bottom:8px;" onerror="this.style.display='none'">` : ''}
+            ${cover ? `<img src="${cover}" loading="lazy" style="width:60px;height:80px;object-fit:cover;border-radius:6px;float:left;margin-right:12px;margin-bottom:8px;" onerror="this.style.display='none'">` : ''}
             <div style="font-weight:700;color:#3D5A80;font-size:16px;margin-bottom:4px;">${r.title || 'Unknown'}</div>
-            <div style="color:#8B7E74;margin-bottom:6px;">${contributors.length > 0 ? 'by ' + contributors.slice(0,3).join(', ') : ''} ${r.date ? '· ' + r.date : ''}</div>
-            ${subjects.length > 0 ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">${subjects.slice(0,4).map(s => `<span class="subject-tag">${s}</span>`).join('')}</div>` : ''}
+            <div style="color:#8B7E74;margin-bottom:6px;">${authors.length > 0 ? 'by ' + authors.slice(0,3).join(', ') : ''} ${r.first_publish_year ? '· ' + r.first_publish_year : ''}${pages}</div>
+            ${subjects.length > 0 ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">${subjects.map(s => `<span class="subject-tag">${s}</span>`).join('')}</div>` : ''}
             <button class="btn btn-primary" style="font-size:13px;padding:6px 14px;" onclick="addFromSearch(${idx})">+ Add to Library</button>
         </div>`;
     }).join('');
@@ -6198,27 +6201,36 @@ function renderSearchResults(results) {
 function addFromSearch(idx) {
     const r = lastSearchResults[idx];
     if (!r) return;
-    const contributors = Array.isArray(r.contributor) ? r.contributor : (r.contributor ? [r.contributor] : []);
+    const authors = Array.isArray(r.author_name) ? r.author_name : [];
     const subjects = Array.isArray(r.subject) ? r.subject : [];
     const langs = Array.isArray(r.language) ? r.language : [];
+    const isbns = Array.isArray(r.isbn) ? r.isbn : [];
+    const publishers = Array.isArray(r.publisher) ? r.publisher : [];
+    // Use the first subject that looks like a real genre, else leave blank (OL subjects are noisy).
+    const genre = subjects.find(s => typeof s === 'string' && s.length <= 24 && /^[A-Za-z][A-Za-z \-']+$/.test(s)) || '';
 
     app.books.push({
         id: app.getNextId(),
         title: (r.title || 'Unknown').replace(/<[^>]*>/g, '').trim(),
-        author: contributors.length > 0 ? contributors[0].replace(/<[^>]*>/g, '').trim() : 'Unknown',
-        genre: subjects.length > 0 ? subjects[0] : '',
-        pages: 0, isbn: '', publisher: '',
-        publicationYear: r.date ? parseInt(r.date) || null : null,
+        author: authors.length > 0 ? authors[0].replace(/<[^>]*>/g, '').trim() : 'Unknown',
+        genre: genre,
+        pages: r.number_of_pages_median || 0,
+        isbn: isbns.length > 0 ? String(isbns[0]) : '',
+        publisher: publishers.length > 0 ? publishers[0] : '',
+        publicationYear: r.first_publish_year || null,
         language: langs.length > 0 ? langs[0] : 'English',
         format: '', series: '', description: '',
         status: 'want', rating: 0,
-        notes: 'Added from Library of Congress', dateAdded: new Date().toISOString()
+        coverId: r.cover_i || undefined,
+        notes: 'Added from Open Library', dateAdded: new Date().toISOString()
     });
     app.addXP(10);
     app.saveData();
     updateXPDisplay();
     showNotification('Added! +10 XP 📚', 1500);
-    addActivity('added', `Added "${document.getElementById('addTitle')?.value || 'a book'}"`);
+    addActivity('added', `Added "${(r.title || 'a book').replace(/<[^>]*>/g, '').trim()}"`);
+    if (typeof populateLibraryDropdowns === 'function') populateLibraryDropdowns();
+    if (typeof applyLibraryFilters === 'function') applyLibraryFilters();
 }
 
 function showWhereToBuy(title, author, isbn) {
@@ -7596,7 +7608,7 @@ function parseBookBuddyCSV(content) {
         if (v === 'not read' || v === 'to read' || v === 'to-read' || v === 'unread') return 'want';
         // Substring fallbacks
         if (v.includes('wish')) return 'buy';
-        if (v.includes('loan')) return 'loaned';
+        if (v.includes('loan')) return 'read';
         if (v.includes('abandon') || v.includes('did not finish') || v.includes('dnf') || v.includes('gave up')) return 'dnf';
         if (v.includes('not read') || v.includes('unread') || v.includes('to read') || v.includes('to-read') || v.includes('plan') || v.includes('want')) return 'want';
         if (v.includes('current') || v.includes('in progress') || v.includes('on hold') || v.includes('paused')) return 'reading';
@@ -8403,7 +8415,7 @@ function parseCSV(content) {
                 // and 'to-read', so check the specific statuses first.
                 if (v.includes('currently') || v === 'reading') book.status = 'reading';
                 else if (v.includes('did not finish') || v.includes('dnf')) book.status = 'dnf';
-                else if (v.includes('loan')) book.status = 'loaned';
+                else if (v.includes('loan')) book.status = 'read';
                 else if (v.includes('buy')) book.status = 'buy';
                 else if (v.includes('to-read') || v.includes('to read') || v.includes('to be read') || v === 'tbr' || v.includes('want')) book.status = 'want';
                 else if (v.includes('read') || v.includes('finished')) book.status = 'read';
@@ -11321,6 +11333,29 @@ function showTBRResult(idx) {
                 '<button class="tbr-action-btn secondary" onclick="doTBRSpin()">🎲 Spin Again</button>' +
             '</div>' +
         '</div>';
+    showTBRResultPopup(book);
+}
+
+// Big, easy-to-read pop-up announcing the spun book (the inline card stays below the wheel too).
+function showTBRResultPopup(book) {
+    if (!book) return;
+    var modal = document.getElementById('tbrResultModal');
+    if (!modal) { modal = document.createElement('div'); modal.id = 'tbrResultModal'; modal.className = 'modal'; document.body.appendChild(modal); }
+    var genre = (book.genre || '').trim();
+    var pages = book.pages ? book.pages + ' pages' : '';
+    var details = [genre, pages].filter(Boolean).join(' · ');
+    modal.innerHTML = '<div class="modal-content" style="max-width:440px;text-align:center;">' +
+        '<div style="font-size:40px;margin-bottom:6px;">🎲</div>' +
+        '<div style="font-size:12px;font-weight:700;letter-spacing:.08em;color:#8B7E74;text-transform:uppercase;margin-bottom:8px;">Your next read</div>' +
+        '<div style="font-family:Quicksand,sans-serif;font-size:30px;line-height:1.2;font-weight:700;color:#3D5A80;margin-bottom:8px;">' + String(book.title || 'Untitled').replace(/</g, '&lt;') + '</div>' +
+        '<div style="font-size:15px;color:#8B7E74;font-style:italic;margin-bottom:' + (details ? '10px' : '18px') + ';">by ' + String(book.author || 'Unknown').replace(/</g, '&lt;') + '</div>' +
+        (details ? '<div style="display:inline-block;font-size:12px;font-weight:700;padding:4px 12px;border-radius:99px;background:rgba(125,155,118,0.15);color:#7D9B76;margin-bottom:18px;">' + details + '</div>' : '') +
+        '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">' +
+            '<button class="btn btn-primary" onclick="closeModal(\'tbrResultModal\');tbrStartReading(' + book.id + ')">📖 Start Reading</button>' +
+            '<button class="btn btn-secondary" onclick="closeModal(\'tbrResultModal\');doTBRSpin()">🎲 Spin Again</button>' +
+            '<button class="btn btn-secondary" onclick="closeModal(\'tbrResultModal\')">Close</button>' +
+        '</div></div>';
+    modal.classList.add('active');
 }
 
 function tbrStartReading(bookId) {
