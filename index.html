@@ -3718,27 +3718,8 @@
                         </div>
                     </div>
 
-                    <!-- Your Friend Code -->
-                    <div style="background: rgba(210, 180, 140, 0.1); border: 2px dashed #D4A76A; border-radius: 12px; padding: 16px; margin-bottom: 24px;">
-                        <div style="font-weight: 600; color: #3D5A80; margin-bottom: 8px;">Your Friend Code</div>
-                        <div style="display: flex; gap: 8px; align-items: center;">
-                            <div id="userFriendCode" style="font-family: 'Courier New', monospace; font-weight: 700; font-size: 18px; color: #C2705B; flex: 1; padding: 12px; background: #FEF3E2; border-radius: 8px;">LOAD...</div>
-                            <button class="btn btn-secondary" onclick="copyFriendCode()" style="white-space: nowrap;">📋 Copy</button>
-                            <button class="btn btn-secondary" onclick="showMyQRCode()" style="white-space: nowrap;">📱 QR</button>
-                        </div>
-                    </div>
-
-                    <!-- Add Friend Button -->
-                    <button class="btn btn-primary" onclick="document.getElementById('addFriendModal').classList.add('active')" style="margin-bottom: 24px;">+ Add Friend</button>
-
-                    <!-- Friends Grid -->
+                    <!-- Friends grid — cloud-only; hosts a sign-in prompt when logged out -->
                     <div id="friendsGrid" class="friend-grid"></div>
-
-                    <!-- Pending Requests -->
-                    <div id="pendingRequestsSection" style="display: none;">
-                        <h3 style="color: #3D5A80; margin-bottom: 16px; margin-top: 32px;">Pending Requests</h3>
-                        <div id="pendingRequestsList"></div>
-                    </div>
                 </div>
 
                 <div id="spinnerSection" class="content-section" style="display:none !important;">
@@ -4133,6 +4114,51 @@
                     </div>
                 </div>
 
+                <div id="friendGiftForm" style="margin-bottom:24px;background:linear-gradient(135deg,rgba(194,112,91,0.08),rgba(212,167,106,0.08));border-radius:12px;padding:14px;border:2px dashed rgba(194,112,91,0.3);display:none;">
+                    <h3 style="color:#3D5A80;font-weight:600;margin-bottom:10px;font-size:14px;">🎁 Gift a Book</h3>
+                    <select id="giftFromLibrary" onchange="fillGiftFromLibrary()" style="width:100%;padding:8px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;margin-bottom:8px;">
+                        <option value="">📚 Pick from your library…</option>
+                    </select>
+                    <div style="font-size:11px;color:#8B7E74;margin-bottom:8px;">…or type a title:</div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+                        <input type="text" id="giftTitle" oninput="updateGiftBuyLinks()" placeholder="Book title" style="padding:8px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;">
+                        <input type="text" id="giftAuthor" oninput="updateGiftBuyLinks()" placeholder="Author" style="padding:8px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;">
+                    </div>
+                    <input type="text" id="giftNote" placeholder="Add a note (optional)" style="width:100%;padding:8px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;margin-bottom:8px;">
+                    <div id="giftShipTo" style="font-size:11px;color:#8B7E74;margin-bottom:8px;"></div>
+                    <div id="giftBuyLinks" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;"></div>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn btn-primary" style="flex:1;padding:8px 14px;font-size:13px;" onclick="submitGift()">🎁 Send Gift</button>
+                        <button class="btn btn-secondary" style="padding:8px 12px;font-size:13px;" onclick="closeGiftForm()">✕</button>
+                    </div>
+                </div>
+
+                <div id="friendCoopForm" style="margin-bottom:24px;background:linear-gradient(135deg,rgba(125,155,118,0.08),rgba(61,90,128,0.08));border-radius:12px;padding:14px;border:2px dashed rgba(125,155,118,0.3);display:none;">
+                    <h3 style="color:#3D5A80;font-weight:600;margin-bottom:10px;font-size:14px;">⚔️ Start a Co-op Challenge</h3>
+                    <input type="text" id="coopTitle" placeholder="Challenge name (optional)" style="width:100%;padding:8px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;margin-bottom:8px;">
+                    <div style="display:grid;grid-template-columns:1.2fr 1fr 1.3fr;gap:8px;margin-bottom:8px;">
+                        <select id="coopGoalType" onchange="updateCoopHint()" style="padding:8px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;">
+                            <option value="books">📚 Books</option>
+                            <option value="pages">📖 Pages</option>
+                            <option value="minutes">⏱️ Minutes</option>
+                        </select>
+                        <input type="number" id="coopTarget" min="1" value="3" oninput="updateCoopHint()" placeholder="Target" style="padding:8px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;">
+                        <select id="coopWindow" style="padding:8px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;">
+                            <option value="7">1 week</option>
+                            <option value="14">2 weeks</option>
+                            <option value="30" selected>1 month</option>
+                            <option value="0">No deadline</option>
+                        </select>
+                    </div>
+                    <div id="coopHint" style="font-size:11px;color:#8B7E74;margin-bottom:10px;"></div>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn btn-primary" style="flex:1;padding:8px 14px;font-size:13px;" onclick="submitCoop()">⚔️ Start Game</button>
+                        <button class="btn btn-secondary" style="padding:8px 12px;font-size:13px;" onclick="closeCoopForm()">✕</button>
+                    </div>
+                </div>
+
+                <div id="friendCoopActive" style="margin-bottom:24px;"></div>
+
                 <div style="margin-bottom: 24px;">
                     <h3 style="color: #3D5A80; font-weight: 600; margin-bottom: 12px; font-size: 14px;">History</h3>
                     <div id="friendActivityList" style="max-height: 300px; overflow-y: auto;"></div>
@@ -4192,7 +4218,19 @@
             async sendRequest(toUid) { const c = await this.load(); if (!c || !Cloud._uid) throw new Error('Not signed in'); const { error } = await c.from('friendships').insert({ user_a: Cloud._uid, user_b: toUid, status: 'pending' }); if (error) throw error; },
             async respond(rowId, status) { const c = await this.load(); if (!c) return; try { await c.from('friendships').update({ status: status }).eq('id', rowId); } catch (e) {} },
             async removeFriendship(rowId) { const c = await this.load(); if (!c) return; try { await c.from('friendships').delete().eq('id', rowId); } catch (e) {} },
-            async profilesByIds(ids) { const c = await this.load(); if (!c || !ids.length) return {}; try { const { data } = await c.from('profiles').select('id,display_name,friend_code').in('id', ids); const m = {}; (data || []).forEach(p => { m[p.id] = p; }); return m; } catch (e) { return {}; } }
+            async profilesByIds(ids) { const c = await this.load(); if (!c || !ids.length) return {}; try { const { data } = await c.from('profiles').select('id,display_name,friend_code').in('id', ids); const m = {}; (data || []).forEach(p => { m[p.id] = p; }); return m; } catch (e) { return {}; } },
+            // ---- Phase 2: shipping addresses ----
+            async myAddress() { const c = await this.load(); if (!c || !Cloud._uid) return null; try { const { data } = await c.from('addresses').select('*').eq('user_id', Cloud._uid).maybeSingle(); return data || null; } catch (e) { return null; } },
+            async saveAddress(addr) { const c = await this.load(); if (!c || !Cloud._uid) return; try { await c.from('addresses').upsert(Object.assign({ user_id: Cloud._uid, updated_at: new Date().toISOString() }, addr)); } catch (e) {} },
+            async friendAddress(uid) { const c = await this.load(); if (!c || !uid) return null; try { const { data } = await c.from('addresses').select('*').eq('user_id', uid).maybeSingle(); return data || null; } catch (e) { return null; } },
+            // ---- Phase 2: gifts ----
+            async sendGiftCloud(recipientUid, g) { const c = await this.load(); if (!c || !Cloud._uid) throw new Error('Not signed in'); const { error } = await c.from('gifts').insert(Object.assign({ sender: Cloud._uid, recipient: recipientUid, status: 'sent' }, g)); if (error) throw error; },
+            async myGifts() { const c = await this.load(); if (!c) return []; try { const { data } = await c.from('gifts').select('*').order('created_at', { ascending: false }); return data || []; } catch (e) { return []; } },
+            async updateGiftStatus(id, status) { const c = await this.load(); if (!c) return; try { await c.from('gifts').update({ status: status }).eq('id', id); } catch (e) {} },
+            // ---- Phase 2: co-op challenges ----
+            async myCoops() { const c = await this.load(); if (!c) return []; try { const { data } = await c.from('coop_challenges').select('*').order('created_at', { ascending: false }); return data || []; } catch (e) { return []; } },
+            async startCoop(partnerUid, ch) { const c = await this.load(); if (!c || !Cloud._uid) throw new Error('Not signed in'); const { data, error } = await c.from('coop_challenges').insert(Object.assign({ creator: Cloud._uid, partner: partnerUid, status: 'pending' }, ch)).select().maybeSingle(); if (error) throw error; return data; },
+            async updateCoop(id, fields) { const c = await this.load(); if (!c) return; try { await c.from('coop_challenges').update(fields).eq('id', id); } catch (e) {} }
         };
         let _cloudSaveTimer = null;
         function cloudPush() {
@@ -5567,6 +5605,7 @@ function renderLibraryBooksFiltered(books) {
                         ${['reading','read','want','dnf','buy'].map(s => `<button class="quick-status-opt ${book.status===s?'current':''}" onclick="event.stopPropagation();quickChangeStatus(${book.id},'${s}')">${statusEmoji[s]||''} ${statusLabels[s]}</button>`).join('')}
                     </div>
                 </div>
+                ${book.status !== 'reading' && book.status !== 'read' ? `<button class="btn btn-primary" style="font-size:10px;padding:4px 10px;border-radius:16px;" onclick="event.stopPropagation();quickChangeStatus(${book.id},'reading')">📖 Start Reading</button>` : ''}
                 <button class="btn btn-secondary" style="font-size:10px;padding:4px 10px;border-radius:16px;" onclick="event.stopPropagation();openBookModal(${book.id})">✏️ Edit</button>
             </div>
             ${book.shelfLocation ? `<div style="font-size:11px;color:#D4A76A;margin-top:4px;cursor:pointer;" onclick="event.stopPropagation();showShelfLocation(${book.shelfPhotoIdx})" title="Click to see shelf photo">📍 ${book.shelfLocation}</div>` : ''}
@@ -5901,6 +5940,7 @@ function renderLibraryBooks(filter) {
                         ${['reading','read','want','dnf','buy'].map(s => `<button class="quick-status-opt ${book.status===s?'current':''}" onclick="event.stopPropagation();quickChangeStatus(${book.id},'${s}')">${statusEmoji[s]||''} ${statusLabels[s]}</button>`).join('')}
                     </div>
                 </div>
+                ${book.status !== 'reading' && book.status !== 'read' ? `<button class="btn btn-primary" style="font-size:10px;padding:4px 10px;border-radius:16px;" onclick="event.stopPropagation();quickChangeStatus(${book.id},'reading')">📖 Start Reading</button>` : ''}
                 <button class="btn btn-secondary" style="font-size:10px;padding:4px 10px;border-radius:16px;" onclick="event.stopPropagation();openBookModal(${book.id})">✏️ Edit</button>
             </div>
             ${book.shelfLocation ? `<div style="font-size:11px;color:#D4A76A;margin-top:4px;cursor:pointer;" onclick="event.stopPropagation();showShelfLocation(${book.shelfPhotoIdx})" title="Click to see shelf photo">📍 ${book.shelfLocation}</div>` : ''}
@@ -5979,6 +6019,10 @@ function openBookModal(bookId) {
     const iStyle = 'padding:10px;border-radius:10px;border:2px solid #E8DFD5;background:#FFF8F0;color:#3D5A80;width:100%;font-family:Nunito,sans-serif;';
 
     document.getElementById('bookModalBody').innerHTML = `
+        <div style="font-size:12px;color:#8B7E74;font-weight:700;margin-bottom:6px;">STATUS — tap to change</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+            ${['want','reading','read'].map(s => `<button onclick="quickChangeStatus(${book.id},'${s}');openBookModal(${book.id})" style="flex:1;min-width:90px;padding:10px;border-radius:10px;border:2px solid ${book.status===s?statusColors[s]:'#E8DFD5'};background:${book.status===s?statusColors[s]+'22':'#FFF8F0'};color:${book.status===s?statusColors[s]:'#3D5A80'};font-family:Nunito,sans-serif;font-weight:700;font-size:13px;cursor:pointer;">${statusEmoji[s]} ${s==='want'?'To Be Read':statusLabels[s]}</button>`).join('')}
+        </div>
         ${book.description ? `<div id="descDiv_${book.id}" style="background:rgba(125,155,118,0.1);border-left:3px solid #7D9B76;padding:12px 16px;border-radius:0 10px 10px 0;margin-bottom:16px;font-size:14px;color:#8B7E74;font-style:italic;"><span id="descText_${book.id}">${book.description.length > 100 ? book.description.substring(0, 100) + '...' : book.description}</span>${book.description.length > 100 ? `<button onclick="toggleDescription(${book.id})" style="background:none;border:none;color:#7D9B76;cursor:pointer;font-weight:700;margin-left:8px;padding:0;text-decoration:underline;">show more</button>` : ''}</div>` : ''}
         ${(book.status==='reading'||book.status==='read'||book.status==='dnf') ? renderReadingBox(book) : ''}
         <div style="font-family:Quicksand,sans-serif;font-weight:700;color:#3D5A80;font-size:15px;margin-bottom:10px;">📚 Book Info</div>
@@ -10509,8 +10553,10 @@ async function renderCloudFriends() {
     let html = '';
     html += '<div style="background:#FFF8F0;border:1.5px solid #E8DFD5;border-radius:10px;padding:12px;margin-bottom:12px;">'
         + '<div style="font-size:11px;color:#8B7E74;font-weight:700;">YOUR FRIEND CODE</div>'
-        + '<div style="display:flex;gap:8px;align-items:center;margin-top:4px;"><div style="font-family:monospace;font-weight:700;font-size:16px;color:#C2705B;flex:1;">' + myCode + '</div>'
-        + '<button class="btn btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="copyCloudCode()">📋 Copy</button></div></div>';
+        + '<div style="display:flex;gap:8px;align-items:center;margin-top:4px;flex-wrap:wrap;"><div style="font-family:monospace;font-weight:700;font-size:16px;color:#C2705B;flex:1;min-width:120px;">' + myCode + '</div>'
+        + '<button class="btn btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="copyCloudCode()">📋 Copy</button>'
+        + '<button class="btn btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="toggleCloudQR()">📱 QR</button></div>'
+        + '<div id="cloudQRBox" style="display:none;text-align:center;margin-top:10px;"></div></div>';
     html += '<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;"><input id="cloudAddCodeInput" type="text" placeholder="Enter a friend\'s code (BB-…)" style="flex:1;min-width:160px;padding:9px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;"><button class="btn btn-primary" style="font-size:13px;" onclick="cloudAddFriend()">+ Add Friend</button></div>';
     if (incoming.length) {
         html += '<div style="font-size:12px;font-weight:700;color:#3D5A80;margin-bottom:6px;">📨 Friend Requests</div>';
@@ -10537,7 +10583,179 @@ async function renderCloudFriends() {
         html += '<div style="font-size:12px;font-weight:700;color:#3D5A80;margin:10px 0 6px;">⏳ Sent Requests</div>';
         outgoing.forEach(r => { html += '<div style="color:#8B7E74;font-size:13px;padding:4px 10px;">' + nameFor(r.user_b) + ' — waiting to accept…</div>'; });
     }
+    html += '<div id="cloudGiftInbox" style="margin-top:14px;"></div>';
+    html += '<div id="cloudExtras" style="margin-top:14px;"></div>';
     body.innerHTML = html;
+    try { renderCloudExtras(); } catch (e) {}
+    try { renderCloudGiftInbox(); } catch (e) {}
+    try { syncCloudCoops(); } catch (e) {}
+}
+
+// ---- QR for cloud friend code (lazy-loads a real QR encoder) ----
+var _qrLoading = null;
+function loadQRLib() {
+    if (window.qrcode) return Promise.resolve(window.qrcode);
+    if (_qrLoading) return _qrLoading;
+    _qrLoading = new Promise(function (resolve) {
+        var s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
+        s.onload = function () { resolve(window.qrcode || null); };
+        s.onerror = function () { resolve(null); };
+        document.head.appendChild(s);
+    });
+    return _qrLoading;
+}
+function toggleCloudQR() {
+    var box = document.getElementById('cloudQRBox');
+    if (!box) return;
+    if (box.style.display === 'none') { box.style.display = 'block'; renderCloudQR(); }
+    else { box.style.display = 'none'; }
+}
+function renderCloudQR() {
+    var box = document.getElementById('cloudQRBox');
+    if (!box) return;
+    var code = (typeof Cloud !== 'undefined' && Cloud.myCode) ? Cloud.myCode() : '';
+    box.innerHTML = '<div style="font-size:12px;color:#8B7E74;">Loading QR…</div>';
+    loadQRLib().then(function (qrcode) {
+        if (!qrcode) { box.innerHTML = '<div style="font-size:12px;color:#8B7E74;">QR needs a connection the first time.</div>'; return; }
+        try {
+            var qr = qrcode(0, 'M'); qr.addData(code || ''); qr.make();
+            box.innerHTML = '<div style="display:inline-block;background:#fff;padding:10px;border-radius:10px;">' + qr.createImgTag(4, 0) + '</div>'
+                + '<div style="font-size:11px;color:#8B7E74;margin-top:6px;">A friend scans this to get your code<br><strong>' + (code || '') + '</strong></div>';
+        } catch (e) { box.innerHTML = '<div style="font-size:12px;color:#8B7E74;">Couldn\'t draw QR.</div>'; }
+    });
+}
+
+// ---- Your shipping address (cloud) ----
+function renderCloudExtras() {
+    var el = document.getElementById('cloudExtras');
+    if (!el) return;
+    var inS = 'width:100%;padding:8px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;margin-bottom:8px;';
+    el.innerHTML = '<div style="background:#FFF8F0;border:1.5px solid #E8DFD5;border-radius:10px;padding:12px;">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="toggleCloudAddr()"><div style="font-size:11px;color:#8B7E74;font-weight:700;">📦 YOUR SHIPPING ADDRESS</div><span id="cloudAddrArrow" style="color:#8B7E74;">▼</span></div>'
+        + '<div id="cloudAddrBody" style="display:none;margin-top:10px;">'
+        + '<div style="font-size:11px;color:#8B7E74;margin-bottom:8px;">So friends can send you a book. Shared only with your accepted friends.</div>'
+        + '<input id="addrRecipient" placeholder="Recipient name" style="' + inS + '">'
+        + '<input id="addrLine1" placeholder="Street address" style="' + inS + '">'
+        + '<input id="addrLine2" placeholder="Apt / unit (optional)" style="' + inS + '">'
+        + '<div style="display:grid;grid-template-columns:1.4fr 0.8fr 0.8fr;gap:8px;"><input id="addrCity" placeholder="City" style="' + inS + '"><input id="addrRegion" placeholder="State" style="' + inS + '"><input id="addrPostal" placeholder="ZIP" style="' + inS + '"></div>'
+        + '<input id="addrCountry" placeholder="Country" style="' + inS + '">'
+        + '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#8B7E74;margin-bottom:10px;cursor:pointer;"><input type="checkbox" id="addrShare" checked> Share with my friends</label>'
+        + '<button class="btn btn-primary" style="font-size:13px;width:100%;" onclick="saveCloudAddress()">Save address</button>'
+        + '</div></div>';
+}
+function toggleCloudAddr() {
+    var body = document.getElementById('cloudAddrBody');
+    var arrow = document.getElementById('cloudAddrArrow');
+    if (!body) return;
+    if (body.style.display === 'none') { body.style.display = 'block'; if (arrow) arrow.textContent = '▲'; loadCloudAddressInto(); }
+    else { body.style.display = 'none'; if (arrow) arrow.textContent = '▼'; }
+}
+function loadCloudAddressInto() {
+    if (typeof Cloud === 'undefined' || !Cloud.myAddress) return;
+    Cloud.myAddress().then(function (a) {
+        if (!a) return;
+        var set = function (id, v) { var el = document.getElementById(id); if (el) el.value = v || ''; };
+        set('addrRecipient', a.recipient); set('addrLine1', a.line1); set('addrLine2', a.line2);
+        set('addrCity', a.city); set('addrRegion', a.region); set('addrPostal', a.postal_code); set('addrCountry', a.country);
+        var sh = document.getElementById('addrShare'); if (sh) sh.checked = a.share_with_friends !== false;
+    }).catch(function () {});
+}
+function saveCloudAddress() {
+    var val = function (id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; };
+    var addr = {
+        recipient: val('addrRecipient'), line1: val('addrLine1'), line2: val('addrLine2'),
+        city: val('addrCity'), region: val('addrRegion'), postal_code: val('addrPostal'), country: val('addrCountry'),
+        share_with_friends: (document.getElementById('addrShare') || {}).checked !== false
+    };
+    if (typeof Cloud !== 'undefined' && Cloud.saveAddress) {
+        Cloud.saveAddress(addr).then(function () { showNotification('Address saved 📦', 1500); }).catch(function () { showNotification('Could not save address', 1500); });
+    }
+    toggleCloudAddr();
+}
+
+// ---- Gift inbox (gifts received from cloud friends) ----
+async function renderCloudGiftInbox() {
+    var el = document.getElementById('cloudGiftInbox');
+    if (!el || typeof Cloud === 'undefined' || !Cloud.myGifts) return;
+    var uid = Cloud._uid;
+    var gifts = await Cloud.myGifts();
+    var received = (gifts || []).filter(function (g) { return g.recipient === uid; });
+    // mirror into the sender's shadow-friend gift log (dedupe by cloud gift id)
+    received.forEach(function (g) {
+        var fr = app.friends.find(function (f) { return f.cloudUid === g.sender; });
+        if (fr) {
+            if (!fr.giftLog) fr.giftLog = [];
+            if (!fr.giftLog.find(function (x) { return x.cloudId === g.id; })) {
+                fr.giftLog.push({ cloudId: g.id, dir: 'received', title: g.title, author: g.author, note: g.note, date: g.created_at });
+            }
+        }
+    });
+    app.saveData();
+    if (!received.length) { el.innerHTML = ''; return; }
+    el.innerHTML = '<div style="font-size:12px;font-weight:700;color:#3D5A80;margin-bottom:6px;">🎁 Gifts for you (' + received.length + ')</div>'
+        + received.map(function (g) {
+            var thanked = g.status === 'thanked';
+            return '<div style="background:#FFF8F0;border:1.5px solid #D4A76A;border-radius:10px;padding:10px;margin-bottom:8px;">'
+                + '<div style="color:#3D5A80;font-weight:600;font-size:13px;">🎁 "' + _esc(g.title) + '"' + (g.author ? ' <span style="font-weight:400;color:#8B7E74;">by ' + _esc(g.author) + '</span>' : '') + '</div>'
+                + (g.note ? '<div style="font-size:12px;color:#8B7E74;margin-top:3px;">“' + _esc(g.note) + '”</div>' : '')
+                + '<div style="margin-top:6px;">' + (thanked ? '<span style="font-size:11px;color:#7D9B76;font-weight:700;">💚 Thanked</span>'
+                    : '<button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="thankGift(\'' + g.id + '\')">💚 Say thanks</button>'
+                    + ' <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="addGiftToLibrary(' + "'" + _esc(g.title).replace(/'/g, "\\'") + "','" + _esc(g.author || '').replace(/'/g, "\\'") + "'" + ')">➕ Add to library</button>') + '</div>'
+                + '</div>';
+        }).join('');
+}
+function thankGift(id) {
+    if (typeof Cloud !== 'undefined' && Cloud.updateGiftStatus) Cloud.updateGiftStatus(id, 'thanked').then(function () { renderCloudGiftInbox(); }).catch(function () {});
+    showNotification('Thanks sent 💚', 1200);
+}
+function addGiftToLibrary(title, author) {
+    if (!title) return;
+    var book = { id: Date.now(), title: title, author: author || '', status: 'want', dateAdded: new Date().toISOString(), rating: 0 };
+    app.books.push(book);
+    app.saveData();
+    showNotification('Added "' + title + '" to your TBR 📚', 1500);
+    if (typeof renderBooks === 'function') { try { renderBooks(); } catch (e) {} }
+}
+
+// ---- Pull co-op challenges from cloud (partner progress + games friends started) ----
+async function syncCloudCoops() {
+    if (typeof Cloud === 'undefined' || !Cloud.myCoops) return;
+    var uid = Cloud._uid;
+    var rows = await Cloud.myCoops();
+    if (!rows || !rows.length) return;
+    var changed = false;
+    rows.forEach(function (row) {
+        if (row.status === 'declined') return;
+        var iAmCreator = row.creator === uid;
+        var otherUid = iAmCreator ? row.partner : row.creator;
+        var fr = app.friends.find(function (f) { return f.cloudUid === otherUid; });
+        if (!fr) return;
+        var local = (app.challenges || []).find(function (c) { return c.cloudId === row.id; });
+        var myProg = iAmCreator ? row.progress_creator : row.progress_partner;
+        var theirProg = iAmCreator ? row.progress_partner : row.progress_creator;
+        if (!local) {
+            local = {
+                id: Date.now() + Math.floor(Math.random() * 1000), name: row.title || 'Reading Buddy Challenge',
+                type: 'coop', goalType: row.goal_type, target: row.target, current: 0,
+                partnerName: fr.name, friendId: fr.id, myRole: iAmCreator ? 'creator' : 'partner',
+                myProgress: myProg || 0, theirProgress: theirProg || 0,
+                startDate: row.start_date, endDate: row.end_date, completed: row.status === 'done',
+                cloudId: row.id, status: row.status
+            };
+            if (!app.challenges) app.challenges = [];
+            app.challenges.push(local);
+            if (!fr.coopChallenges) fr.coopChallenges = [];
+            fr.coopChallenges.push(local.id);
+            changed = true;
+        } else {
+            if (local.theirProgress !== (theirProg || 0)) { local.theirProgress = theirProg || 0; changed = true; }
+            local.target = row.target; local.goalType = row.goal_type;
+            local.current = (local.myProgress || 0) + (local.theirProgress || 0);
+            if (row.status === 'done' && !local.completed) { local.completed = true; local.status = 'done'; }
+        }
+    });
+    if (changed) app.saveData();
 }
 
 function copyCloudCode() {
@@ -10582,51 +10800,33 @@ async function cloudRemoveFriend(rowId) {
 }
 
 function renderFriends() {
+    // Friends are cloud-only now (shelf friends removed 2026-06-23). Stats come from
+    // the cloud "shadow" friend records; the grid hosts a sign-in prompt when logged out.
     const grid = document.getElementById('friendsGrid');
     const totalEl = document.getElementById('totalFriendsCount');
     const highestEl = document.getElementById('highestLevelName');
     const giftsEl = document.getElementById('totalGiftsCount');
-    const userCodeEl = document.getElementById('userFriendCode');
 
-    if (!grid || !totalEl || !highestEl || !giftsEl) return;
-
-    if (userCodeEl) userCodeEl.textContent = app.friendCode;
-
-    totalEl.textContent = app.friends.length;
+    const cloudFriends = (app.friends || []).filter(f => f.cloudUid);
+    if (totalEl) totalEl.textContent = cloudFriends.length;
 
     let totalGifts = 0;
     let highestLevel = friendshipLevels[0];
-    for (const friend of app.friends) {
-        totalGifts += friend.giftsGiven + friend.giftsReceived;
+    for (const friend of cloudFriends) {
+        totalGifts += (friend.giftsGiven || 0) + ((friend.giftLog || []).filter(g => g.dir === 'received').length);
         const level = getFriendshipLevel(friend.friendshipXP);
-        if (level.level > highestLevel.level) {
-            highestLevel = level;
-        }
+        if (level.level > highestLevel.level) highestLevel = level;
     }
-    giftsEl.textContent = totalGifts;
-    highestEl.textContent = highestLevel.emoji + ' ' + highestLevel.name;
+    if (giftsEl) giftsEl.textContent = totalGifts;
+    if (highestEl) highestEl.textContent = cloudFriends.length ? (highestLevel.emoji + ' ' + highestLevel.name) : '—';
 
-    grid.innerHTML = '';
-    for (const friend of app.friends) {
-        if (friend.cloudUid) continue; // cloud friends are shown in the 🌐 Cloud Friends card
-        const level = getFriendshipLevel(friend.friendshipXP);
-        const nextLevel = friendshipLevels.find(l => l.level === level.level + 1) || friendshipLevels[friendshipLevels.length - 1];
-        const xpProgress = (friend.friendshipXP - level.xpNeeded) / (nextLevel.xpNeeded - level.xpNeeded);
-        const progressPercent = Math.min(100, Math.max(0, xpProgress * 100));
-
-        const card = document.createElement('div');
-        card.className = 'friend-card';
-        card.onclick = () => openFriendDetail(friend.id);
-        card.innerHTML = `
-            <div class="friend-avatar">${friend.avatar}</div>
-            <div class="friend-name">${friend.name}</div>
-            <div class="friend-level" style="color: ${level.color};">${level.emoji} ${level.name}</div>
-            <div class="friendship-bar">
-                <div class="friendship-fill" style="width: ${progressPercent}%; background: linear-gradient(90deg, ${level.color}, ${(friendshipLevels[level.level] || level).color});"></div>
-            </div>
-            <div class="friendship-xp">${friend.friendshipXP} XP</div>
-        `;
-        grid.appendChild(card);
+    if (grid) {
+        const loggedIn = (typeof Cloud !== 'undefined' && Cloud.enabled() && Cloud._uid);
+        grid.innerHTML = loggedIn ? '' :
+            '<div style="background:#FEF3E2;border:2px dashed #D4A76A;border-radius:12px;padding:20px;text-align:center;color:#8B7E74;">'
+            + '<div style="font-size:32px;margin-bottom:8px;">🐉</div>'
+            + '<div style="font-weight:700;color:#3D5A80;margin-bottom:4px;">Friends live in the cloud now</div>'
+            + '<div style="font-size:13px;">Log in to add friends, gift books, and play co-op reading games across devices.</div></div>';
     }
     try { renderCloudFriends(); } catch (e) {}
 }
@@ -10676,6 +10876,8 @@ function openFriendDetail(friendId) {
     document.getElementById('friendDetailProgressFill').style.width = progressPercent + '%';
     document.getElementById('friendDetailXPText').textContent = `${friend.friendshipXP} / ${nextLevel.xpNeeded} XP`;
 
+    ['friendGiftForm', 'friendCoopForm', 'friendSuggestForm'].forEach(function (id) { const f = document.getElementById(id); if (f) f.style.display = 'none'; });
+    renderFriendCoops(friend);
     renderFriendActivity(friend);
 
     document.getElementById('friendDetailModal').classList.add('active');
@@ -10819,55 +11021,239 @@ function sendBookRec(friendId, bookId) {
     showNotification(`Sent to ${friend.name}!`, 'success');
 }
 
+// ===================== Co-op Challenge (gamified, cross-device) =====================
+function _coopUnit(gt) { return gt === 'pages' ? 'pages' : (gt === 'minutes' ? 'minutes' : 'books'); }
+function _esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
 function startCoopChallengePrompt() {
     const friend = app.friends.find(f => f.id === currentFriendId);
     if (!friend) return;
-    startCoopChallenge(friend.id);
+    const form = document.getElementById('friendCoopForm');
+    if (!form) return;
+    const gf = document.getElementById('friendGiftForm'); if (gf) gf.style.display = 'none';
+    const sf = document.getElementById('friendSuggestForm'); if (sf) sf.style.display = 'none';
+    form.style.display = 'block';
+    document.getElementById('coopTitle').value = '';
+    document.getElementById('coopGoalType').value = 'books';
+    document.getElementById('coopTarget').value = '3';
+    document.getElementById('coopWindow').value = '30';
+    updateCoopHint();
 }
 
-function startCoopChallenge(friendId) {
-    const friend = app.friends.find(f => f.id === friendId);
+function updateCoopHint() {
+    const friend = app.friends.find(f => f.id === currentFriendId);
+    const gt = (document.getElementById('coopGoalType') || {}).value || 'books';
+    const tgt = parseInt((document.getElementById('coopTarget') || {}).value) || 0;
+    const el = document.getElementById('coopHint');
+    if (el) el.textContent = 'Team up to read ' + (tgt || '—') + ' ' + _coopUnit(gt) + ' together' + (friend ? ' with ' + friend.name : '') + ' — you both fill the same bar! 🏁';
+}
+
+function closeCoopForm() { const f = document.getElementById('friendCoopForm'); if (f) f.style.display = 'none'; }
+
+function submitCoop() {
+    const friend = app.friends.find(f => f.id === currentFriendId);
     if (!friend) return;
-
-    const challengeId = Date.now();
+    const goalType = (document.getElementById('coopGoalType') || {}).value || 'books';
+    const target = parseInt((document.getElementById('coopTarget') || {}).value) || 0;
+    if (target <= 0) { showNotification('Pick a target!', 1200); return; }
+    const days = parseInt((document.getElementById('coopWindow') || {}).value);
+    let title = ((document.getElementById('coopTitle') || {}).value || '').trim();
+    if (!title) title = 'Reading Buddy Challenge';
+    const end = days ? new Date(Date.now() + days * 86400000).toISOString() : null;
+    const localId = Date.now();
     const challenge = {
-        id: challengeId,
-        name: `Reading Buddy Challenge with ${friend.name}`,
-        type: 'coop',
-        goalType: 'pages',
-        target: 500,
-        current: 0,
-        participants: ['user', friend.id],
-        startDate: new Date().toISOString(),
-        completed: false
+        id: localId, name: title, type: 'coop', goalType: goalType, target: target, current: 0,
+        partnerName: friend.name, friendId: friend.id, myRole: 'creator',
+        myProgress: 0, theirProgress: 0,
+        startDate: new Date().toISOString(), endDate: end, completed: false,
+        cloudId: null, status: friend.cloudUid ? 'pending' : 'active'
     };
-
     app.challenges.push(challenge);
-    friend.coopChallenges.push(challengeId);
-    addFriendshipXP(friendId, 20, 'Start Co-op');
+    if (!friend.coopChallenges) friend.coopChallenges = [];
+    friend.coopChallenges.push(localId);
+    addFriendshipXP(friend.id, 20, 'Start Co-op');
+    const last = friend.interactions[friend.interactions.length - 1];
+    if (last) last.detail = '⚔️ ' + title + ' (' + target + ' ' + _coopUnit(goalType) + ')';
     app.saveData();
-    showNotification(`Co-op with ${friend.name}!`, 'success');
+    closeCoopForm();
+    if (friend.cloudUid && typeof Cloud !== 'undefined' && Cloud.startCoop) {
+        Cloud.startCoop(friend.cloudUid, { title: title, goal_type: goalType, target: target, status: 'active', end_date: end })
+            .then(function (row) { if (row && row.id) { challenge.cloudId = row.id; challenge.status = 'active'; app.saveData(); } })
+            .catch(function () {});
+    }
+    showNotification('Co-op started with ' + friend.name + '! ⚔️', 1800);
+    openFriendDetail(friend.id);
 }
 
+function renderFriendCoops(friend) {
+    const el = document.getElementById('friendCoopActive');
+    if (!el) return;
+    const list = (app.challenges || []).filter(function (c) { return c.type === 'coop' && c.friendId === friend.id && c.status !== 'declined'; });
+    if (!list.length) { el.innerHTML = ''; return; }
+    el.innerHTML = '<h3 style="color:#3D5A80;font-weight:600;margin-bottom:12px;font-size:14px;">⚔️ Co-op Games</h3>' + list.map(function (c) {
+        const mine = c.myProgress || 0, theirs = c.theirProgress || 0;
+        const total = Math.min(c.target, mine + theirs);
+        const pct = c.target ? Math.min(100, Math.round((mine + theirs) / c.target * 100)) : 0;
+        const minePct = (mine + theirs) ? Math.round(mine / (mine + theirs) * 100) : 50;
+        const unit = _coopUnit(c.goalType);
+        const done = (mine + theirs) >= c.target;
+        let deadline = '';
+        if (c.endDate) {
+            const dleft = Math.ceil((new Date(c.endDate) - new Date()) / 86400000);
+            deadline = dleft > 0 ? (dleft + ' day' + (dleft === 1 ? '' : 's') + ' left') : 'deadline passed';
+        }
+        const step = c.goalType === 'books' ? 1 : (c.goalType === 'pages' ? 10 : 15);
+        return '<div style="background:#FFF8F0;border:2px solid ' + (done ? '#7D9B76' : '#E8DFD5') + ';border-radius:12px;padding:14px;margin-bottom:10px;">'
+            + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><strong style="color:#3D5A80;font-size:14px;">' + (done ? '🏆 ' : '') + _esc(c.name) + '</strong>'
+            + '<span style="font-size:11px;color:#8B7E74;">' + _esc(deadline) + '</span></div>'
+            + '<div style="font-size:12px;color:#7D9B76;margin-bottom:8px;">' + (mine + theirs) + ' / ' + c.target + ' ' + unit + ' • ' + pct + '%</div>'
+            + '<div style="height:18px;background:#E8DFD5;border-radius:9px;overflow:hidden;display:flex;margin-bottom:8px;">'
+            + '<div style="width:' + (pct * minePct / 100) + '%;background:linear-gradient(90deg,#D4A76A,#C2705B);"></div>'
+            + '<div style="width:' + (pct * (100 - minePct) / 100) + '%;background:linear-gradient(90deg,#7D9B76,#5E7C57);"></div>'
+            + '</div>'
+            + '<div style="display:flex;justify-content:space-between;font-size:11px;color:#8B7E74;margin-bottom:10px;"><span>🟠 You: ' + mine + '</span><span>🟢 ' + _esc(friend.name) + ': ' + theirs + '</span></div>'
+            + (done
+                ? '<div style="text-align:center;color:#7D9B76;font-weight:700;font-size:13px;">🎉 Challenge complete! Great teamwork.</div>'
+                : '<div style="display:flex;gap:8px;align-items:center;"><span style="font-size:11px;color:#8B7E74;">Log your reading:</span>'
+                + '<button class="btn btn-secondary" style="font-size:12px;padding:5px 12px;" onclick="logCoopProgress(' + c.id + ',' + step + ')">+' + step + ' ' + unit + '</button>'
+                + '<button class="btn btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="dropCoop(' + c.id + ')" title="Leave challenge">✕</button></div>')
+            + '</div>';
+    }).join('');
+}
+
+function logCoopProgress(localId, amount) {
+    const c = (app.challenges || []).find(function (x) { return x.id === localId; });
+    if (!c) return;
+    c.myProgress = (c.myProgress || 0) + amount;
+    if (c.myProgress < 0) c.myProgress = 0;
+    c.current = (c.myProgress || 0) + (c.theirProgress || 0);
+    const justDone = !c.completed && c.current >= c.target;
+    if (justDone) { c.completed = true; c.status = 'done'; }
+    app.saveData();
+    if (c.cloudId && typeof Cloud !== 'undefined' && Cloud.updateCoop) {
+        const fields = {};
+        if (c.myRole === 'partner') fields.progress_partner = c.myProgress; else fields.progress_creator = c.myProgress;
+        if (c.completed) fields.status = 'done';
+        Cloud.updateCoop(c.cloudId, fields).catch(function () {});
+    }
+    if (justDone) {
+        if (typeof triggerConfetti === 'function') { try { triggerConfetti(); } catch (e) {} }
+        showNotification('🏆 Co-op complete! ' + c.target + ' ' + _coopUnit(c.goalType) + ' together!', 2500);
+        app.addXP(40);
+    } else {
+        showNotification('+' + amount + ' ' + _coopUnit(c.goalType) + ' logged! 🏁', 1200);
+    }
+    const friend = app.friends.find(function (f) { return f.id === c.friendId; });
+    if (friend) renderFriendCoops(friend);
+}
+
+function dropCoop(localId) {
+    const c = (app.challenges || []).find(function (x) { return x.id === localId; });
+    if (!c) return;
+    if (!confirm('Leave "' + (c.name || 'this challenge') + '"?')) return;
+    app.challenges = app.challenges.filter(function (x) { return x.id !== localId; });
+    const friend = app.friends.find(function (f) { return f.id === c.friendId; });
+    if (friend && friend.coopChallenges) friend.coopChallenges = friend.coopChallenges.filter(function (id) { return id !== localId; });
+    if (c.cloudId && typeof Cloud !== 'undefined' && Cloud.updateCoop) Cloud.updateCoop(c.cloudId, { status: 'declined' }).catch(function () {});
+    app.saveData();
+    if (friend) renderFriendCoops(friend);
+}
+
+// ===================== Gift a Book (book + note + buy-links + address + cross-device) =====================
 function sendGiftPrompt() {
     const friend = app.friends.find(f => f.id === currentFriendId);
     if (!friend) return;
-    if (app.books.length === 0) {
-        showNotification('Add books first!', 'error');
-        return;
+    const form = document.getElementById('friendGiftForm');
+    if (!form) return;
+    const cf = document.getElementById('friendCoopForm'); if (cf) cf.style.display = 'none';
+    const sf = document.getElementById('friendSuggestForm'); if (sf) sf.style.display = 'none';
+    form.style.display = 'block';
+    document.getElementById('giftTitle').value = '';
+    document.getElementById('giftAuthor').value = '';
+    document.getElementById('giftNote').value = '';
+    window._giftCover = '';
+    const sel = document.getElementById('giftFromLibrary');
+    if (sel) {
+        const books = app.books.slice().sort(function (a, b) { return (a.title || '').localeCompare(b.title || ''); });
+        sel.innerHTML = '<option value="">📚 Pick from your library…</option>' + books.map(function (b) {
+            return '<option value="' + b.id + '">' + _esc(b.title || 'Untitled') + (b.author ? ' — ' + _esc(b.author) : '') + '</option>';
+        }).join('');
+        sel.value = '';
     }
-    const book = app.books[Math.floor(Math.random() * app.books.length)];
-    sendGift(friend.id, book.id);
+    updateGiftBuyLinks();
+    const shipEl = document.getElementById('giftShipTo');
+    if (shipEl) {
+        shipEl.textContent = '';
+        window._giftAddrText = '';
+        if (friend.cloudUid && typeof Cloud !== 'undefined' && Cloud.friendAddress) {
+            Cloud.friendAddress(friend.cloudUid).then(function (addr) {
+                if (addr && (addr.line1 || addr.city)) {
+                    const parts = [addr.recipient || friend.name, addr.line1, addr.line2, [addr.city, addr.region, addr.postal_code].filter(Boolean).join(' '), addr.country].filter(Boolean);
+                    window._giftAddrText = parts.join('\n');
+                    shipEl.innerHTML = '📦 Ship to: ' + _esc(parts.join(', ')) + ' <button class="btn btn-secondary" style="font-size:10px;padding:2px 8px;margin-left:4px;" onclick="copyGiftAddress()">📋 Copy</button>';
+                } else {
+                    shipEl.textContent = '📦 ' + friend.name + " hasn't shared a shipping address yet.";
+                }
+            }).catch(function () {});
+        }
+    }
 }
 
-function sendGift(friendId, bookId) {
-    const friend = app.friends.find(f => f.id === friendId);
-    const book = app.books.find(b => b.id === bookId);
-    if (!friend || !book) return;
+function fillGiftFromLibrary() {
+    const sel = document.getElementById('giftFromLibrary');
+    if (!sel || !sel.value) return;
+    const b = app.books.find(function (x) { return x.id === parseInt(sel.value); });
+    if (!b) return;
+    document.getElementById('giftTitle').value = b.title || '';
+    document.getElementById('giftAuthor').value = b.author || '';
+    window._giftCover = b.cover || '';
+    updateGiftBuyLinks();
+}
 
-    friend.giftsGiven++;
-    addFriendshipXP(friendId, 15, 'Send Gift');
-    showNotification(`Gifted to ${friend.name}!`, 'success');
+function updateGiftBuyLinks() {
+    const t = ((document.getElementById('giftTitle') || {}).value || '').trim();
+    const a = ((document.getElementById('giftAuthor') || {}).value || '').trim();
+    const el = document.getElementById('giftBuyLinks');
+    if (!el) return;
+    if (!t) { el.innerHTML = ''; return; }
+    const q = encodeURIComponent((t + ' ' + a).trim());
+    const bookshop = 'https://bookshop.org/search?keywords=' + q;
+    const amazon = 'https://www.amazon.com/s?k=' + q + '&i=stripbooks';
+    el.innerHTML = '<span style="font-size:11px;color:#8B7E74;align-self:center;">Buy to send:</span>'
+        + '<a href="' + bookshop + '" target="_blank" rel="noopener" class="btn btn-secondary" style="font-size:12px;padding:5px 10px;text-decoration:none;">🛍️ Bookshop.org</a>'
+        + '<a href="' + amazon + '" target="_blank" rel="noopener" class="btn btn-secondary" style="font-size:12px;padding:5px 10px;text-decoration:none;">📦 Amazon</a>';
+}
+
+function copyGiftAddress() {
+    const txt = window._giftAddrText || '';
+    if (txt && navigator.clipboard) { navigator.clipboard.writeText(txt).then(function () { showNotification('Address copied 📋', 1200); }).catch(function () {}); }
+}
+
+function closeGiftForm() { const f = document.getElementById('friendGiftForm'); if (f) f.style.display = 'none'; }
+
+function submitGift() {
+    const friend = app.friends.find(f => f.id === currentFriendId);
+    if (!friend) return;
+    const title = ((document.getElementById('giftTitle') || {}).value || '').trim();
+    const author = ((document.getElementById('giftAuthor') || {}).value || '').trim();
+    const note = ((document.getElementById('giftNote') || {}).value || '').trim();
+    if (!title) { showNotification('Pick or type a book!', 1200); return; }
+    const cover = window._giftCover || '';
+    friend.giftsGiven = (friend.giftsGiven || 0) + 1;
+    if (!friend.giftLog) friend.giftLog = [];
+    friend.giftLog.push({ dir: 'given', title: title, author: author, note: note, date: new Date().toISOString() });
+    addFriendshipXP(friend.id, 15, 'Send Gift');
+    const last = friend.interactions[friend.interactions.length - 1];
+    if (last) last.detail = '🎁 "' + title + '"' + (note ? ' — ' + note : '');
+    app.saveData();
+    closeGiftForm();
+    if (friend.cloudUid && typeof Cloud !== 'undefined' && Cloud.sendGiftCloud) {
+        Cloud.sendGiftCloud(friend.cloudUid, { title: title, author: author, cover: cover, note: note }).catch(function () {});
+    }
+    window._giftCover = '';
+    showNotification('🎁 Gifted "' + title + '" to ' + friend.name + '!', 2000);
+    addActivity('shared', 'Gifted "' + title + '" to ' + friend.name);
+    openFriendDetail(friend.id);
 }
 
 function reactToFriendPrompt() {
