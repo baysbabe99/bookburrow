@@ -9903,6 +9903,24 @@ const recDB = [
     // Graphic Novel
     { title:"Heartstopper: Volume 1", author:"Alice Oseman", pages:288, genre:"Graphic Novel", tropes:["Friends to Lovers","Slow Burn","Coming of Age"], mood:"cozy", content:[], why:"Sweet YA love story with gorgeous art" },
     { title:"Saga: Volume 1", author:"Brian K. Vaughan", pages:160, genre:"Graphic Novel", tropes:["Space Opera","Found Family","Forbidden Love"], mood:"adventurous", content:["Graphic Violence","Sexual Content/Spice"], why:"Epic space opera with heart" },
+
+    // More picks (added 2026-06-22)
+    { title:"The Fifth Season", author:"N.K. Jemisin", pages:512, genre:"Fantasy", tropes:["Chosen One","Dual Timeline","Morally Grey Characters"], mood:"dark", content:["Graphic Violence","Abuse/Trauma"], why:"Apocalyptic, Hugo-winning epic fantasy" },
+    { title:"The Lies of Locke Lamora", author:"Scott Lynch", pages:752, genre:"Fantasy", tropes:["Heist","Found Family","Morally Grey Characters"], mood:"adventurous", content:["Graphic Violence"], why:"Gentleman thieves and dazzling schemes" },
+    { title:"A Deadly Education", author:"Naomi Novik", pages:336, genre:"Fantasy", tropes:["Dark Academia","Enemies to Lovers","Morally Grey Characters"], mood:"adventurous", content:["Graphic Violence"], why:"A killer magic school with attitude" },
+    { title:"Fourth Wing", author:"Rebecca Yarros", pages:528, genre:"Fantasy", tropes:["Enemies to Lovers","Chosen One","Slow Burn"], mood:"adventurous", content:["Graphic Violence","Sexual Content/Spice"], why:"Dragon-riding war college; BookTok obsession" },
+    { title:"A Court of Thorns and Roses", author:"Sarah J. Maas", pages:419, genre:"Fantasy", tropes:["Enemies to Lovers","Forbidden Love","Slow Burn"], mood:"adventurous", content:["Sexual Content/Spice","Graphic Violence"], why:"Beauty-and-the-Beast faerie romantasy" },
+    { title:"Project Hail Mary", author:"Andy Weir", pages:496, genre:"Science Fiction", tropes:["Found Family"], mood:"adventurous", content:[], why:"A lone astronaut, a clever alien, a galaxy to save" },
+    { title:"The Long Way to a Small, Angry Planet", author:"Becky Chambers", pages:518, genre:"Science Fiction", tropes:["Found Family","Space Opera"], mood:"cozy", content:[], why:"Warm, character-driven space opera" },
+    { title:"Children of Time", author:"Adrian Tchaikovsky", pages:600, genre:"Science Fiction", tropes:["Dual Timeline"], mood:"thought-provoking", content:["Graphic Violence"], why:"Evolution, uplifted spiders, and survival" },
+    { title:"Klara and the Sun", author:"Kazuo Ishiguro", pages:320, genre:"Science Fiction", tropes:[], mood:"thought-provoking", content:[], why:"An artificial friend observes love and humanity" },
+    { title:"Beach Read", author:"Emily Henry", pages:384, genre:"Romance", tropes:["Enemies to Lovers","Slow Burn","Forbidden Love"], mood:"emotional", content:["Sexual Content/Spice"], why:"Rival writers swap genres one summer" },
+    { title:"Red, White & Royal Blue", author:"Casey McQuiston", pages:421, genre:"Romance", tropes:["Enemies to Lovers","Forbidden Love","Slow Burn"], mood:"funny", content:["Sexual Content/Spice"], why:"First Son falls for a prince" },
+    { title:"The Spanish Love Deception", author:"Elena Armas", pages:484, genre:"Romance", tropes:["Enemies to Lovers","Slow Burn","Forbidden Love"], mood:"emotional", content:["Sexual Content/Spice"], why:"Fake-dating with maximum tension" },
+    { title:"The Silent Patient", author:"Alex Michaelides", pages:336, genre:"Thriller", tropes:["Unreliable Narrator","Locked Room"], mood:"dark", content:["Graphic Violence","Abuse/Trauma"], why:"A shocking psychological twist" },
+    { title:"Gone Girl", author:"Gillian Flynn", pages:432, genre:"Thriller", tropes:["Unreliable Narrator","Dual Timeline","Morally Grey Characters"], mood:"dark", content:["Graphic Violence"], why:"The marriage thriller that started it all" },
+    { title:"The Thursday Murder Club", author:"Richard Osman", pages:368, genre:"Thriller", tropes:["Found Family","Locked Room"], mood:"funny", content:[], why:"Retirees crack cold cases with charm" },
+    { title:"Tomorrow, and Tomorrow, and Tomorrow", author:"Gabrielle Zevin", pages:416, genre:"Literary Fiction", tropes:["Friends to Lovers","Found Family","Coming of Age"], mood:"emotional", content:[], why:"Friendship, love, and video games across decades" },
 ];
 
 // 👍/👎 feedback on a recommendation — records like/dislike (used to weight future recs);
@@ -9912,6 +9930,19 @@ function rateRec(title, val) {
     if (!app.profile.recFeedback) app.profile.recFeedback = {};
     var t = String(title).toLowerCase();
     app.profile.recFeedback[t] = val;
+    // Two-way sync: reflect the like/dislike into the Profile's likes & dislikes
+    var _src = (typeof recDB !== 'undefined') ? recDB.find(function(r){ return r.title.toLowerCase() === t; }) : null;
+    if (_src) {
+        if (val === 'like') {
+            app.profile.favoriteGenres = app.profile.favoriteGenres || [];
+            if (_src.genre && app.profile.favoriteGenres.indexOf(_src.genre) < 0) app.profile.favoriteGenres.push(_src.genre);
+            app.profile.favoriteAuthors = app.profile.favoriteAuthors || [];
+            if (_src.author && !app.profile.favoriteAuthors.some(function(a){ return String(a).toLowerCase() === _src.author.toLowerCase(); })) app.profile.favoriteAuthors.push(_src.author);
+        } else if (val === 'dislike') {
+            app.profile.dislikedGenres = app.profile.dislikedGenres || [];
+            if (_src.genre && app.profile.dislikedGenres.indexOf(_src.genre) < 0) app.profile.dislikedGenres.push(_src.genre);
+        }
+    }
     if (val === 'dislike') {
         if (!app.profile.recDismissed) app.profile.recDismissed = [];
         if (app.profile.recDismissed.indexOf(t) < 0) app.profile.recDismissed.push(t);
@@ -9992,6 +10023,7 @@ function renderRecommendations() {
         if (fb[t] === 'like') { likedG.add(src.genre); likedA.add(src.author.toLowerCase()); }
         else if (fb[t] === 'dislike') { dislikedG.add(src.genre); dislikedA.add(src.author.toLowerCase()); }
     });
+    (profile.dislikedGenres || []).forEach(g => dislikedG.add(g));
 
     // Apply content-to-avoid filter
     if (hideAvoided && avoidContent.length > 0) {
@@ -10078,14 +10110,24 @@ function renderRecommendations() {
     </div>`;
 
     // Render main recs
+    const disG = (profile.dislikedGenres || []);
+    const likeBits = [ (profile.favoriteGenres || []).slice(0, 4).join(', '), (profile.favoriteAuthors || []).slice(0, 3).join(', ') ].filter(Boolean).join(' · ');
+    const avoidBits = [ disG.join(', '), (avoidContent || []).join(', ') ].filter(Boolean).join(' · ');
+    const whyPanelHtml = '<div style="background:#FEF3E2;border-radius:12px;padding:14px;margin-bottom:16px;border:2px solid rgba(125,155,118,0.3);">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;"><h3 style="color:#3D5A80;font-size:14px;margin:0;">💡 Why these picks</h3>'
+        + '<button class="btn btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="navigateTo(\'profile\')">Edit likes/dislikes</button></div>'
+        + '<div style="font-size:12px;color:#8B7E74;margin-top:6px;">' + (likeBits ? '👍 Based on: ' + likeBits : 'Tip: set favorite genres &amp; authors in your Profile to personalize these — your 👍/👎 below also feed back into them.') + (avoidBits ? '<br>👎 Avoiding: ' + avoidBits : '') + '</div>'
+        + '<div style="margin-top:10px;"><button class="btn btn-primary" style="font-size:13px;" onclick="findMoreRecs()">🔎 Find more for me</button></div>'
+        + '<div id="moreRecsResults" style="margin-top:10px;"></div></div>';
+
     if (recs.length === 0 && friendRecs.length === 0) {
-        container.innerHTML = friendInputHtml + '<div style="text-align:center;padding:40px;color:#8B7E74;">No matches — adjust filters. 📚</div>';
+        container.innerHTML = whyPanelHtml + friendInputHtml + '<div style="text-align:center;padding:40px;color:#8B7E74;">No matches — adjust filters. 📚</div>';
         return;
     }
 
     const moodEmoji = { cozy:'🧸', dark:'🌑', funny:'😂', emotional:'💧', adventurous:'⚔️', 'thought-provoking':'🧠' };
 
-    container.innerHTML = friendInputHtml + friendHtml + `
+    container.innerHTML = whyPanelHtml + friendInputHtml + friendHtml + `
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;">
             ${recs.slice(0, 30).map(rec => `
                 <div style="background:#FEF3E2;border-radius:12px;padding:16px;border:2px solid ${rec._score >= 5 ? 'rgba(125,155,118,0.5)' : '#E8DFD5'};transition:all 0.2s;position:relative;" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 20px rgba(0,0,0,0.08)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
@@ -10114,6 +10156,39 @@ function renderRecommendations() {
                 </div>
             `).join('')}
         </div>`;
+}
+
+// 🔎 "Find more for me" — pull extra recs from Open Library by your favorite genres/authors.
+async function findMoreRecs() {
+    const out = document.getElementById('moreRecsResults');
+    if (!out) return;
+    const profile = app.profile || {};
+    const favG = profile.favoriteGenres || [];
+    const favA = profile.favoriteAuthors || [];
+    let q;
+    if (favG.length) q = 'subject:' + favG[Math.floor(Math.random() * favG.length)];
+    else if (favA.length) q = 'author:' + favA[0];
+    else q = 'subject:fiction';
+    out.innerHTML = '<div style="color:#8B7E74;padding:10px;">🔎 Finding more for you…</div>';
+    try {
+        const r = await fetch('https://openlibrary.org/search.json?q=' + encodeURIComponent(q) + '&limit=14&fields=title,author_name,number_of_pages_median,cover_i');
+        const data = await r.json();
+        const have = new Set(app.books.map(b => b.title.toLowerCase()));
+        const inDB = new Set(recDB.map(x => x.title.toLowerCase()));
+        const docs = (data.docs || []).filter(d => d.title && !have.has(d.title.toLowerCase()) && !inDB.has(d.title.toLowerCase())).slice(0, 8);
+        if (!docs.length) { out.innerHTML = '<div style="color:#8B7E74;padding:10px;">No new finds right now — try again.</div>'; return; }
+        out.innerHTML = '<div style="font-size:12px;font-weight:700;color:#3D5A80;margin:6px 0;">🌐 More for you (Open Library)</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;">' + docs.map(function(d){
+            var au = (d.author_name && d.author_name[0]) || 'Unknown';
+            var pg = d.number_of_pages_median || 0;
+            var te = String(d.title).replace(/'/g, "\\'");
+            var ae = String(au).replace(/'/g, "\\'");
+            return '<div style="background:#FFF8F0;border-radius:10px;padding:12px;border:1.5px solid #E8DFD5;">'
+                + '<div style="font-weight:700;color:#3D5A80;font-size:13px;">' + String(d.title).replace(/</g, '&lt;') + '</div>'
+                + '<div style="color:#8B7E74;font-size:12px;margin-bottom:8px;">by ' + String(au).replace(/</g, '&lt;') + (pg ? ' · ' + pg + 'p' : '') + '</div>'
+                + '<div style="display:flex;gap:5px;"><button class="btn btn-primary" style="flex:1;font-size:11px;padding:5px 6px;" onclick="addRecommendation(\'' + te + '\',\'' + ae + '\',\'\',' + pg + ',\'want\')">📖 TBR</button>'
+                + '<button class="btn btn-secondary" style="flex:1;font-size:11px;padding:5px 6px;" onclick="ownRec(\'' + te + '\',\'' + ae + '\',\'\',' + pg + ')">📦 Own</button></div></div>';
+        }).join('') + '</div>';
+    } catch (e) { out.innerHTML = '<div style="color:#C2705B;padding:10px;">Could not reach Open Library — try again.</div>'; }
 }
 
 // "📦 Own it" on a rec — add the book to the library marked as owned (Physical).
