@@ -3632,7 +3632,7 @@
                         <div id="challengeLibrary" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;"></div>
                         <div style="margin-top:22px;border-top:2px dashed #E8DFD5;padding-top:16px;">
                             <h4 style="color:#3D5A80;margin:0 0 4px;">🍂 Mini &amp; Seasonal Challenges</h4>
-                            <p style="color:#8B7E74;font-size:12px;margin-bottom:12px;">Short, low-pressure spin-offs of the 52-week idea — finish one in a season.</p>
+                            <p style="color:#8B7E74;font-size:12px;margin-bottom:12px;">Bite-sized seasonal &amp; monthly runs that break a bigger challenge down — e.g. a Summer or monthly mini within 52 Books in 52 Weeks.</p>
                             <div id="miniChallengeList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;"></div>
                         </div>
                     </div>
@@ -6572,12 +6572,12 @@ function getChallengeLibrary() {
         { id: 'cl_5star', cat: 'extreme', name: 'Five Star Finder', emoji: '⭐', goalType: 'books', target: 10, desc: 'Find and rate 10 books as 5 stars.', reward: 200, badge: '⭐' },
 
         // 🍂 MINI & SEASONAL — short spin-offs of the 52-week idea (each ships with real prompts)
-        { id: 'cl_mini_spring', cat: 'mini', name: 'Spring Mini-Readathon', emoji: '🌷', goalType: 'books', target: 5, desc: 'A 5-prompt seasonal mini for spring.', reward: 120, badge: '🌷', prompts: ["A book with a green or floral cover","A story about a fresh start or new beginning","A book set in spring or featuring a garden","A debut author","A book that's been waiting on your TBR"] },
-        { id: 'cl_mini_summer', cat: 'mini', name: 'Summer Mini-Readathon', emoji: '🌊', goalType: 'books', target: 5, desc: 'A 5-prompt seasonal mini for summer.', reward: 120, badge: '🌊', prompts: ["A beach or vacation read","A book set somewhere hot or by the sea","A swoony romance","A page-turning thriller","A quick read under 250 pages"] },
-        { id: 'cl_mini_fall', cat: 'mini', name: 'Autumn Mini-Readathon', emoji: '🍂', goalType: 'books', target: 5, desc: 'A 5-prompt seasonal mini for autumn.', reward: 120, badge: '🍂', prompts: ["A cozy mystery","A spooky or atmospheric read","A book set at a school or university","A book to pair with a warm drink","A book with an orange, red, or brown cover"] },
-        { id: 'cl_mini_winter', cat: 'mini', name: 'Winter Mini-Readathon', emoji: '❄️', goalType: 'books', target: 5, desc: 'A 5-prompt seasonal mini for winter.', reward: 120, badge: '❄️', prompts: ["A book set in snow or the cold","A heartwarming or hopeful read","A doorstopper (500+ pages)","A comfort re-read","A holiday or festive story"] },
-        { id: 'cl_mini_bingo', cat: 'mini', name: 'Monthly Mini-Bingo', emoji: '🎟️', goalType: 'books', target: 9, desc: 'A 3x3 bingo card — fill all nine.', reward: 200, badge: '🎟️', prompts: ["A one-word title","A sequel or next-in-series","A nonfiction book","A book recommended to you","On your shelf over a year","A new-to-you author","Under 300 pages","A book you hope is 5 stars","A person on the cover"] },
-        { id: 'cl_mini_12in12', cat: 'mini', name: '12 in 12 (Spin-off)', emoji: '🗓️', goalType: 'books', target: 12, desc: 'A gentler spin-off of 52-in-52 — one book a month.', reward: 200, badge: '🗓️', prompts: ["January read","February read","March read","April read","May read","June read","July read","August read","September read","October read","November read","December read"] }
+        { id: 'cl_mini_spring', cat: 'mini', parent: 'cl_52books', name: 'Spring Mini-Readathon', emoji: '🌷', goalType: 'books', target: 5, desc: 'A 5-prompt seasonal mini for spring.', reward: 120, badge: '🌷', prompts: ["A book with a green or floral cover","A story about a fresh start or new beginning","A book set in spring or featuring a garden","A debut author","A book that's been waiting on your TBR"] },
+        { id: 'cl_mini_summer', cat: 'mini', parent: 'cl_52books', name: 'Summer Mini-Readathon', emoji: '🌊', goalType: 'books', target: 5, desc: 'A 5-prompt seasonal mini for summer.', reward: 120, badge: '🌊', prompts: ["A beach or vacation read","A book set somewhere hot or by the sea","A swoony romance","A page-turning thriller","A quick read under 250 pages"] },
+        { id: 'cl_mini_fall', cat: 'mini', parent: 'cl_52books', name: 'Autumn Mini-Readathon', emoji: '🍂', goalType: 'books', target: 5, desc: 'A 5-prompt seasonal mini for autumn.', reward: 120, badge: '🍂', prompts: ["A cozy mystery","A spooky or atmospheric read","A book set at a school or university","A book to pair with a warm drink","A book with an orange, red, or brown cover"] },
+        { id: 'cl_mini_winter', cat: 'mini', parent: 'cl_52books', name: 'Winter Mini-Readathon', emoji: '❄️', goalType: 'books', target: 5, desc: 'A 5-prompt seasonal mini for winter.', reward: 120, badge: '❄️', prompts: ["A book set in snow or the cold","A heartwarming or hopeful read","A doorstopper (500+ pages)","A comfort re-read","A holiday or festive story"] },
+        { id: 'cl_mini_bingo', cat: 'mini', parent: 'cl_52books', name: 'Monthly Mini-Bingo', emoji: '🎟️', goalType: 'books', target: 9, desc: 'A 3x3 bingo card — fill all nine.', reward: 200, badge: '🎟️', prompts: ["A one-word title","A sequel or next-in-series","A nonfiction book","A book recommended to you","On your shelf over a year","A new-to-you author","Under 300 pages","A book you hope is 5 stars","A person on the cover"] },
+        { id: 'cl_mini_12in12', cat: 'mini', parent: 'cl_52books', name: '12 in 12 (Spin-off)', emoji: '🗓️', goalType: 'books', target: 12, desc: 'A gentler spin-off of 52-in-52 — one book a month.', reward: 200, badge: '🗓️', prompts: ["January read","February read","March read","April read","May read","June read","July read","August read","September read","October read","November read","December read"] }
     ];
 }
 
@@ -6657,9 +6657,10 @@ function renderChallengeLibrary() {
 function renderMiniChallenges() {
     var el = document.getElementById('miniChallengeList');
     if (!el) return;
+    var lib = getChallengeLibrary();
     var activeIds = app.challenges.map(function(c){ return c.libId || ''; });
-    var minis = getChallengeLibrary().filter(function(c){ return c.cat === 'mini'; });
-    el.innerHTML = minis.map(function(c){
+    var minis = lib.filter(function(c){ return c.cat === 'mini'; });
+    function card(c) {
         var isActive = activeIds.includes(c.id);
         return '<div style="background:' + (isActive ? 'rgba(125,155,118,0.05)' : '#FFF8F0') + ';border-radius:12px;padding:14px;border:2px solid ' + (isActive ? '#7D9B76' : '#E8DFD5') + ';">'
             + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><span style="font-size:24px;">' + c.emoji + '</span><div style="font-weight:700;color:#3D5A80;font-size:14px;">' + c.name + '</div></div>'
@@ -6671,7 +6672,18 @@ function renderMiniChallenges() {
             + '</div>'
             + (isActive ? '<div style="color:#7D9B76;font-weight:600;font-size:12px;">✅ Already active</div>' : '<button class="btn btn-primary" style="width:100%;font-size:12px;padding:6px;" onclick="startLibraryChallenge(\'' + c.id + '\')">Start This Challenge</button>')
             + '</div>';
-    }).join('');
+    }
+    // Group minis under the bigger ("parent") challenge they belong to.
+    var groups = {};
+    minis.forEach(function(m){ var p = m.parent || 'other'; (groups[p] = groups[p] || []).push(m); });
+    var html = '';
+    Object.keys(groups).forEach(function(pid){
+        var parent = lib.find(function(c){ return c.id === pid; });
+        var label = parent ? (parent.emoji + ' ' + parent.name) : 'Standalone minis';
+        html += '<div style="font-size:12px;font-weight:700;color:#7D9B76;margin:8px 0;">🔗 Part of ' + label + '</div>';
+        html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin-bottom:18px;">' + groups[pid].map(card).join('') + '</div>';
+    });
+    el.innerHTML = html;
 }
 
 // Build a checklist for challenges that have no real published prompt list:
