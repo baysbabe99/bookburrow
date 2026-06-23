@@ -3144,7 +3144,7 @@
 
                     <!-- 3. Stat Cards -->
                     <div class="stats-grid">
-                        <div class="stat-card"><div class="stat-icon">📚</div><div class="stat-value" id="booksReadStat">0</div><div class="stat-label">Books Finished</div></div>
+                        <div class="stat-card"><div class="stat-icon">📚</div><div class="stat-value" id="booksReadStat">0</div><div class="stat-label">Books Read</div></div>
                         <div class="stat-card"><div class="stat-icon">🔥</div><div class="stat-value" id="streakStat">0</div><div class="stat-label">Current Streak</div></div>
                         <div class="stat-card"><div class="stat-icon">⭐</div><div class="stat-value" id="xpStat">0</div><div class="stat-label">XP Points</div></div>
                         <div class="stat-card"><div class="stat-icon">🎯</div><div class="stat-value" id="levelStat">1</div><div class="stat-label">Current Level</div></div>
@@ -3238,7 +3238,7 @@
                         <div class="filter-tabs">
                             <button class="filter-btn active" data-filter="all">All Books</button>
                             <button class="filter-btn" data-filter="reading">Reading</button>
-                            <button class="filter-btn" data-filter="read">Finished</button>
+                            <button class="filter-btn" data-filter="read">Read</button>
                             <button class="filter-btn" data-filter="want">To Be Read</button>
                             <button class="filter-btn" data-filter="dnf">DNF</button>
                             <button class="filter-btn" data-filter="buy">Want to Buy</button>
@@ -3305,7 +3305,7 @@
                         </label>
                         <span id="selectedCount" style="color:#8B7E74;font-size:13px;">0 selected</span>
                         <div style="flex:1;"></div>
-                        <button class="btn btn-primary" style="font-size:13px;padding:6px 14px;" onclick="bulkMarkFinished()">✅ Mark as Finished</button>
+                        <button class="btn btn-primary" style="font-size:13px;padding:6px 14px;" onclick="bulkMarkFinished()">✅ Mark as Read</button>
                         <button class="btn btn-secondary" style="font-size:13px;padding:6px 14px;" onclick="bulkMarkWant()">📖 Mark To Be Read</button>
                         <button class="btn btn-secondary" style="font-size:13px;padding:6px 14px;" onclick="cancelBulkSelect()">Cancel</button>
                     </div>
@@ -3421,7 +3421,7 @@
                                 <label style="font-size:12px;font-weight:700;color:#8B7E74;display:block;margin-bottom:4px;">Books to arrange</label>
                                 <select id="shelfBuilderSource" onchange="renderShelfBuilder()" style="width:100%;padding:8px 10px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;">
                                     <option value="all">All Books</option>
-                                    <option value="read">Finished</option>
+                                    <option value="read">Read</option>
                                     <option value="want">To Be Read</option>
                                     <option value="reading">Currently Reading</option>
                                 </select>
@@ -3826,7 +3826,7 @@
                         <select id="bookStatus" required>
                             <option value="">Select Status</option>
                             <option value="reading">Currently Reading</option>
-                            <option value="read">Finished</option>
+                            <option value="read">Read</option>
                             <option value="want">To Be Read</option>
                             <option value="dnf">Did Not Finish</option>
                             <option value="buy">Want to Buy</option>
@@ -4530,9 +4530,9 @@
                 + '<div style="color:#7D9B76;font-weight:700;margin-top:4px;">Level ' + level + ' · ' + title + '</div>'
                 + '<div style="margin-top:8px;"><button class="login-link" style="margin:0;color:#C2705B;" onclick="changePassword()">🔑 Set / change password</button></div>'
                 + '</div>'
-                + '<div style="display:flex;gap:10px;flex-wrap:wrap;">' + tile('📚', finished, 'Finished') + tile('🎯', thisYear + '/' + goal, 'This Year') + tile('🔥', (app.streak || 0), 'Streak') + tile('⭐', (app.xp || 0), 'XP') + '</div>'
+                + '<div style="display:flex;gap:10px;flex-wrap:wrap;">' + tile('📚', finished, 'Read') + tile('🎯', thisYear + '/' + goal, 'This Year') + tile('🔥', (app.streak || 0), 'Streak') + tile('⭐', (app.xp || 0), 'XP') + '</div>'
                 + '</div>'
-                + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:' + (reading.length ? '12px' : '24px') + ';">' + pill('📖 Reading', reading.length) + pill('📚 TBR', tbr) + pill('✅ Finished', finished) + pill('🚫 DNF', dnf) + '</div>'
+                + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:' + (reading.length ? '12px' : '24px') + ';">' + pill('📖 Reading', reading.length) + pill('📚 TBR', tbr) + pill('✅ Read', finished) + pill('🚫 DNF', dnf) + '</div>'
                 + (reading.length ? '<div style="background:#FEF3E2;border-radius:12px;padding:14px 16px;margin-bottom:24px;"><div style="font-weight:700;color:#3D5A80;margin-bottom:6px;">Currently reading</div>' + reading.slice(0, 3).map(b => '<div style="color:#8B7E74;font-size:13px;margin-top:2px;">• ' + b.title + ' — ' + (b.progressPercentage || 0) + '%</div>').join('') + '</div>' : '');
         }
 
@@ -4774,7 +4774,7 @@ let currentBookRating = 0;
 let lastSearchResults = [];
 let scannerStream = null;
 
-const statusLabels = { reading: 'Reading', read: 'Finished', want: 'To Be Read', dnf: 'DNF', buy: 'Want to Buy', loaned: 'Loaned Out' };
+const statusLabels = { reading: 'Reading', read: 'Read', want: 'To Be Read', dnf: 'DNF', buy: 'Want to Buy', loaned: 'Loaned Out' };
 const statusColors = { reading: '#5A8A50', read: '#C2705B', want: '#D4A76A', dnf: '#3D5A80', buy: '#B8860B', loaned: '#9B8EC4' };
 const statusEmoji = { reading: '📖', read: '✅', want: '📋', dnf: '🚫', buy: '🛒', loaned: '📤' };
 const coverGradients = [
@@ -5381,7 +5381,7 @@ function renderLibraryStats() {
     const counts = { want: 0, reading: 0, read: 0, dnf: 0, buy: 0 };
     app.books.forEach(b => { if (counts[b.status] !== undefined) counts[b.status]++; });
 
-    const labels = { want: '📖 To Be Read', reading: '📚 Reading', read: '✅ Finished', dnf: '🚫 DNF', buy: '🛒 Want to Buy' };
+    const labels = { want: '📖 To Be Read', reading: '📚 Reading', read: '✅ Read', dnf: '🚫 DNF', buy: '🛒 Want to Buy' };
     const colors = { want: '#D4A76A', reading: '#7D9B76', read: '#3D5A80', dnf: '#C2705B', buy: '#9B8EC4' };
 
     const genreCounts = {};
@@ -5522,12 +5522,12 @@ function markBookFinishedFromDash(id) {
     var pg = parseInt(book.pages) || 0;
     if (pg > 0) book.currentPage = pg;
     app.addXP(50);
-    addActivity('finished', 'Finished "' + book.title + '"');
+    addActivity('finished', 'Read "' + book.title + '"');
     app.saveData();
     if (typeof populateLibraryDropdowns === 'function') populateLibraryDropdowns();
     if (typeof applyLibraryFilters === 'function') applyLibraryFilters();
     renderDashboard(); // book is now 'read' → drops off Currently Reading
-    showNotification('Finished — on your shelf! 🎉', 2000);
+    showNotification('Read — on your shelf! 🎉', 2000);
 }
 
 function renderLibraryBooksFiltered(books) {
@@ -5848,8 +5848,8 @@ function quickChangeStatus(bookId, newStatus) {
     if (newStatus === 'read' && oldStatus !== 'read') {
         book.dateFinished = new Date().toISOString();
         app.addXP(50);
-        showNotification(`Finished! +50 XP 🎉`, 1500);
-        addActivity('finished', `Finished "${book.title}"`);
+        showNotification(`Read! +50 XP 🎉`, 1500);
+        addActivity('finished', `Read "${book.title}"`);
     } else if (newStatus === 'reading' && oldStatus !== 'reading') {
         addActivity('started', `Started "${book.title}"`);
         showNotification(`Now reading "${book.title}" 📖`, 1500);
@@ -5929,7 +5929,7 @@ function showBookSummary(event, bookId) {
     if (book.format) chips.push(book.format);
     if (book.series) chips.push(book.series);
 
-    const statusLabels = { reading: 'Reading', read: 'Finished', want: 'TBR', dnf: 'DNF', buy: 'Want to Buy', loaned: 'Loaned' };
+    const statusLabels = { reading: 'Reading', read: 'Read', want: 'TBR', dnf: 'DNF', buy: 'Want to Buy', loaned: 'Loaned' };
 
     const popup = document.createElement('div');
     popup.className = 'book-summary-popup';
@@ -5996,7 +5996,7 @@ function openBookModal(bookId) {
         <div style="margin-top:10px;"><label style="font-size:12px;color:#8B7E74;font-weight:700;">SERIES</label><input type="text" id="editBookSeries" value="${(book.series||'').replace(/"/g,'&quot;')}" placeholder="e.g. Harry Potter #1" style="${iStyle}"></div>
         <div style="margin-top:10px;"><label style="font-size:12px;color:#8B7E74;font-weight:700;">DESCRIPTION</label><textarea id="editBookDescription" style="${iStyle}resize:vertical;min-height:50px;">${book.description||''}</textarea></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">
-            <div><label style="font-size:12px;color:#8B7E74;font-weight:700;">STATUS</label><select id="editBookStatus" style="${iStyle}"><option value="want" ${book.status==='want'?'selected':''}>To Be Read</option><option value="reading" ${book.status==='reading'?'selected':''}>Reading</option><option value="read" ${book.status==='read'?'selected':''}>Finished</option><option value="dnf" ${book.status==='dnf'?'selected':''}>DNF</option><option value="buy" ${book.status==='buy'?'selected':''}>Want to Buy</option></select></div>
+            <div><label style="font-size:12px;color:#8B7E74;font-weight:700;">STATUS</label><select id="editBookStatus" style="${iStyle}"><option value="want" ${book.status==='want'?'selected':''}>To Be Read</option><option value="reading" ${book.status==='reading'?'selected':''}>Reading</option><option value="read" ${book.status==='read'?'selected':''}>Read</option><option value="dnf" ${book.status==='dnf'?'selected':''}>DNF</option><option value="buy" ${book.status==='buy'?'selected':''}>Want to Buy</option></select></div>
             <div><label style="font-size:12px;color:#8B7E74;font-weight:700;">ADDED</label><div style="padding:10px;color:#8B7E74;">${book.dateAdded ? new Date(book.dateAdded).toLocaleDateString() : 'Unknown'}</div></div>
         </div>
         <div style="margin-top:10px;"><label style="font-size:12px;color:#8B7E74;font-weight:700;">I OWN / WANT THIS AS</label>
@@ -6168,7 +6168,7 @@ function saveBookChanges(bookId) {
     if (newStatus === 'read' && book.status !== 'read') {
         app.addXP(50);
         showNotification('Book finished! +50 XP 🎉', 2000);
-        addActivity('finished', `Finished "${book.title}"`);
+        addActivity('finished', `Read "${book.title}"`);
     }
     if (newStatus === 'reading' && book.status !== 'reading') {
         addActivity('started', `Started "${book.title}"`);
@@ -10312,7 +10312,7 @@ function bulkMarkFinished() {
     app.saveData();
     toggleBulkMode();
     applyLibraryFilters();
-    showNotification(`${newlyFinished} finished! +${newlyFinished * 50} XP 🎉`, 1500);
+    showNotification(`${newlyFinished} read! +${newlyFinished * 50} XP 🎉`, 1500);
     if (newlyFinished >= 3) triggerConfetti();
 }
 
@@ -10464,6 +10464,30 @@ function addFriendshipXP(friendId, amount, reason) {
     app.saveData();
 }
 
+// A cloud friend gets a local "shadow" friend record so it has the full friend
+// experience (level/XP, interactions, activity) via the normal friend detail modal.
+function ensureCloudShadowFriend(uidOther, name, rowId) {
+    var f = app.friends.find(function(x){ return x.cloudUid === uidOther; });
+    if (!f) {
+        var idx = 0; for (var i = 0; i < uidOther.length; i++) idx += uidOther.charCodeAt(i);
+        f = {
+            id: Date.now() + Math.floor(Math.random() * 100000),
+            name: name || 'Reader',
+            avatar: (typeof friendAvatars !== 'undefined' && friendAvatars.length) ? friendAvatars[idx % friendAvatars.length] : '🐉',
+            friendCode: null, type: 'cloud', cloudUid: uidOther, cloudRowId: rowId,
+            friendshipXP: 0, friendshipLevel: 1, dateAdded: new Date().toISOString(),
+            lastInteraction: null, interactions: [], coopChallenges: [],
+            giftsGiven: 0, giftsReceived: 0, recsGiven: [], recsReceived: []
+        };
+        app.friends.push(f);
+        app.saveData();
+    } else {
+        if (name && f.name !== name) f.name = name;
+        f.cloudRowId = rowId;
+    }
+    return f;
+}
+
 // ===== Cloud (two-way) friends — only active when logged into a cloud account =====
 async function renderCloudFriends() {
     const card = document.getElementById('cloudFriendsCard');
@@ -10501,9 +10525,13 @@ async function renderCloudFriends() {
     if (!accepted.length) html += '<div style="color:#8B7E74;font-size:13px;margin-bottom:6px;">No cloud friends yet — share your code above!</div>';
     accepted.forEach(r => {
         const otherId = (r.user_a === uid ? r.user_b : r.user_a);
-        html += '<div style="display:flex;align-items:center;gap:8px;background:#FFF8F0;border:1.5px solid #7D9B76;border-radius:10px;padding:10px;margin-bottom:8px;">'
-            + '<div style="flex:1;color:#3D5A80;font-weight:600;">🐉 ' + nameFor(otherId) + '</div>'
-            + '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="cloudRemoveFriend(\'' + r.id + '\')">Remove</button></div>';
+        const nm = nameFor(otherId);
+        const shadow = ensureCloudShadowFriend(otherId, nm, r.id);
+        const lvl = getFriendshipLevel(shadow.friendshipXP);
+        html += '<div style="display:flex;align-items:center;gap:8px;background:#FFF8F0;border:1.5px solid #7D9B76;border-radius:10px;padding:10px;margin-bottom:8px;cursor:pointer;" onclick="openFriendDetail(' + shadow.id + ')">'
+            + '<div style="font-size:22px;">' + (shadow.avatar || '🐉') + '</div>'
+            + '<div style="flex:1;"><div style="color:#3D5A80;font-weight:600;">' + nm + '</div><div style="font-size:11px;color:#8B7E74;">' + lvl.emoji + ' ' + lvl.name + ' · ' + shadow.friendshipXP + ' XP · tap for more</div></div>'
+            + '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="event.stopPropagation();cloudRemoveFriend(\'' + r.id + '\')">Remove</button></div>';
     });
     if (outgoing.length) {
         html += '<div style="font-size:12px;font-weight:700;color:#3D5A80;margin:10px 0 6px;">⏳ Sent Requests</div>';
@@ -10547,7 +10575,10 @@ async function cloudRespond(rowId, accept) {
 async function cloudRemoveFriend(rowId) {
     if (!confirm('Remove this friend?')) return;
     await Cloud.removeFriendship(rowId);
+    app.friends = app.friends.filter(function(x){ return x.cloudRowId !== rowId; });
+    app.saveData();
     renderCloudFriends();
+    renderFriends();
 }
 
 function renderFriends() {
@@ -10577,6 +10608,7 @@ function renderFriends() {
 
     grid.innerHTML = '';
     for (const friend of app.friends) {
+        if (friend.cloudUid) continue; // cloud friends are shown in the 🌐 Cloud Friends card
         const level = getFriendshipLevel(friend.friendshipXP);
         const nextLevel = friendshipLevels.find(l => l.level === level.level + 1) || friendshipLevels[friendshipLevels.length - 1];
         const xpProgress = (friend.friendshipXP - level.xpNeeded) / (nextLevel.xpNeeded - level.xpNeeded);
@@ -10615,10 +10647,12 @@ function removeFriend(friendId) {
     var f = app.friends.find(function(x){ return x.id === friendId; });
     if (!f) return;
     if (!confirm('Remove ' + (f.name || 'this friend') + ' from your friends?')) return;
+    if (f.cloudRowId && typeof Cloud !== 'undefined' && Cloud.removeFriendship) { try { Cloud.removeFriendship(f.cloudRowId); } catch (e) {} }
     app.friends = app.friends.filter(function(x){ return x.id !== friendId; });
     app.saveData();
     closeModal('friendDetailModal');
     renderFriends();
+    try { renderCloudFriends(); } catch (e) {}
     showNotification('Friend removed', 1500);
 }
 
@@ -13048,7 +13082,7 @@ function renderShelfBuilder() {
             if (sa !== sb) return sa - sb;
             return (a.genre || '').localeCompare(b.genre || '');
         });
-        sortDescription = 'Grouped by reading status: Currently Reading first (most accessible), then TBR, Finished, and others. Within each group, sorted by genre. Great for keeping your "action" books front and centre.';
+        sortDescription = 'Grouped by reading status: Currently Reading first (most accessible), then TBR, Read, and others. Within each group, sorted by genre. Great for keeping your "action" books front and centre.';
     }
 
     // Split into shelves
