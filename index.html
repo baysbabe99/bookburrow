@@ -3695,6 +3695,13 @@
                 <div id="friendsSection" class="content-section">
                     <h2 class="section-header">Friends</h2>
 
+                    <!-- Cloud Friends (real two-way; only shows when logged into a cloud account) -->
+                    <div id="cloudFriendsCard" style="display:none;background:#FEF3E2;border-radius:14px;padding:18px;margin-bottom:20px;border:2px solid rgba(125,155,118,0.35);">
+                        <h3 style="color:#3D5A80;margin:0 0 4px;">🌐 Cloud Friends</h3>
+                        <p style="color:#8B7E74;font-size:12px;margin-bottom:12px;">Real two-way friends across devices — share your code, accept requests, and you both stay connected.</p>
+                        <div id="cloudFriendsBody"></div>
+                    </div>
+
                     <!-- Friend Stats Bar -->
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px;">
                         <div style="background: #FEF3E2; border-radius: 12px; padding: 16px; border: 1px solid rgba(212, 167, 106, 0.3); text-align: center;">
@@ -4172,7 +4179,16 @@
             async signUp(email, password) { const c = await this.load(); if (!c) throw new Error('Cloud unavailable'); const { data, error } = await c.auth.signUp({ email, password }); if (error) throw error; return data.user; },
             async signOut() { const c = await this.load(); if (c) { try { await c.auth.signOut(); } catch (e) {} } },
             async loadShelf(uid) { const c = await this.load(); if (!c) return null; try { const { data } = await c.from('shelves').select('data').eq('user_id', uid).maybeSingle(); return data ? data.data : null; } catch (e) { return null; } },
-            async saveShelf(uid, payload) { const c = await this.load(); if (!c) return; try { await c.from('shelves').upsert({ user_id: uid, data: payload, updated_at: new Date().toISOString() }); } catch (e) {} }
+            async saveShelf(uid, payload) { const c = await this.load(); if (!c) return; try { await c.from('shelves').upsert({ user_id: uid, data: payload, updated_at: new Date().toISOString() }); } catch (e) {} },
+            // ---- Two-way cloud friends (profiles + friendships tables) ----
+            myCode() { return Cloud._uid ? 'BB-' + Cloud._uid.replace(/-/g, '').slice(0, 8).toUpperCase() : null; },
+            async ensureProfile(displayName) { const c = await this.load(); if (!c || !Cloud._uid) return; try { await c.from('profiles').upsert({ id: Cloud._uid, display_name: displayName || 'Reader', friend_code: this.myCode() }); } catch (e) {} },
+            async findByCode(code) { const c = await this.load(); if (!c) return null; try { const { data } = await c.from('profiles').select('id,display_name,friend_code').eq('friend_code', code).maybeSingle(); return data || null; } catch (e) { return null; } },
+            async myFriendships() { const c = await this.load(); if (!c) return []; try { const { data } = await c.from('friendships').select('*'); return data || []; } catch (e) { return []; } },
+            async sendRequest(toUid) { const c = await this.load(); if (!c || !Cloud._uid) throw new Error('Not signed in'); const { error } = await c.from('friendships').insert({ user_a: Cloud._uid, user_b: toUid, status: 'pending' }); if (error) throw error; },
+            async respond(rowId, status) { const c = await this.load(); if (!c) return; try { await c.from('friendships').update({ status: status }).eq('id', rowId); } catch (e) {} },
+            async removeFriendship(rowId) { const c = await this.load(); if (!c) return; try { await c.from('friendships').delete().eq('id', rowId); } catch (e) {} },
+            async profilesByIds(ids) { const c = await this.load(); if (!c || !ids.length) return {}; try { const { data } = await c.from('profiles').select('id,display_name,friend_code').in('id', ids); const m = {}; (data || []).forEach(p => { m[p.id] = p; }); return m; } catch (e) { return {}; } }
         };
         let _cloudSaveTimer = null;
         function cloudPush() {
@@ -10357,6 +10373,92 @@ function addFriendshipXP(friendId, amount, reason) {
     app.saveData();
 }
 
+// ===== Cloud (two-way) friends — only active when logged into a cloud account =====
+async function renderCloudFriends() {
+    const card = document.getElementById('cloudFriendsCard');
+    const body = document.getElementById('cloudFriendsBody');
+    if (!card || !body) return;
+    if (!Cloud.enabled() || !Cloud._uid) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+    body.innerHTML = '<div style="color:#8B7E74;font-size:13px;">Loading…</div>';
+    await Cloud.ensureProfile((app && app.profile && app.profile.name) || 'Reader');
+    const myCode = Cloud.myCode();
+    const uid = Cloud._uid;
+    const rows = await Cloud.myFriendships();
+    const accepted = rows.filter(r => r.status === 'accepted');
+    const incoming = rows.filter(r => r.status === 'pending' && r.user_b === uid);
+    const outgoing = rows.filter(r => r.status === 'pending' && r.user_a === uid);
+    const otherIds = [...new Set(rows.map(r => (r.user_a === uid ? r.user_b : r.user_a)))];
+    const profs = await Cloud.profilesByIds(otherIds);
+    const nameFor = id => ((profs[id] && profs[id].display_name) || 'Reader');
+    let html = '';
+    html += '<div style="background:#FFF8F0;border:1.5px solid #E8DFD5;border-radius:10px;padding:12px;margin-bottom:12px;">'
+        + '<div style="font-size:11px;color:#8B7E74;font-weight:700;">YOUR FRIEND CODE</div>'
+        + '<div style="display:flex;gap:8px;align-items:center;margin-top:4px;"><div style="font-family:monospace;font-weight:700;font-size:16px;color:#C2705B;flex:1;">' + myCode + '</div>'
+        + '<button class="btn btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="copyCloudCode()">📋 Copy</button></div></div>';
+    html += '<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;"><input id="cloudAddCodeInput" type="text" placeholder="Enter a friend\'s code (BB-…)" style="flex:1;min-width:160px;padding:9px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;"><button class="btn btn-primary" style="font-size:13px;" onclick="cloudAddFriend()">+ Add Friend</button></div>';
+    if (incoming.length) {
+        html += '<div style="font-size:12px;font-weight:700;color:#3D5A80;margin-bottom:6px;">📨 Friend Requests</div>';
+        incoming.forEach(r => {
+            html += '<div style="display:flex;align-items:center;gap:8px;background:#FFF8F0;border:1.5px solid #D4A76A;border-radius:10px;padding:10px;margin-bottom:8px;flex-wrap:wrap;">'
+                + '<div style="flex:1;min-width:120px;color:#3D5A80;font-weight:600;">' + nameFor(r.user_a) + ' wants to be friends</div>'
+                + '<button class="btn btn-primary" style="font-size:12px;padding:5px 10px;" onclick="cloudRespond(\'' + r.id + '\',true)">Accept</button>'
+                + '<button class="btn btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="cloudRespond(\'' + r.id + '\',false)">Decline</button></div>';
+        });
+    }
+    html += '<div style="font-size:12px;font-weight:700;color:#3D5A80;margin:10px 0 6px;">🤝 Friends (' + accepted.length + ')</div>';
+    if (!accepted.length) html += '<div style="color:#8B7E74;font-size:13px;margin-bottom:6px;">No cloud friends yet — share your code above!</div>';
+    accepted.forEach(r => {
+        const otherId = (r.user_a === uid ? r.user_b : r.user_a);
+        html += '<div style="display:flex;align-items:center;gap:8px;background:#FFF8F0;border:1.5px solid #7D9B76;border-radius:10px;padding:10px;margin-bottom:8px;">'
+            + '<div style="flex:1;color:#3D5A80;font-weight:600;">🐉 ' + nameFor(otherId) + '</div>'
+            + '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="cloudRemoveFriend(\'' + r.id + '\')">Remove</button></div>';
+    });
+    if (outgoing.length) {
+        html += '<div style="font-size:12px;font-weight:700;color:#3D5A80;margin:10px 0 6px;">⏳ Sent Requests</div>';
+        outgoing.forEach(r => { html += '<div style="color:#8B7E74;font-size:13px;padding:4px 10px;">' + nameFor(r.user_b) + ' — waiting to accept…</div>'; });
+    }
+    body.innerHTML = html;
+}
+
+function copyCloudCode() {
+    const code = Cloud.myCode();
+    if (!code) return;
+    if (navigator.clipboard) { navigator.clipboard.writeText(code).then(() => showNotification('Code copied! 📋', 1200)).catch(() => {}); }
+    else { showNotification(code, 2000); }
+}
+
+async function cloudAddFriend() {
+    const inp = document.getElementById('cloudAddCodeInput');
+    const code = (inp ? inp.value : '').trim().toUpperCase();
+    if (!code) { showNotification('Enter a friend code', 1200); return; }
+    if (code === Cloud.myCode()) { showNotification("That's your own code!", 1500); return; }
+    const prof = await Cloud.findByCode(code);
+    if (!prof) { showNotification('No one found with that code', 1500); return; }
+    try {
+        await Cloud.sendRequest(prof.id);
+        showNotification('Request sent to ' + (prof.display_name || 'them') + '! 🤝', 1800);
+        if (inp) inp.value = '';
+        renderCloudFriends();
+    } catch (e) {
+        const msg = (e && e.message) || '';
+        showNotification(/duplicate|unique/i.test(msg) ? 'Already connected or requested' : 'Could not send request', 1800);
+    }
+}
+
+async function cloudRespond(rowId, accept) {
+    if (accept) await Cloud.respond(rowId, 'accepted');
+    else await Cloud.removeFriendship(rowId);
+    showNotification(accept ? 'Friend added! 🎉' : 'Request declined', 1500);
+    renderCloudFriends();
+}
+
+async function cloudRemoveFriend(rowId) {
+    if (!confirm('Remove this friend?')) return;
+    await Cloud.removeFriendship(rowId);
+    renderCloudFriends();
+}
+
 function renderFriends() {
     const grid = document.getElementById('friendsGrid');
     const totalEl = document.getElementById('totalFriendsCount');
@@ -10403,6 +10505,7 @@ function renderFriends() {
         `;
         grid.appendChild(card);
     }
+    try { renderCloudFriends(); } catch (e) {}
 }
 
 function renameFriend(id) {
