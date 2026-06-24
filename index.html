@@ -6892,7 +6892,60 @@ function getChallengeLibrary() {
         { id: 'cl_mini_fall', cat: 'mini', parent: 'cl_52books', name: 'Autumn Mini-Readathon', emoji: '🍂', goalType: 'books', target: 5, desc: 'A 5-prompt seasonal mini for autumn.', reward: 120, badge: '🍂', prompts: ["A cozy mystery","A spooky or atmospheric read","A book set at a school or university","A book to pair with a warm drink","A book with an orange, red, or brown cover"] },
         { id: 'cl_mini_winter', cat: 'mini', parent: 'cl_52books', name: 'Winter Mini-Readathon', emoji: '❄️', goalType: 'books', target: 5, desc: 'A 5-prompt seasonal mini for winter.', reward: 120, badge: '❄️', prompts: ["A book set in snow or the cold","A heartwarming or hopeful read","A doorstopper (500+ pages)","A comfort re-read","A holiday or festive story"] },
         { id: 'cl_mini_bingo', cat: 'mini', parent: 'cl_52books', name: 'Monthly Mini-Bingo', emoji: '🎟️', goalType: 'books', target: 9, desc: 'A 3x3 bingo card — fill all nine.', reward: 200, badge: '🎟️', prompts: ["A one-word title","A sequel or next-in-series","A nonfiction book","A book recommended to you","On your shelf over a year","A new-to-you author","Under 300 pages","A book you hope is 5 stars","A person on the cover"] },
-        { id: 'cl_mini_12in12', cat: 'mini', parent: 'cl_52books', name: '12 in 12 (Spin-off)', emoji: '🗓️', goalType: 'books', target: 12, desc: 'A gentler spin-off of 52-in-52 — one book a month.', reward: 200, badge: '🗓️', prompts: ["January read","February read","March read","April read","May read","June read","July read","August read","September read","October read","November read","December read"] }
+        { id: 'cl_mini_12in12', cat: 'mini', parent: 'cl_52books', name: '12 in 12 (Spin-off)', emoji: '🗓️', goalType: 'books', target: 12, desc: 'A gentler spin-off of 52-in-52 — one book a month.', reward: 200, badge: '🗓️', prompts: ["January read","February read","March read","April read","May read","June read","July read","August read","September read","October read","November read","December read"] },
+
+        // 🌱 STARTER SPIN-OFFS — a bite-sized mini nested under each main challenge.
+        // (No prompts = the app auto-builds a checklist via generateChallengeSlots.)
+        // Quantity
+        { id: 'cl_mini_readharder', cat: 'mini', parent: 'cl_26books', name: 'Read Harder Starter', emoji: '💪', goalType: 'books', target: 6, desc: 'A 6-task warm-up for Read Harder.', reward: 80, badge: '💪' },
+        { id: 'cl_mini_century', cat: 'mini', parent: 'cl_100books', name: 'Century Warm-Up', emoji: '💯', goalType: 'books', target: 25, desc: 'A quarter of the way to 100 — read 25.', reward: 250, badge: '💯' },
+        { id: 'cl_mini_quarterly', cat: 'mini', parent: 'cl_12books', name: 'Quarterly Reader', emoji: '📅', goalType: 'books', target: 4, desc: 'One book per season — read 4.', reward: 60, badge: '📅' },
+        { id: 'cl_mini_popsugar10', cat: 'mini', parent: 'cl_popsugar', name: 'PopSugar Mini 10', emoji: '🍭', goalType: 'books', target: 10, desc: 'A 10-prompt taste of PopSugar 40.', reward: 120, badge: '🍭', prompts: ["A book with a fruit on the cover","A book about new beginnings","A book under 260 pages","A book about a book club","A book outside your comfort zone","A book set in winter","A debut you meant to read","A love story that defies social boundaries","A travel read","A book that gives you FOMO"] },
+        // Pages
+        { id: 'cl_mini_1kpages', cat: 'mini', parent: 'cl_5kpages', name: '1K Page Sprint', emoji: '📄', goalType: 'pages', target: 1000, desc: 'A quick 1,000-page sprint.', reward: 50, badge: '📄' },
+        { id: 'cl_mini_5kwarmup', cat: 'mini', parent: 'cl_10kpages', name: 'Marathon Half', emoji: '🏃', goalType: 'pages', target: 5000, desc: 'Halfway to the 10K — read 5,000 pages.', reward: 200, badge: '🏃' },
+        { id: 'cl_mini_10kcheck', cat: 'mini', parent: 'cl_25kpages', name: 'Ultra Checkpoint', emoji: '🏔️', goalType: 'pages', target: 10000, desc: 'Hit the 10,000-page checkpoint.', reward: 400, badge: '🏔️' },
+        { id: 'cl_mini_doorstop2', cat: 'mini', parent: 'cl_doorstop', name: 'Doorstop Starter', emoji: '🧱', goalType: 'books', target: 2, desc: 'Two chunky 500+ page reads.', reward: 100, badge: '🧱' },
+        { id: 'cl_mini_quick4', cat: 'mini', parent: 'cl_quickreads', name: 'Quick Reads Mini', emoji: '⚡', goalType: 'books', target: 4, desc: 'Four short reads under 200 pages.', reward: 80, badge: '⚡' },
+        // Genre
+        { id: 'cl_mini_genre5', cat: 'mini', parent: 'cl_genrehop', name: 'Genre Sampler', emoji: '🌍', goalType: 'genres', target: 5, desc: 'Sample 5 different genres.', reward: 150, badge: '🌍' },
+        { id: 'cl_mini_romance4', cat: 'mini', parent: 'cl_romance', name: 'Romance Mini', emoji: '💕', goalType: 'books', target: 4, desc: 'Four swoony romances.', reward: 80, badge: '💕' },
+        { id: 'cl_mini_horror4', cat: 'mini', parent: 'cl_horror', name: 'Spooky Starter', emoji: '👻', goalType: 'books', target: 4, desc: 'Four scares to start.', reward: 80, badge: '👻' },
+        { id: 'cl_mini_mystery4', cat: 'mini', parent: 'cl_mystery', name: 'Whodunit Mini', emoji: '🔍', goalType: 'books', target: 4, desc: 'Four mysteries to crack.', reward: 80, badge: '🔍' },
+        { id: 'cl_mini_scifi3', cat: 'mini', parent: 'cl_scifi', name: 'Sci-Fi Sampler', emoji: '🚀', goalType: 'books', target: 3, desc: 'Three sci-fi worlds.', reward: 60, badge: '🚀' },
+        { id: 'cl_mini_fantasy3', cat: 'mini', parent: 'cl_fantasy', name: 'Fantasy Starter', emoji: '🐉', goalType: 'books', target: 3, desc: 'Three fantasy adventures.', reward: 60, badge: '🐉' },
+        { id: 'cl_mini_nonfic4', cat: 'mini', parent: 'cl_nonfic', name: 'Nonfiction Mini', emoji: '🧠', goalType: 'books', target: 4, desc: 'Four nonfiction reads.', reward: 80, badge: '🧠' },
+        { id: 'cl_mini_memoir3', cat: 'mini', parent: 'cl_memoir', name: 'Memoir Mini', emoji: '🪞', goalType: 'books', target: 3, desc: 'Three life stories.', reward: 60, badge: '🪞' },
+        { id: 'cl_mini_classics3', cat: 'mini', parent: 'cl_classics', name: 'Classics Starter', emoji: '🏛️', goalType: 'books', target: 3, desc: 'Three pre-1975 classics.', reward: 80, badge: '🏛️' },
+        { id: 'cl_mini_poetry2', cat: 'mini', parent: 'cl_poetry', name: 'Poetry Mini', emoji: '🌸', goalType: 'books', target: 2, desc: 'Two poetry collections.', reward: 50, badge: '🌸' },
+        // Diversity
+        { id: 'cl_mini_diverse4', cat: 'mini', parent: 'cl_diverse', name: 'Diverse Starter', emoji: '🌈', goalType: 'books', target: 4, desc: 'Four diverse voices.', reward: 100, badge: '🌈' },
+        { id: 'cl_mini_women4', cat: 'mini', parent: 'cl_womenauth', name: 'Women Authors Mini', emoji: '👩‍💼', goalType: 'books', target: 4, desc: 'Four books by women.', reward: 80, badge: '👩‍💼' },
+        { id: 'cl_mini_translated2', cat: 'mini', parent: 'cl_translated', name: 'Translation Taster', emoji: '🗣️', goalType: 'books', target: 2, desc: 'Two translated reads.', reward: 60, badge: '🗣️' },
+        { id: 'cl_mini_debut2', cat: 'mini', parent: 'cl_debut', name: 'Debut Mini', emoji: '🌟', goalType: 'books', target: 2, desc: 'Two debut novels.', reward: 50, badge: '🌟' },
+        { id: 'cl_mini_indie2', cat: 'mini', parent: 'cl_indie', name: 'Indie Mini', emoji: '🏠', goalType: 'books', target: 2, desc: 'Two indie reads.', reward: 50, badge: '🏠' },
+        // Format
+        { id: 'cl_mini_audio4', cat: 'mini', parent: 'cl_audio', name: 'Audio Mini', emoji: '🎧', goalType: 'books', target: 4, desc: 'Four audiobooks.', reward: 80, badge: '🎧' },
+        { id: 'cl_mini_ebook4', cat: 'mini', parent: 'cl_ebook', name: 'eBook Mini', emoji: '📱', goalType: 'books', target: 4, desc: 'Four eBooks.', reward: 80, badge: '📱' },
+        { id: 'cl_mini_phys4', cat: 'mini', parent: 'cl_physical', name: 'Paperback Mini', emoji: '📖', goalType: 'books', target: 4, desc: 'Four physical books.', reward: 80, badge: '📖' },
+        { id: 'cl_mini_graphic3', cat: 'mini', parent: 'cl_graphic', name: 'Graphic Mini', emoji: '🎨', goalType: 'books', target: 3, desc: 'Three graphic novels.', reward: 60, badge: '🎨' },
+        // Trending
+        { id: 'cl_mini_booktok4', cat: 'mini', parent: 'cl_booktok', name: 'BookTok Mini', emoji: '📲', goalType: 'books', target: 4, desc: 'Four viral BookTok picks.', reward: 80, badge: '📲' },
+        { id: 'cl_mini_buzz4', cat: 'mini', parent: 'cl_buzzword', name: 'Buzzword Mini', emoji: '🐝', goalType: 'books', target: 4, desc: 'Four buzzword titles.', reward: 80, badge: '🐝', prompts: ["A color in the title","A name in the title","An animal in the title","A number in the title"] },
+        { id: 'cl_mini_vowels', cat: 'mini', parent: 'cl_abc', name: 'Vowel Mini (AEIOU)', emoji: '🔤', goalType: 'books', target: 5, desc: 'One title for each vowel.', reward: 100, badge: '🔤', prompts: ["Title starts with A","Title starts with E","Title starts with I","Title starts with O","Title starts with U"] },
+        { id: 'cl_mini_primary', cat: 'mini', parent: 'cl_rainbow', name: 'Primary Colors', emoji: '🌈', goalType: 'books', target: 3, desc: 'Red, yellow, and blue covers.', reward: 60, badge: '🌈', prompts: ["A red cover","A yellow cover","A blue cover"] },
+        { id: 'cl_mini_tbr5', cat: 'mini', parent: 'cl_tbr', name: 'TBR Mini', emoji: '📚', goalType: 'books', target: 5, desc: 'Knock 5 off your TBR pile.', reward: 100, badge: '✅' },
+        // Cozy
+        { id: 'cl_mini_reread1', cat: 'mini', parent: 'cl_reread', name: 'One Comfort Re-read', emoji: '🧣', goalType: 'books', target: 1, desc: 'Re-read one favorite.', reward: 40, badge: '🧣' },
+        { id: 'cl_mini_dnf1', cat: 'mini', parent: 'cl_dnfredo', name: 'DNF Second Chance', emoji: '🔄', goalType: 'books', target: 1, desc: 'Give one DNF another go.', reward: 50, badge: '🔄' },
+        { id: 'cl_mini_cozy4', cat: 'mini', parent: 'cl_bedtime', name: 'Cozy Mini', emoji: '🌙', goalType: 'books', target: 4, desc: 'Four feel-good comfort reads.', reward: 80, badge: '🌙' },
+        { id: 'cl_mini_habit3', cat: 'mini', parent: 'cl_5min', name: 'Habit Starter', emoji: '⏰', goalType: 'books', target: 3, desc: 'Build the habit with 3 books.', reward: 70, badge: '⏰' },
+        { id: 'cl_mini_series1', cat: 'mini', parent: 'cl_series', name: 'Finish One Series', emoji: '📕', goalType: 'books', target: 1, desc: 'Finally finish one series.', reward: 80, badge: '📕' },
+        // Extreme
+        { id: 'cl_mini_weekend', cat: 'mini', parent: 'cl_bkday', name: 'Weekend Double', emoji: '🔥', goalType: 'books', target: 2, desc: 'Two books in one weekend.', reward: 150, badge: '🔥' },
+        { id: 'cl_mini_novella', cat: 'mini', parent: 'cl_allnight', name: 'Novella in a Night', emoji: '🌃', goalType: 'books', target: 1, desc: 'A short book in one sitting.', reward: 60, badge: '🌃' },
+        { id: 'cl_mini_streak7', cat: 'mini', parent: 'cl_streak30', name: '7-Day Streak', emoji: '📆', goalType: 'books', target: 7, desc: 'Read every day for a week.', reward: 100, badge: '📆' },
+        { id: 'cl_mini_5star5', cat: 'mini', parent: 'cl_5star', name: 'Five Star Five', emoji: '⭐', goalType: 'books', target: 5, desc: 'Find five 5-star reads.', reward: 100, badge: '⭐' }
     ];
 }
 
