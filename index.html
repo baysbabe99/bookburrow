@@ -5077,34 +5077,40 @@ async function discoverUpcomingReleases() {
     if (!authors.length && !genres.length) { if (body) body.innerHTML = '<div style="color:#8B7E74;font-size:13px;">Add favorite authors or genres in your Profile to discover new books.</div>'; return; }
     if (body) body.innerHTML = '<div style="color:#8B7E74;font-size:13px;padding:8px;">🔮 Searching for new &amp; upcoming books (' + authors.concat(genres).map(_esc).join(', ') + ')…</div>';
     var have = new Set(app.books.map(function (b) { return (b.title || '').toLowerCase(); }));
-    var seen = new Set(), found = [];
+    var seen = new Set(), found = [], anyOk = false, anyErr = false;
     var nowYear = new Date().getFullYear();
-    var queries = authors.map(function (a) { return { type: 'author', term: a, q: 'inauthor:"' + a + '"' }; })
-        .concat(genres.map(function (g) { return { type: 'genre', term: g, q: 'subject:"' + g + '"' }; }));
+    var fields = 'title,author_name,first_publish_year,cover_i,key';
+    // Open Library is free, key-less, CORS-friendly, and "sort=new" surfaces the newest titles.
+    var queries = authors.map(function (a) { return { type: 'author', term: a, url: 'https://openlibrary.org/search.json?author=' + encodeURIComponent(a) + '&sort=new&limit=12&fields=' + fields }; })
+        .concat(genres.map(function (g) { return { type: 'genre', term: g, url: 'https://openlibrary.org/search.json?subject=' + encodeURIComponent(String(g).toLowerCase()) + '&sort=new&limit=12&fields=' + fields }; }));
     for (var i = 0; i < queries.length; i++) {
         var qq = queries[i];
         try {
-            var url = 'https://www.googleapis.com/books/v1/volumes?q=' + encodeURIComponent(qq.q) + '&orderBy=newest&maxResults=12&printType=books';
-            var res = await fetch(url);
+            var res = await fetch(qq.url);
+            if (!res.ok) { anyErr = true; continue; }
             var data = await res.json();
+            anyOk = true;
             (function (qq) {
-                (data.items || []).forEach(function (it) {
-                    var vi = it.volumeInfo || {}, title = vi.title; if (!title) return;
+                (data.docs || []).forEach(function (d) {
+                    var title = d.title; if (!title) return;
                     var key = title.toLowerCase();
                     if (have.has(key) || seen.has(key)) return;
-                    var date = vi.publishedDate || '';
-                    var yr = parseInt((String(date).match(/^\d{4}/) || [0])[0]) || 0;
-                    if (!(_isFutureDate(date) || yr >= nowYear - 1)) return; // keep it new & upcoming
+                    var yr = d.first_publish_year || 0;
+                    if (yr && yr < nowYear - 1) return; // keep recent + current + upcoming
                     if (qq.type === 'author') {
-                        var byAuthor = (vi.authors || []).some(function (a) { return a.toLowerCase().indexOf(qq.term.toLowerCase()) >= 0 || qq.term.toLowerCase().indexOf(a.toLowerCase()) >= 0; });
+                        var byAuthor = (d.author_name || []).some(function (a) { return a.toLowerCase().indexOf(qq.term.toLowerCase()) >= 0 || qq.term.toLowerCase().indexOf(a.toLowerCase()) >= 0; });
                         if (!byAuthor) return;
                     }
                     seen.add(key);
-                    var img = (vi.imageLinks && (vi.imageLinks.thumbnail || vi.imageLinks.smallThumbnail)) || '';
-                    found.push({ title: title, author: (vi.authors && vi.authors[0]) || (qq.type === 'author' ? qq.term : ''), date: date, pages: vi.pageCount || 0, genre: (vi.categories && vi.categories[0]) || (qq.type === 'genre' ? qq.term : ''), cover: img ? img.replace(/^http:/, 'https:') : '', via: qq.type === 'author' ? ('by ' + qq.term) : ('in ' + qq.term) });
+                    found.push({
+                        title: title, author: (d.author_name && d.author_name[0]) || (qq.type === 'author' ? qq.term : ''),
+                        year: yr, date: yr ? String(yr) : '', upcoming: !!(yr && yr > nowYear), pages: 0, genre: (qq.type === 'genre' ? qq.term : ''),
+                        cover: d.cover_i ? ('https://covers.openlibrary.org/b/id/' + d.cover_i + '-M.jpg') : '',
+                        via: qq.type === 'author' ? ('by ' + qq.term) : ('in ' + qq.term)
+                    });
                 });
             })(qq);
-        } catch (e) {}
+        } catch (e) { anyErr = true; }
     }
     // Penguin Random House — genuine forthcoming titles (real on-sale dates), via the optional proxy
     if (typeof NYT_PROXY_URL !== 'undefined' && NYT_PROXY_URL && authors.length) {
@@ -5117,39 +5123,39 @@ async function discoverUpcomingReleases() {
                     var k = String(w.title || '').toLowerCase();
                     if (!w.title || have.has(k) || seen.has(k)) return;
                     seen.add(k);
-                    found.push({ title: w.title, author: w.author || '', date: w.onsale || '', pages: w.pages || 0, genre: '', cover: w.cover || '', via: 'PRH' + (w.onsale ? ' · on-sale ' + w.onsale : '') });
+                    found.push({ title: w.title, author: w.author || '', year: parseInt(String(w.onsale || '').slice(0, 4)) || 0, date: w.onsale || '', upcoming: _isFutureDate(w.onsale), pages: w.pages || 0, genre: '', cover: w.cover || '', via: 'PRH' + (w.onsale ? ' · on-sale ' + w.onsale : '') });
                 });
             } catch (e) {}
         }
     }
-    found.sort(function (a, b) { return String(b.date).localeCompare(String(a.date)); });
-    found.sort(function (a, b) { return (_isFutureDate(a.date) ? 0 : 1) - (_isFutureDate(b.date) ? 0 : 1); });
+    found.sort(function (a, b) { return (b.year || 0) - (a.year || 0); });
+    found.sort(function (a, b) { return (a.upcoming ? 0 : 1) - (b.upcoming ? 0 : 1); });
     window._discoverResults = found.slice(0, 24);
+    if (!found.length && anyErr && !anyOk) { if (body) body.innerHTML = '<div style="color:#C2705B;font-size:13px;">Couldn\'t reach the book service just now — please try again in a moment.</div>'; return; }
     renderDiscoverResults();
 }
 function renderDiscoverResults() {
     var body = document.getElementById('discoverReleasesBody');
     if (!body) return;
     var list = window._discoverResults || [];
-    if (!list.length) { body.innerHTML = '<div style="color:#8B7E74;font-size:13px;">No new titles found right now — check back later.</div>'; return; }
+    if (!list.length) { body.innerHTML = '<div style="color:#8B7E74;font-size:13px;">No new titles found right now — try a different favorite author, or check back later.</div>'; return; }
     body.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;">' + list.map(function (b, i) {
-        var future = _isFutureDate(b.date);
-        return '<div style="display:flex;gap:10px;background:#FFF8F0;border:1.5px solid ' + (future ? '#D4A76A' : '#E8DFD5') + ';border-radius:10px;padding:10px;">'
-            + (b.cover ? '<img src="' + _esc(b.cover) + '" style="width:40px;height:60px;object-fit:cover;border-radius:4px;flex-shrink:0;">' : '<div style="width:40px;height:60px;background:#E8DFD5;border-radius:4px;flex-shrink:0;text-align:center;line-height:60px;">📖</div>')
+        var precise = _normReleaseDate(b.date);
+        return '<div style="display:flex;gap:10px;background:#FFF8F0;border:1.5px solid ' + (b.upcoming ? '#D4A76A' : '#E8DFD5') + ';border-radius:10px;padding:10px;">'
+            + (b.cover ? '<img src="' + _esc(b.cover) + '" onerror="this.style.display=\'none\'" style="width:40px;height:60px;object-fit:cover;border-radius:4px;flex-shrink:0;">' : '<div style="width:40px;height:60px;background:#E8DFD5;border-radius:4px;flex-shrink:0;text-align:center;line-height:60px;">📖</div>')
             + '<div style="flex:1;min-width:0;"><div style="color:#3D5A80;font-weight:700;font-size:12px;">' + _esc(b.title) + '</div>'
             + '<div style="font-size:11px;color:#8B7E74;">' + _esc(b.author) + (b.date ? ' · ' + _esc(b.date) : '') + '</div>'
             + (b.via ? '<div style="font-size:10px;color:#7D9B76;font-weight:600;">' + _esc(b.via) + '</div>' : '')
-            + (future ? '<div style="font-size:10px;color:#C2705B;font-weight:700;margin-top:2px;">🔜 Upcoming</div>' : '')
-            + '<button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;margin-top:6px;" onclick="addDiscoveredBook(' + i + ')">➕ ' + (future ? 'Track release' : 'Add to TBR') + '</button>'
+            + (b.upcoming ? '<div style="font-size:10px;color:#C2705B;font-weight:700;margin-top:2px;">🔜 Upcoming</div>' : '')
+            + '<button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;margin-top:6px;" onclick="addDiscoveredBook(' + i + ')">➕ ' + (precise ? 'Track release' : 'Add to TBR') + '</button>'
             + '</div></div>';
     }).join('') + '</div>';
 }
 function addDiscoveredBook(i) {
     var b = (window._discoverResults || [])[i];
     if (!b) return;
-    var future = _isFutureDate(b.date);
-    var rel = future ? _normReleaseDate(b.date) : '';
-    var book = { id: Date.now() + Math.floor(Math.random() * 1000), title: b.title, author: b.author || '', status: 'want', genre: b.genre || '', pages: b.pages || 0, cover: b.cover || '', isbn: '', rating: 0, dateAdded: new Date().toISOString(), releaseDate: rel, ownershipFormat: [], notes: 'Discovered from a favorite author' };
+    var rel = _normReleaseDate(b.date);
+    var book = { id: Date.now() + Math.floor(Math.random() * 1000), title: b.title, author: b.author || '', status: 'want', genre: b.genre || '', pages: b.pages || 0, cover: b.cover || '', isbn: '', rating: 0, dateAdded: new Date().toISOString(), releaseDate: rel, ownershipFormat: [], notes: 'Discovered from a favorite author/genre' };
     app.books.push(book); app.saveData();
     showNotification(rel ? 'Tracking "' + b.title + '" — release alert set 🔔' : 'Added "' + b.title + '" to your TBR 📚', 1900);
     try { if (typeof populateLibraryDropdowns === 'function') populateLibraryDropdowns(); } catch (e) {}
