@@ -9079,7 +9079,7 @@ async function _onScanFiles(files) {
     _openScanModal('<div style="padding:30px;text-align:center;color:#8B7E74;">Loading photos…</div>');
     try {
         const raw = await Promise.all(arr.map(_readImageFile));
-        const maxDim = _shelfScan.mode === 'multi' ? 600 : 1024;
+        const maxDim = _shelfScan.mode === 'multi' ? 800 : 2048;
         _shelfScan.images = await Promise.all(raw.map(d => _downscaleDataUrl(d, maxDim)));
     } catch (e) {
         _openScanModal('<div style="padding:30px;text-align:center;color:#C2705B;">Couldn\'t read those images.</div>');
