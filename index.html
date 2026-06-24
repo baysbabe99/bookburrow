@@ -3437,6 +3437,34 @@
                     <p style="color: #7D9B76; margin-bottom: 16px; font-size: 14px;">📸 Upload shelf photos and tag books.</p>
                     <!-- Photo Shelf Stats -->
                     <div id="photoShelfStats" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;"></div>
+
+                    <!-- Shelf Puzzle (AI scan) -->
+                    <div style="background:linear-gradient(135deg,#FEF3E2,#FBEAD7);border:1px solid rgba(212,167,106,0.35);border-radius:16px;padding:18px;margin-bottom:22px;">
+                        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                            <h3 style="color:#3D5A80;margin:0;font-size:17px;">🧩 Shelf Puzzle</h3>
+                            <span id="shelfScanStatus" style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;"></span>
+                            <button class="btn btn-secondary" style="margin-left:auto;font-size:12px;padding:5px 10px;" onclick="toggleShelfAiSetup()">⚙️ AI scan setup</button>
+                        </div>
+                        <p style="color:#8B7E74;font-size:13px;margin:8px 0 14px;">Photograph a shelf and rebuild it here in order — then link every book to your library.</p>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                            <button class="btn btn-primary" style="font-size:13px;" onclick="startShelfScan('auto')">📷 Whole shelf — auto-split</button>
+                            <button class="btn btn-secondary" style="font-size:13px;" onclick="startShelfScan('tap')">👆 Whole shelf — tap in order</button>
+                            <button class="btn btn-secondary" style="font-size:13px;" onclick="startShelfScan('multi')">🖼️ Individual photos in order</button>
+                        </div>
+                        <div id="shelfAiSetup" style="display:none;margin-top:14px;padding:12px;background:#FFF8F0;border:1px dashed #E8DFD5;border-radius:12px;">
+                            <label style="font-size:12px;font-weight:700;color:#8B7E74;display:block;margin-bottom:6px;">Cloudflare Worker URL (see SHELF_VISION_SETUP.md)</label>
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                <input type="url" id="shelfVisionUrlInput" placeholder="https://bookburrow-vision.you.workers.dev" style="flex:1;min-width:220px;padding:8px 10px;border:2px solid #E8DFD5;border-radius:10px;background:#fff;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;">
+                                <button class="btn btn-primary" style="font-size:13px;" onclick="saveShelfVisionUrl()">Save</button>
+                            </div>
+                            <p style="color:#8B7E74;font-size:11px;margin:8px 0 0;">Only needed for AI reading. Tap-in-order and individual photos work without it.</p>
+                        </div>
+                        <div id="shelfPuzzles" style="margin-top:16px;"></div>
+                    </div>
+                    <datalist id="libraryTitlesList"></datalist>
+                    <input type="file" id="shelfScanInput" accept="image/*" style="display:none;">
+                    <input type="file" id="shelfScanInputMulti" accept="image/*" multiple style="display:none;">
+
                     <div class="photo-upload-zone" id="photoUploadZone" onclick="document.getElementById('photoInput').click()" style="cursor:pointer;border:3px dashed #E8DFD5;border-radius:16px;padding:30px 20px;text-align:center;transition:all 0.3s ease;">
                         <div style="font-size:40px;margin-bottom:8px;">📸</div>
                         <p style="font-weight:600;color:#3D5A80;margin-bottom:4px;">Drag & drop bookshelf photos here</p>
@@ -4003,6 +4031,16 @@
         </div>
     </div>
 
+    <div id="shelfScanModal" class="modal">
+        <div class="modal-content" style="max-width:900px;">
+            <div class="modal-header">
+                <h2 id="shelfScanTitle">Scan a Shelf</h2>
+                <button class="modal-close" data-modal="shelfScanModal">&times;</button>
+            </div>
+            <div class="modal-body" id="shelfScanBody"></div>
+        </div>
+    </div>
+
     <div id="photoTagModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -4237,6 +4275,11 @@
         // Optional: NYT Best Sellers via your own Cloudflare Worker proxy (see NYT_BESTSELLERS_SETUP.md).
         // The proxy keeps your NYT API key server-side; THIS url is safe to expose. Blank = NYT panel hidden.
         const NYT_PROXY_URL = '';
+
+        // Optional: Shelf Puzzle AI scan via your own Cloudflare Worker (see SHELF_VISION_SETUP.md).
+        // Runs on Cloudflare Workers AI (no API key needed); THIS url is safe to expose. Usually set in-app
+        // (Photo Shelf → ⚙️ AI scan setup), which is stored per-reader and overrides this default.
+        const SHELF_VISION_URL = '';
 
         const Cloud = {
             _client: null, _loading: null, _uid: null,
@@ -4647,6 +4690,7 @@
             this.yearlyGoal = data.yearlyGoal || 24;
             this.connectedApps = data.connectedApps || {};
             this.shelfPhotos = data.shelfPhotos || [];
+            this.shelfVisionUrl = data.shelfVisionUrl || '';
             this.lastLogin = data.lastLogin || null;
             this.streak = data.streak || 0;
             this.profile = data.profile || {};
@@ -4660,6 +4704,26 @@
             this.initializeSampleData();
         }
         this.checkStreak();
+        this.migrateShelfPhotoRefs();
+    }
+
+    // One-time migration: books linked to a shelf photo by array index
+    // (shelfPhotoIdx) are switched to the photo's stable id (shelfPhotoId),
+    // so deleting or reordering photos can no longer mis-point a book.
+    // Dangling links (photo already gone) are cleared. Idempotent.
+    migrateShelfPhotoRefs() {
+        const photos = this.shelfPhotos || [];
+        let changed = false;
+        (this.books || []).forEach(b => {
+            if (b.shelfPhotoId !== undefined) return;            // already migrated / new-style
+            if (b.shelfPhotoIdx === undefined || b.shelfPhotoIdx === null) return;
+            const p = photos[b.shelfPhotoIdx];
+            b.shelfPhotoId = p ? p.id : null;
+            if (!p) b.shelfLocation = '';                        // photo gone → drop dangling chip
+            delete b.shelfPhotoIdx;                              // retire the unstable field
+            changed = true;
+        });
+        if (changed) this.saveData();
     }
 
     initializeSampleData() {
@@ -4682,6 +4746,7 @@
         this.yearlyGoal = 24;
         this.connectedApps = {};
         this.shelfPhotos = [];
+        this.shelfVisionUrl = '';
         this.profile = { avatar: '😊', name: '', theme: 'cozy', favoriteGenres: [], favoriteAuthors: [], preferredPages: '', preferredFormat: '', favoritePublishers: [] };
         this.streak = 1;
         this.lastLogin = new Date().toISOString();
@@ -4714,7 +4779,7 @@
         localStorage.setItem(profileDataKey(), JSON.stringify({
             books: this.books, xp: this.xp, loans: this.loans, borrows: this.borrows,
             challenges: this.challenges, achievements: this.achievements, yearlyGoal: this.yearlyGoal,
-            connectedApps: this.connectedApps, shelfPhotos: this.shelfPhotos,
+            connectedApps: this.connectedApps, shelfPhotos: this.shelfPhotos, shelfVisionUrl: this.shelfVisionUrl,
             lastLogin: this.lastLogin, streak: this.streak, profile: this.profile,
             friends: this.friends, friendCode: this.friendCode, gifts: this.gifts,
             releaseAlertsEnabled: this.releaseAlertsEnabled,
@@ -4934,7 +4999,7 @@ function switchLibraryTab(tab) {
     // Refresh content for the selected tab
     if (tab === 'books') { populateLibraryDropdowns(); applyLibraryFilters(); }
     if (tab === 'loans') renderLoans();
-    if (tab === 'photos') { renderPhotoGallery(); renderShelfMap(); }
+    if (tab === 'photos') { renderPhotoGallery(); renderShelfMap(); renderShelfPuzzles(); refreshShelfScanStatus(); refreshLibraryTitlesDatalist(); }
     if (tab === 'spinner') initTBRSpinner();
 }
 
@@ -5931,7 +5996,7 @@ function renderLibraryBooksFiltered(books) {
                 ${book.status !== 'reading' && book.status !== 'read' ? `<button class="btn btn-primary" style="font-size:10px;padding:4px 10px;border-radius:16px;" onclick="event.stopPropagation();quickChangeStatus(${book.id},'reading')">📖 Start Reading</button>` : ''}
                 <button class="btn btn-secondary" style="font-size:10px;padding:4px 10px;border-radius:16px;" onclick="event.stopPropagation();openBookModal(${book.id})">✏️ Edit</button>
             </div>
-            ${book.shelfLocation ? `<div style="font-size:11px;color:#D4A76A;margin-top:4px;cursor:pointer;" onclick="event.stopPropagation();showShelfLocation(${book.shelfPhotoIdx})" title="Click to see shelf photo">📍 ${book.shelfLocation}</div>` : ''}
+            ${book.shelfLocation ? `<div style="font-size:11px;color:#D4A76A;margin-top:4px;cursor:pointer;" onclick="event.stopPropagation();showShelfLocation(${book.shelfPhotoId})" title="Click to see shelf photo">📍 ${escapeHtml(book.shelfLocation)}</div>` : ''}
             ${book.status === 'buy' ? `<button class="btn btn-primary" style="margin-top:8px;font-size:11px;padding:4px 10px;width:100%;" onclick="event.stopPropagation();showWhereToBuy('${book.title.replace(/'/g,"\\'")}','${(book.author||'').replace(/'/g,"\\'")}','${(book.isbn||'').replace(/'/g,"\\'")}')">🏪 Where to Buy</button>` : ''}
             ${book.rating > 0 ? `<div style="margin-top:6px;">${'⭐'.repeat(book.rating)}${'☆'.repeat(5-book.rating)}</div>` : ''}
         </div>`;
@@ -6266,7 +6331,7 @@ function renderLibraryBooks(filter) {
                 ${book.status !== 'reading' && book.status !== 'read' ? `<button class="btn btn-primary" style="font-size:10px;padding:4px 10px;border-radius:16px;" onclick="event.stopPropagation();quickChangeStatus(${book.id},'reading')">📖 Start Reading</button>` : ''}
                 <button class="btn btn-secondary" style="font-size:10px;padding:4px 10px;border-radius:16px;" onclick="event.stopPropagation();openBookModal(${book.id})">✏️ Edit</button>
             </div>
-            ${book.shelfLocation ? `<div style="font-size:11px;color:#D4A76A;margin-top:4px;cursor:pointer;" onclick="event.stopPropagation();showShelfLocation(${book.shelfPhotoIdx})" title="Click to see shelf photo">📍 ${book.shelfLocation}</div>` : ''}
+            ${book.shelfLocation ? `<div style="font-size:11px;color:#D4A76A;margin-top:4px;cursor:pointer;" onclick="event.stopPropagation();showShelfLocation(${book.shelfPhotoId})" title="Click to see shelf photo">📍 ${escapeHtml(book.shelfLocation)}</div>` : ''}
             ${book.status === 'buy' ? `<button class="btn btn-primary" style="margin-top:8px;font-size:11px;padding:4px 10px;width:100%;" onclick="event.stopPropagation();showWhereToBuy('${book.title.replace(/'/g,"\\'")}','${(book.author||'').replace(/'/g,"\\'")}','${(book.isbn||'').replace(/'/g,"\\'")}')">🏪 Where to Buy</button>` : ''}
             ${book.rating > 0 ? `<div style="margin-top:6px;">${'⭐'.repeat(book.rating)}${'☆'.repeat(5-book.rating)}</div>` : ''}
         </div>`;
@@ -6372,7 +6437,7 @@ function openBookModal(bookId) {
             <label style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;border:2px solid ${(book.ownershipFormat||[]).includes('Do Not Own')?'#F43F5E':'#E8DFD5'};background:${(book.ownershipFormat||[]).includes('Do Not Own')?'rgba(244,63,94,0.1)':'#FFF8F0'};cursor:pointer;font-size:13px;color:${(book.ownershipFormat||[]).includes('Do Not Own')?'#F43F5E':'#3D5A80'};"><input type="checkbox" class="ownershipFmt" value="Do Not Own" ${(book.ownershipFormat||[]).includes('Do Not Own')?'checked':''} onchange="handleDoNotOwnChange(this)" style="accent-color:#F43F5E;"> 🚫 Do Not Own</label>
         </div></div>
         <div style="margin-top:10px;"><label style="font-size:12px;color:#8B7E74;font-weight:700;">RATING</label><div id="editBookRating" style="font-size:24px;cursor:pointer;">${[1,2,3,4,5].map(i => `<span onclick="setBookRating(${i})" style="cursor:pointer;">${i <= (book.rating||0) ? '⭐' : '☆'}</span>`).join('')}</div></div>
-        ${book.shelfLocation ? `<div style="margin-top:10px;background:rgba(212,167,106,0.1);border-radius:10px;padding:10px 14px;display:flex;align-items:center;gap:10px;cursor:pointer;" onclick="closeModal('bookModal');showShelfLocation(${book.shelfPhotoIdx})"><span style="font-size:20px;">📍</span><div><div style="font-size:12px;color:#8B7E74;font-weight:700;">SHELF LOCATION</div><div style="color:#3D5A80;font-weight:600;">${book.shelfLocation}</div><div style="font-size:11px;color:#D4A76A;">Click to view shelf photo</div></div></div>` : ''}
+        ${book.shelfLocation ? `<div style="margin-top:10px;background:rgba(212,167,106,0.1);border-radius:10px;padding:10px 14px;display:flex;align-items:center;gap:10px;cursor:pointer;" onclick="closeModal('bookModal');showShelfLocation(${book.shelfPhotoId})"><span style="font-size:20px;">📍</span><div><div style="font-size:12px;color:#8B7E74;font-weight:700;">SHELF LOCATION</div><div style="color:#3D5A80;font-weight:600;">${escapeHtml(book.shelfLocation)}</div><div style="font-size:11px;color:#D4A76A;">Click to view shelf photo</div></div></div>` : ''}
         <div style="margin-top:10px;"><label style="font-size:12px;color:#8B7E74;font-weight:700;">NOTES</label><textarea id="editBookNotes" style="${iStyle}resize:vertical;min-height:70px;">${book.notes||''}</textarea></div>
         <div style="display:flex;gap:10px;margin-top:16px;">
             <button class="btn btn-primary" style="flex:1;" onclick="saveBookChanges(${book.id})">💾 Save</button>
@@ -8580,6 +8645,19 @@ function clearAllData() {
 // ============================================
 // PHOTO SHELF
 // ============================================
+// Escape user text before injecting into innerHTML / HTML attributes
+function escapeHtml(s) {
+    return (s == null ? '' : String(s))
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// Resolve a shelf photo by its stable id → current array index (or -1)
+function photoIndexById(id) {
+    if (id === undefined || id === null) return -1;
+    return (app.shelfPhotos || []).findIndex(p => p.id === id);
+}
+
 function setupPhotoUpload() {
     const zone = document.getElementById('photoUploadZone');
     const input = document.getElementById('photoInput');
@@ -8635,9 +8713,9 @@ function renderPhotoGallery() {
         gallery.style.gridTemplateColumns = '1fr';
         gallery.innerHTML = app.shelfPhotos.map((photo, idx) => `
             <div style="background:#FEF3E2;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.06);display:flex;gap:16px;padding:12px;">
-                <img src="${photo.data}" alt="${photo.label}" style="width:120px;height:90px;object-fit:cover;border-radius:8px;cursor:pointer;flex-shrink:0;" onclick="openPhotoLightbox(${idx})">
+                <img src="${photo.data}" alt="${escapeHtml(photo.label)}" style="width:120px;height:90px;object-fit:cover;border-radius:8px;cursor:pointer;flex-shrink:0;" onclick="openPhotoLightbox(${idx})">
                 <div style="flex:1;min-width:0;">
-                    <input type="text" value="${photo.label}" onchange="updatePhotoLabel(${idx}, this.value)" style="width:100%;padding:5px 8px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-weight:600;font-size:14px;">
+                    <input type="text" value="${escapeHtml(photo.label)}" onchange="updatePhotoLabel(${idx}, this.value)" style="width:100%;padding:5px 8px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-weight:600;font-size:14px;">
                     <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap;">
                         ${photo.taggedBooks.length > 0 ? `<span style="font-size:12px;color:#7D9B76;font-weight:600;">📚 ${photo.taggedBooks.length} books</span>` : '<span style="font-size:12px;color:#8B7E74;">No books tagged</span>'}
                         <span style="font-size:11px;color:#8B7E74;">Added ${new Date(photo.dateAdded).toLocaleDateString()}</span>
@@ -8654,14 +8732,14 @@ function renderPhotoGallery() {
         gallery.innerHTML = app.shelfPhotos.map((photo, idx) => `
             <div style="background:#FEF3E2;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.06);">
                 <div style="position:relative;cursor:pointer;" onclick="openPhotoLightbox(${idx})">
-                    <img src="${photo.data}" alt="${photo.label}" style="width:100%;height:180px;object-fit:cover;display:block;">
+                    <img src="${photo.data}" alt="${escapeHtml(photo.label)}" style="width:100%;height:180px;object-fit:cover;display:block;">
                     <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,0.6));padding:8px 12px;">
-                        <div style="color:white;font-size:12px;font-weight:600;">${photo.label}</div>
+                        <div style="color:white;font-size:12px;font-weight:600;">${escapeHtml(photo.label)}</div>
                         ${photo.taggedBooks.length > 0 ? `<div style="color:rgba(255,255,255,0.8);font-size:11px;">📚 ${photo.taggedBooks.length} books</div>` : ''}
                     </div>
                 </div>
                 <div style="padding:10px;">
-                    <input type="text" value="${photo.label}" onchange="updatePhotoLabel(${idx}, this.value)" style="width:100%;padding:5px 8px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-weight:600;font-size:13px;">
+                    <input type="text" value="${escapeHtml(photo.label)}" onchange="updatePhotoLabel(${idx}, this.value)" style="width:100%;padding:5px 8px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-weight:600;font-size:13px;">
                     <div style="display:flex;gap:6px;margin-top:8px;">
                         <button class="btn btn-primary" style="flex:1;font-size:11px;padding:5px;" onclick="openPhotoTagModal(${idx})">Tag Books</button>
                         <button class="btn btn-secondary" style="flex:1;font-size:11px;padding:5px;" onclick="deletePhoto(${idx})">Delete</button>
@@ -8713,14 +8791,13 @@ function closePhotoLightbox() {
     if (lb) lb.style.display = 'none';
 }
 
-function showShelfLocation(photoIdx) {
-    if (photoIdx === undefined || photoIdx === null) return;
-    const photo = app.shelfPhotos[photoIdx];
-    if (!photo) {
-        showNotification('Photo unavailable', 1200);
+function showShelfLocation(photoId) {
+    const idx = photoIndexById(photoId);
+    if (idx < 0) {
+        showNotification('Shelf photo no longer exists', 1500);
         return;
     }
-    openPhotoLightbox(photoIdx);
+    openPhotoLightbox(idx);
 }
 
 function updatePhotoLabel(idx, label) {
@@ -8730,7 +8807,14 @@ function updatePhotoLabel(idx, label) {
 
 function deletePhoto(idx) {
     if (confirm('Delete this photo?')) {
+        const removed = app.shelfPhotos[idx];
         app.shelfPhotos.splice(idx, 1);
+        if (removed) {
+            // Clear shelf info on any books that pointed at the deleted photo
+            app.books.forEach(b => {
+                if (b.shelfPhotoId === removed.id) { b.shelfPhotoId = null; b.shelfLocation = ''; }
+            });
+        }
         app.saveData();
         renderPhotoGallery();
     }
@@ -8746,13 +8830,13 @@ function openPhotoTagModal(idx) {
         modalBody.innerHTML = `
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
                 <div>
-                    <img src="${photo.data}" alt="${photo.label}" style="width:100%;border-radius:12px;max-height:300px;object-fit:cover;">
+                    <img src="${photo.data}" alt="${escapeHtml(photo.label)}" style="width:100%;border-radius:12px;max-height:300px;object-fit:cover;">
                     <p style="color:#7D9B76;font-size:12px;margin-top:8px;text-align:center;">Look at the spines and type the titles you see!</p>
                 </div>
                 <div>
                     <label style="font-size:13px;color:#8B7E74;font-weight:700;display:block;margin-bottom:6px;">Books on this shelf (one per line):</label>
                     <p style="color:#8B7E74;font-size:12px;margin-bottom:8px;">Format: <strong>Title by Author</strong> — or just the title!</p>
-                    <textarea id="photoTagInput" style="width:100%;min-height:200px;padding:10px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;" placeholder="The Great Gatsby by F. Scott Fitzgerald&#10;Pride and Prejudice by Jane Austen&#10;Dune&#10;The Hobbit by J.R.R. Tolkien">${photo.taggedBooks ? photo.taggedBooks.map(b => b.title + (b.author ? ' by ' + b.author : '')).join('\n') : ''}</textarea>
+                    <textarea id="photoTagInput" style="width:100%;min-height:200px;padding:10px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;" placeholder="The Great Gatsby by F. Scott Fitzgerald&#10;Pride and Prejudice by Jane Austen&#10;Dune&#10;The Hobbit by J.R.R. Tolkien">${photo.taggedBooks ? photo.taggedBooks.map(b => escapeHtml(b.title + (b.author ? ' by ' + b.author : ''))).join('\n') : ''}</textarea>
                     <div style="display:flex;gap:8px;margin-top:12px;">
                         <button class="btn btn-primary" style="flex:1;" onclick="savePhotoTags(${idx})">📚 Save & Add All to Library</button>
                         <button class="btn btn-secondary" onclick="closeModal('photoTagModal')">Cancel</button>
@@ -8771,26 +8855,27 @@ function savePhotoTags(idx) {
     const tagged = [];
     let added = 0;
 
+    const photo = app.shelfPhotos[idx];
     lines.forEach(line => {
         const match = line.match(/(.+?)\s+by\s+(.+)/i);
         const title = match ? match[1].trim() : line.trim();
         const author = match ? match[2].trim() : '';
         tagged.push({ title, author });
 
-        // Add to library if not already there
-        const existing = app.books.find(b => b.title.toLowerCase() === title.toLowerCase());
+        // Add to library if not already there — strong dedup (same matcher as import)
+        const existing = app.books.find(b => isImportDuplicate(b, { title, author, isbn: '' }));
         if (existing) {
             // Update shelf location even if book already exists
-            existing.shelfLocation = app.shelfPhotos[idx].label;
-            existing.shelfPhotoIdx = idx;
+            existing.shelfLocation = photo.label;
+            existing.shelfPhotoId = photo.id;
         } else {
             app.books.push({
                 id: app.getNextId(), title, author, genre: '', pages: 0, isbn: '',
                 publisher: '', publicationYear: null, language: 'English', format: '',
                 series: '', description: '', status: 'want', rating: 0,
-                notes: `Tagged from shelf photo: ${app.shelfPhotos[idx].label}`,
-                shelfLocation: app.shelfPhotos[idx].label,
-                shelfPhotoIdx: idx,
+                notes: `Tagged from shelf photo: ${escapeHtml(photo.label)}`,
+                shelfLocation: photo.label,
+                shelfPhotoId: photo.id,
                 dateAdded: new Date().toISOString()
             });
             added++;
@@ -8821,6 +8906,442 @@ function savePhotoTags(idx) {
             showNotification('New books highlighted! ☑️', 1500);
         }, 500);
     }
+}
+
+// ============================================
+// SHELF PUZZLE (AI scan + ordered, library-linked shelves)
+// ============================================
+let _shelfScan = { mode: null, images: [], pieces: [], photoId: null };
+
+function getShelfVisionUrl() {
+    return (app && app.shelfVisionUrl) || (typeof SHELF_VISION_URL !== 'undefined' ? SHELF_VISION_URL : '') || '';
+}
+function refreshShelfScanStatus() {
+    const el = document.getElementById('shelfScanStatus');
+    if (el) {
+        const on = !!getShelfVisionUrl();
+        el.textContent = on ? 'AI: connected ✅' : 'AI: not set up';
+        el.style.background = on ? 'rgba(125,155,118,0.15)' : 'rgba(212,167,106,0.18)';
+        el.style.color = on ? '#7D9B76' : '#D4A76A';
+    }
+    const input = document.getElementById('shelfVisionUrlInput');
+    if (input && !input.value) input.value = getShelfVisionUrl();
+}
+function toggleShelfAiSetup() {
+    const box = document.getElementById('shelfAiSetup');
+    if (!box) return;
+    box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    refreshShelfScanStatus();
+}
+function saveShelfVisionUrl() {
+    const input = document.getElementById('shelfVisionUrlInput');
+    const v = (input ? input.value : '').trim();
+    if (v && !/^https?:\/\//i.test(v)) { showNotification('URL must start with https://', 1800); return; }
+    app.shelfVisionUrl = v;
+    app.saveData();
+    refreshShelfScanStatus();
+    showNotification(v ? 'AI scan connected ✅' : 'AI URL cleared', 1500);
+}
+
+// library autocomplete options
+function refreshLibraryTitlesDatalist() {
+    const dl = document.getElementById('libraryTitlesList');
+    if (!dl) return;
+    const seen = {}; let html = '';
+    (app.books || []).forEach(b => {
+        const t = (b.title || '').trim(); if (!t) return;
+        const v = t + (b.author ? ' by ' + b.author : '');
+        const key = v.toLowerCase(); if (seen[key]) return; seen[key] = 1;
+        html += '<option value="' + escapeHtml(v) + '"></option>';
+    });
+    dl.innerHTML = html;
+}
+
+// ---- image helpers ----
+function _readImageFile(file) {
+    return new Promise((resolve, reject) => {
+        if (!file || !file.type || !file.type.startsWith('image/')) { reject(new Error('not image')); return; }
+        const r = new FileReader();
+        r.onload = e => resolve(e.target.result);
+        r.onerror = reject;
+        r.readAsDataURL(file);
+    });
+}
+function _downscaleDataUrl(dataUrl, maxDim) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
+            const w = Math.round(img.naturalWidth * scale), h = Math.round(img.naturalHeight * scale);
+            const c = document.createElement('canvas'); c.width = w; c.height = h;
+            c.getContext('2d').drawImage(img, 0, 0, w, h);
+            try { resolve(c.toDataURL('image/jpeg', 0.82)); } catch (e) { resolve(dataUrl); }
+        };
+        img.onerror = () => resolve(dataUrl);
+        img.src = dataUrl;
+    });
+}
+
+// ---- vision response parsing ----
+function _extractJsonArray(text) {
+    if (!text) return null;
+    let t = String(text).replace(/```json/gi, '```').trim();
+    const fence = t.match(/```([\s\S]*?)```/);
+    if (fence) t = fence[1].trim();
+    const s = t.indexOf('['), e = t.lastIndexOf(']');
+    const slice = (s >= 0 && e > s) ? t.slice(s, e + 1) : t;
+    try { const p = JSON.parse(slice); if (Array.isArray(p)) return p; if (p && Array.isArray(p.books)) return p.books; } catch (_) {}
+    return null;
+}
+function _normBox01(box) {
+    if (!Array.isArray(box) || box.length < 4) return null;
+    let v = box.slice(0, 4).map(Number);
+    if (!v.every(Number.isFinite)) return null;
+    if (v.some(n => n > 1) && v.every(n => n <= 100)) v = v.map(n => n / 100); // percent → fraction
+    return v;
+}
+function parseVisionBooks(data) {
+    let books = (data && Array.isArray(data.books)) ? data.books : null;
+    if (!books && data && typeof data.raw === 'string') books = _extractJsonArray(data.raw);
+    if (!books && Array.isArray(data)) books = data;
+    if (!Array.isArray(books)) books = [];
+    return books.map((b, i) => ({
+        title: (b && b.title != null ? String(b.title) : '').trim(),
+        author: (b && b.author != null ? String(b.author) : '').trim(),
+        box: _normBox01(b && b.box),
+        order: (b && Number.isFinite(b.order)) ? b.order : i
+    })).filter(b => b.title);
+}
+// css region-crop math: box in 0..1 → background size/position percentages
+function cssCropStyle(box) {
+    let x = box[0], y = box[1], w = box[2], h = box[3];
+    w = Math.max(0.001, Math.min(1, w)); h = Math.max(0.001, Math.min(1, h));
+    x = Math.max(0, Math.min(1, x)); y = Math.max(0, Math.min(1, y));
+    const sizeX = 100 / w, sizeY = 100 / h;
+    const posX = w >= 1 ? 0 : (Math.min(x, 1 - w) / (1 - w)) * 100;
+    const posY = h >= 1 ? 0 : (Math.min(y, 1 - h) / (1 - h)) * 100;
+    return { sizeX: sizeX, sizeY: sizeY, posX: posX, posY: posY };
+}
+
+async function callShelfVision(images, mode) {
+    const url = getShelfVisionUrl();
+    if (!url) throw new Error('No AI URL');
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ images: images, mode: mode }) });
+    let data = null; try { data = await res.json(); } catch (_) {}
+    if (!res.ok) throw new Error((data && data.error) ? data.error : ('HTTP ' + res.status));
+    return data;
+}
+
+// ---- capture entry ----
+function startShelfScan(mode) {
+    _shelfScan = { mode: mode, images: [], pieces: [], photoId: null };
+    const inp = document.getElementById(mode === 'multi' ? 'shelfScanInputMulti' : 'shelfScanInput');
+    if (!inp) return;
+    inp.value = '';
+    inp.onchange = () => _onScanFiles(inp.files);
+    inp.click();
+}
+async function _onScanFiles(files) {
+    const arr = Array.from(files || []).filter(f => f.type && f.type.startsWith('image/'));
+    if (!arr.length) return;
+    _openScanModal('<div style="padding:30px;text-align:center;color:#8B7E74;">Loading photos…</div>');
+    try {
+        const raw = await Promise.all(arr.map(_readImageFile));
+        const maxDim = _shelfScan.mode === 'multi' ? 600 : 1024;
+        _shelfScan.images = await Promise.all(raw.map(d => _downscaleDataUrl(d, maxDim)));
+    } catch (e) {
+        _openScanModal('<div style="padding:30px;text-align:center;color:#C2705B;">Couldn\'t read those images.</div>');
+        return;
+    }
+    if (_shelfScan.mode === 'auto') return _runAutoSplit();
+    if (_shelfScan.mode === 'tap') return _renderTapMode();
+    if (_shelfScan.mode === 'multi') return _renderMultiMode();
+}
+function _openScanModal(bodyHtml, title) {
+    const modal = document.getElementById('shelfScanModal');
+    const body = document.getElementById('shelfScanBody');
+    const t = document.getElementById('shelfScanTitle');
+    if (t && title) t.textContent = title;
+    if (body) body.innerHTML = bodyHtml;
+    if (modal) modal.classList.add('active');
+}
+
+// ---- AUTO-SPLIT (AI) ----
+async function _runAutoSplit() {
+    if (!getShelfVisionUrl()) {
+        _openScanModal(
+            '<div style="padding:24px;text-align:center;">' +
+            '<div style="font-size:34px;">🔌</div>' +
+            '<p style="color:#3D5A80;font-weight:700;margin:10px 0 6px;">AI scan isn\'t set up yet</p>' +
+            '<p style="color:#8B7E74;font-size:13px;margin:0 0 14px;">Auto-split needs the AI connection (see SHELF_VISION_SETUP.md), or use tap-in-order instead.</p>' +
+            '<button class="btn btn-secondary" onclick="closeModal(\'shelfScanModal\');toggleShelfAiSetup()">⚙️ Open AI setup</button> ' +
+            '<button class="btn btn-primary" onclick="_renderTapMode()">👆 Tap in order instead</button>' +
+            '</div>', 'Auto-split a shelf');
+        return;
+    }
+    _openScanModal('<div style="padding:30px;text-align:center;color:#8B7E74;"><div style="font-size:30px;">🧩</div><p style="margin-top:10px;">Reading the shelf with AI… this can take a few seconds.</p></div>', 'Auto-split a shelf');
+    try {
+        const data = await callShelfVision(_shelfScan.images, 'shelf');
+        const books = parseVisionBooks(data);
+        if (!books.length) {
+            _openScanModal('<div style="padding:24px;text-align:center;color:#C2705B;">AI didn\'t find any titles. Try a sharper, straight-on photo — or tap in order.<br><br><button class="btn btn-primary" onclick="_renderTapMode()">👆 Tap in order</button></div>', 'Auto-split a shelf');
+            return;
+        }
+        _shelfScan.pieces = books.map((b, i) => ({ title: b.title, author: b.author, box: b.box, order: i }));
+        _renderReview();
+    } catch (e) {
+        _openScanModal('<div style="padding:24px;text-align:center;color:#C2705B;">Couldn\'t reach the AI scanner (' + escapeHtml(String(e.message || e)) + ').<br>Check the Worker URL in ⚙️ AI scan setup.<br><br><button class="btn btn-primary" onclick="_renderTapMode()">👆 Tap in order instead</button></div>', 'Auto-split a shelf');
+    }
+}
+
+// ---- TAP IN ORDER (manual) ----
+function _renderTapMode() {
+    _shelfScan.mode = 'tap';
+    if (!Array.isArray(_shelfScan.pieces)) _shelfScan.pieces = [];
+    const img = _shelfScan.images[0];
+    if (!img) { _openScanModal('<div style="padding:24px;text-align:center;color:#C2705B;">No photo loaded.</div>'); return; }
+    _openScanModal(
+        '<p style="color:#8B7E74;font-size:13px;margin:0 0 10px;">Tap each book on its spine, left to right. Each tap adds it in order.</p>' +
+        '<div style="position:relative;display:inline-block;max-width:100%;">' +
+          '<img id="tapImg" src="' + img + '" style="max-width:100%;border-radius:10px;display:block;cursor:crosshair;" onclick="_tapAddPoint(event)">' +
+          '<div id="tapMarkers" style="position:absolute;inset:0;pointer-events:none;"></div>' +
+        '</div>' +
+        '<div id="tapList" style="margin-top:14px;"></div>' +
+        '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">' +
+          '<button class="btn btn-primary" onclick="_renderReview()">Next: review &amp; link →</button>' +
+          '<button class="btn btn-secondary" onclick="closeModal(\'shelfScanModal\')">Cancel</button>' +
+        '</div>', 'Tap in order');
+    refreshLibraryTitlesDatalist();
+    _renderTapMarkers(); _renderTapList();
+}
+function _tapAddPoint(ev) {
+    const img = document.getElementById('tapImg'); if (!img) return;
+    const r = img.getBoundingClientRect();
+    const x = (ev.clientX - r.left) / r.width, y = (ev.clientY - r.top) / r.height;
+    const bw = 0.06, bh = 0.34;
+    _shelfScan.pieces.push({ title: '', author: '', box: [Math.max(0, x - bw / 2), Math.max(0, y - bh / 2), bw, bh], order: _shelfScan.pieces.length });
+    _renderTapMarkers(); _renderTapList();
+}
+function _renderTapMarkers() {
+    const wrap = document.getElementById('tapMarkers'); if (!wrap) return;
+    wrap.innerHTML = _shelfScan.pieces.map((p, i) => {
+        const cx = (p.box[0] + p.box[2] / 2) * 100, cy = (p.box[1] + p.box[3] / 2) * 100;
+        return '<div style="position:absolute;left:' + cx + '%;top:' + cy + '%;transform:translate(-50%,-50%);background:#C2705B;color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;border:2px solid #fff;">' + (i + 1) + '</div>';
+    }).join('');
+}
+function _renderTapList() {
+    const el = document.getElementById('tapList'); if (!el) return;
+    if (!_shelfScan.pieces.length) { el.innerHTML = '<p style="color:#8B7E74;font-size:12px;">No books tapped yet.</p>'; return; }
+    el.innerHTML = _shelfScan.pieces.map((p, i) =>
+        '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">' +
+        '<span style="background:#C2705B;color:#fff;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">' + (i + 1) + '</span>' +
+        '<input list="libraryTitlesList" value="' + escapeHtml(p.title + (p.author ? ' by ' + p.author : '')) + '" oninput="_setPieceText(' + i + ',this.value)" placeholder="Title by Author" style="flex:1;padding:6px 8px;border:2px solid #E8DFD5;border-radius:8px;font-family:Nunito,sans-serif;font-size:13px;color:#3D5A80;">' +
+        '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_removePiece(' + i + ')">✕</button>' +
+        '</div>'
+    ).join('');
+}
+
+// ---- INDIVIDUAL PHOTOS ----
+function _renderMultiMode() {
+    _shelfScan.mode = 'multi';
+    if (!Array.isArray(_shelfScan.pieces) || !_shelfScan.pieces.length) {
+        _shelfScan.pieces = _shelfScan.images.map((img, i) => ({ title: '', author: '', img: img, order: i }));
+    }
+    const aiBtn = getShelfVisionUrl() ? '<button class="btn btn-primary" style="font-size:13px;" onclick="_multiAiRead()">🤖 Read titles with AI</button>' : '';
+    _openScanModal(
+        '<p style="color:#8B7E74;font-size:13px;margin:0 0 10px;">' + _shelfScan.pieces.length + ' photos, in the order you picked. Type each title (autocompletes from your library)' + (getShelfVisionUrl() ? ', or let AI read them.' : '.') + '</p>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">' + aiBtn +
+          '<button class="btn btn-primary" onclick="_renderReview()">Next: review &amp; link →</button>' +
+          '<button class="btn btn-secondary" onclick="closeModal(\'shelfScanModal\')">Cancel</button>' +
+        '</div>' +
+        '<div id="multiList"></div>', 'Individual photos');
+    refreshLibraryTitlesDatalist();
+    _renderMultiList();
+}
+function _renderMultiList() {
+    const el = document.getElementById('multiList'); if (!el) return;
+    el.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;">' +
+        _shelfScan.pieces.map((p, i) =>
+            '<div style="background:#FEF3E2;border-radius:10px;padding:8px;">' +
+            (p.img ? '<img src="' + p.img + '" style="width:100%;height:120px;object-fit:cover;border-radius:8px;">' : '') +
+            '<div style="font-size:11px;color:#D4A76A;font-weight:700;margin:6px 0 4px;">#' + (i + 1) + '</div>' +
+            '<input list="libraryTitlesList" value="' + escapeHtml(p.title + (p.author ? ' by ' + p.author : '')) + '" oninput="_setPieceText(' + i + ',this.value)" placeholder="Title by Author" style="width:100%;padding:5px 7px;border:2px solid #E8DFD5;border-radius:8px;font-family:Nunito,sans-serif;font-size:12px;color:#3D5A80;">' +
+            '</div>'
+        ).join('') + '</div>';
+}
+async function _multiAiRead() {
+    if (!getShelfVisionUrl()) return;
+    const el = document.getElementById('multiList');
+    if (el) el.insertAdjacentHTML('beforebegin', '<div id="multiAiMsg" style="color:#8B7E74;font-size:12px;margin-bottom:8px;">🤖 Reading titles…</div>');
+    try {
+        const data = await callShelfVision(_shelfScan.images, 'single');
+        // worker returns one entry per image, in order — map positionally, fill only non-empty
+        const arr = (data && Array.isArray(data.books)) ? data.books : (parseVisionBooks(data) || []);
+        let n = 0;
+        arr.forEach((b, i) => {
+            const title = (b && b.title != null ? String(b.title) : '').trim();
+            if (!title || !_shelfScan.pieces[i]) return;
+            _shelfScan.pieces[i].title = title;
+            _shelfScan.pieces[i].author = (b && b.author != null ? String(b.author) : '').trim();
+            n++;
+        });
+        _renderMultiList();
+        showNotification(n ? ('AI read ' + n + ' titles') : 'AI couldn\'t read those — type them in', 1800);
+    } catch (e) {
+        showNotification('AI read failed — type them in', 1800);
+    }
+    const m = document.getElementById('multiAiMsg'); if (m) m.remove();
+}
+
+// ---- shared piece editing ----
+function _setPieceText(i, val) {
+    const p = _shelfScan.pieces[i]; if (!p) return;
+    const m = val.match(/(.+?)\s+by\s+(.+)/i);
+    p.title = m ? m[1].trim() : val.trim();
+    p.author = m ? m[2].trim() : '';
+}
+function _removePiece(i) {
+    _shelfScan.pieces.splice(i, 1);
+    _shelfScan.pieces.forEach((p, idx) => p.order = idx);
+    if (_shelfScan.mode === 'tap') { _renderTapMarkers(); _renderTapList(); }
+    else if (_shelfScan.mode === 'multi') _renderMultiList();
+    else _renderReview();
+}
+
+// ---- REVIEW & COMMIT ----
+function _defaultShelfLabel() {
+    const existing = (_shelfScan.photoId && app.shelfPhotos.find(p => p.id === _shelfScan.photoId));
+    if (existing) return existing.label;
+    return 'Shelf ' + ((app.shelfPhotos ? app.shelfPhotos.length : 0) + 1);
+}
+function _pieceThumbHtml(p, w, h) {
+    if (p.img) return '<img src="' + p.img + '" style="width:' + w + 'px;height:' + h + 'px;object-fit:cover;border-radius:6px;flex-shrink:0;">';
+    if (p.box && _shelfScan.images[0]) {
+        const c = cssCropStyle(p.box);
+        return '<div style="width:' + w + 'px;height:' + h + 'px;border-radius:6px;flex-shrink:0;background-image:url(' + _shelfScan.images[0] + ');background-size:' + c.sizeX + '% ' + c.sizeY + '%;background-position:' + c.posX + '% ' + c.posY + '%;"></div>';
+    }
+    return '<div style="width:' + w + 'px;height:' + h + 'px;border-radius:6px;flex-shrink:0;background:#E8DFD5;"></div>';
+}
+function _renderReview() {
+    const pieces = (_shelfScan.pieces || []).filter(p => (p.title || '').trim());
+    if (!pieces.length) { showNotification('Add at least one book first', 1600); return; }
+    _shelfScan.pieces = pieces.map((p, i) => Object.assign({}, p, { order: i }));
+    refreshLibraryTitlesDatalist();
+    const rows = _shelfScan.pieces.map((p, i) => {
+        const match = app.books.find(b => isImportDuplicate(b, { title: p.title, author: p.author, isbn: '' }));
+        const badge = match
+            ? '<span style="font-size:10px;color:#7D9B76;font-weight:700;white-space:nowrap;">✓ in library</span>'
+            : '<span style="font-size:10px;color:#D4A76A;font-weight:700;white-space:nowrap;">+ new</span>';
+        return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">' +
+            '<span style="color:#8B7E74;font-size:11px;width:18px;text-align:right;flex-shrink:0;">' + (i + 1) + '</span>' +
+            _pieceThumbHtml(p, 40, 56) +
+            '<input list="libraryTitlesList" value="' + escapeHtml(p.title + (p.author ? ' by ' + p.author : '')) + '" oninput="_setPieceText(' + i + ',this.value)" style="flex:1;min-width:0;padding:6px 8px;border:2px solid #E8DFD5;border-radius:8px;font-family:Nunito,sans-serif;font-size:13px;color:#3D5A80;">' +
+            badge +
+            '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;flex-shrink:0;" onclick="_removePiece(' + i + ')">✕</button>' +
+            '</div>';
+    }).join('');
+    _openScanModal(
+        '<p style="color:#8B7E74;font-size:13px;margin:0 0 10px;">In shelf order. Fix any title (autocompletes from your library), then save. Matched books link to your library; new ones are added.</p>' +
+        '<label style="font-size:12px;font-weight:700;color:#8B7E74;">Shelf name</label>' +
+        '<input id="scanShelfLabel" value="' + escapeHtml(_defaultShelfLabel()) + '" style="width:100%;padding:7px 9px;margin:4px 0 12px;border:2px solid #E8DFD5;border-radius:8px;font-family:Nunito,sans-serif;font-size:13px;color:#3D5A80;">' +
+        '<div style="max-height:340px;overflow:auto;">' + rows + '</div>' +
+        '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">' +
+          '<button class="btn btn-primary" onclick="_commitShelfScan()">🧩 Save shelf &amp; link library</button>' +
+          (_shelfScan.mode === 'tap' ? '<button class="btn btn-secondary" onclick="_renderTapMode()">← Back to tapping</button>' : '') +
+          (_shelfScan.mode === 'multi' ? '<button class="btn btn-secondary" onclick="_renderMultiMode()">← Back</button>' : '') +
+          '<button class="btn btn-secondary" onclick="closeModal(\'shelfScanModal\')">Cancel</button>' +
+        '</div>', 'Review &amp; link');
+}
+function _commitShelfScan() {
+    const labelInput = document.getElementById('scanShelfLabel');
+    const pieces = (_shelfScan.pieces || []).filter(p => (p.title || '').trim());
+    if (!pieces.length) { showNotification('Nothing to save', 1500); return; }
+    const label = (labelInput ? labelInput.value : '').trim() || _defaultShelfLabel();
+
+    let photo = _shelfScan.photoId ? app.shelfPhotos.find(p => p.id === _shelfScan.photoId) : null;
+    const isNew = !photo;
+    if (!photo) {
+        photo = { id: Date.now() + Math.random(), data: _shelfScan.images[0] || '', label: label, dateAdded: new Date().toISOString(), taggedBooks: [], pieces: [], isPuzzle: true };
+    }
+    photo.label = label;
+    if (_shelfScan.mode !== 'multi' && _shelfScan.images[0]) photo.data = _shelfScan.images[0];
+    photo.isPuzzle = true;
+
+    let added = 0;
+    photo.pieces = pieces.map((p, i) => {
+        const incoming = { title: p.title, author: p.author, isbn: '' };
+        let lib = app.books.find(b => isImportDuplicate(b, incoming));
+        if (lib) {
+            lib.shelfLocation = label; lib.shelfPhotoId = photo.id; lib.shelfOrder = i;
+        } else {
+            lib = {
+                id: app.getNextId(), title: p.title, author: p.author, genre: '', pages: 0, isbn: '',
+                publisher: '', publicationYear: null, language: 'English', format: '', series: '',
+                description: '', status: 'want', rating: 0, notes: 'Scanned from shelf: ' + label,
+                shelfLocation: label, shelfPhotoId: photo.id, shelfOrder: i,
+                ownershipFormat: ['Physical'], dateAdded: new Date().toISOString()
+            };
+            app.books.push(lib); added++;
+        }
+        return { title: p.title, author: p.author, box: p.box || null, img: p.img || null, order: i, libraryId: lib.id };
+    });
+    photo.taggedBooks = photo.pieces.map(p => ({ title: p.title, author: p.author }));
+    if (isNew) app.shelfPhotos.push(photo);
+
+    if (added > 0) { app.addXP(added * 10); if (added > 3) triggerConfetti(); }
+    app.saveData();
+    try { updateXPDisplay(); } catch (e) {}
+    closeModal('shelfScanModal');
+    renderPhotoGallery();
+    renderShelfPuzzles();
+    showNotification(pieces.length + ' books · ' + added + ' new' + (added > 0 ? ' +' + (added * 10) + ' XP' : ''), 1900);
+}
+
+function editShelfPuzzle(photoId) {
+    const photo = app.shelfPhotos.find(p => p.id === photoId);
+    if (!photo) return;
+    const multi = !!(photo.pieces && photo.pieces.some(p => p.img));
+    _shelfScan = {
+        mode: multi ? 'multi' : 'tap',
+        images: multi ? (photo.pieces || []).map(p => p.img).filter(Boolean) : (photo.data ? [photo.data] : []),
+        pieces: (photo.pieces || []).map((p, i) => ({ title: p.title, author: p.author, box: p.box || null, img: p.img || null, order: i })),
+        photoId: photo.id
+    };
+    _renderReview();
+}
+
+function renderShelfPuzzles() {
+    const wrap = document.getElementById('shelfPuzzles');
+    if (!wrap) return;
+    const puzzles = (app.shelfPhotos || []).filter(p => p.isPuzzle && p.pieces && p.pieces.length);
+    if (!puzzles.length) { wrap.innerHTML = ''; return; }
+    wrap.innerHTML = puzzles.map(photo => {
+        const tiles = photo.pieces.slice().sort((a, b) => (a.order || 0) - (b.order || 0)).map(p => {
+            const lib = (p.libraryId != null) ? app.books.find(b => b.id === p.libraryId) : null;
+            const click = lib ? ' onclick="openBookModal(' + lib.id + ')" title="' + escapeHtml(p.title) + '"' : ' title="' + escapeHtml(p.title) + ' (not in library)"';
+            let face;
+            if (p.img) {
+                face = '<div style="width:46px;height:70px;border-radius:5px;background-image:url(' + p.img + ');background-size:cover;background-position:center;"></div>';
+            } else if (p.box && photo.data) {
+                const c = cssCropStyle(p.box);
+                face = '<div style="width:46px;height:70px;border-radius:5px;background-image:url(' + photo.data + ');background-size:' + c.sizeX + '% ' + c.sizeY + '%;background-position:' + c.posX + '% ' + c.posY + '%;"></div>';
+            } else {
+                face = '<div style="width:46px;height:70px;border-radius:5px;background:linear-gradient(160deg,#7D9B76,#3D5A80);display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;">📖</div>';
+            }
+            return '<div style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:' + (lib ? 'pointer' : 'default') + ';width:50px;"' + click + '>' +
+                face +
+                '<div style="font-size:9px;color:#3D5A80;text-align:center;line-height:1.1;max-height:22px;overflow:hidden;">' + escapeHtml((p.title || '').slice(0, 22)) + '</div>' +
+                (lib ? '' : '<div style="font-size:8px;color:#D4A76A;">+new</div>') + '</div>';
+        }).join('');
+        return '<div style="background:#FFF8F0;border:1px solid #E8DFD5;border-radius:12px;padding:12px;margin-bottom:12px;">' +
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">' +
+              '<span style="font-size:14px;font-weight:700;color:#3D5A80;">🧩 ' + escapeHtml(photo.label) + '</span>' +
+              '<span style="font-size:11px;color:#8B7E74;">' + photo.pieces.length + ' books, in order</span>' +
+              '<button class="btn btn-secondary" style="margin-left:auto;font-size:11px;padding:4px 8px;" onclick="editShelfPuzzle(' + photo.id + ')">✏️ Edit</button>' +
+            '</div>' +
+            '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;">' + tiles + '</div>' +
+        '</div>';
+    }).join('');
 }
 
 // ============================================
@@ -11913,9 +12434,9 @@ function renderShelfMap() {
         return `
         <div class="shelf-map-card">
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-                <img src="${photo.data}" alt="${photo.label}" style="width:60px;height:45px;object-fit:cover;border-radius:8px;cursor:pointer;flex-shrink:0;" onclick="openPhotoLightbox(${realIdx})">
+                <img src="${photo.data}" alt="${escapeHtml(photo.label)}" style="width:60px;height:45px;object-fit:cover;border-radius:8px;cursor:pointer;flex-shrink:0;" onclick="openPhotoLightbox(${realIdx})">
                 <div>
-                    <h4 style="margin:0;font-size:15px;color:#3D5A80;">📍 ${photo.label}</h4>
+                    <h4 style="margin:0;font-size:15px;color:#3D5A80;">📍 ${escapeHtml(photo.label)}</h4>
                     <div style="font-size:12px;color:#8B7E74;">${photo.taggedBooks.length} book${photo.taggedBooks.length !== 1 ? 's' : ''}</div>
                 </div>
             </div>
@@ -11924,8 +12445,8 @@ function renderShelfMap() {
                     <div style="font-size:11px;color:#D4A76A;font-weight:700;margin-bottom:4px;">Row ${rowNum}</div>
                     <div style="display:flex;gap:4px;flex-wrap:wrap;">
                         ${books.map(b => {
-                            const inLibrary = app.books.find(lb => lb.title.toLowerCase() === b.title.toLowerCase());
-                            return `<div style="background:${inLibrary ? 'rgba(125,155,118,0.15)' : 'rgba(212,167,106,0.12)'};padding:4px 10px;border-radius:8px;font-size:12px;color:#3D5A80;cursor:${inLibrary ? 'pointer' : 'default'};border:1px solid ${inLibrary ? 'rgba(125,155,118,0.3)' : 'rgba(212,167,106,0.2)'};" ${inLibrary ? `onclick="openBookModal(${inLibrary.id})" title="Click to view"` : `title="Not yet in library"`}>📖 ${b.title}${b.author ? ` <span style='color:#8B7E74;font-size:11px;'>— ${b.author}</span>` : ''}</div>`;
+                            const inLibrary = app.books.find(lb => isImportDuplicate(lb, { title: b.title, author: b.author, isbn: '' }));
+                            return `<div style="background:${inLibrary ? 'rgba(125,155,118,0.15)' : 'rgba(212,167,106,0.12)'};padding:4px 10px;border-radius:8px;font-size:12px;color:#3D5A80;cursor:${inLibrary ? 'pointer' : 'default'};border:1px solid ${inLibrary ? 'rgba(125,155,118,0.3)' : 'rgba(212,167,106,0.2)'};" ${inLibrary ? `onclick="openBookModal(${inLibrary.id})" title="Click to view"` : `title="Not yet in library"`}>📖 ${escapeHtml(b.title)}${b.author ? ` <span style='color:#8B7E74;font-size:11px;'>— ${escapeHtml(b.author)}</span>` : ''}</div>`;
                         }).join('')}
                     </div>
                 </div>
@@ -11981,7 +12502,7 @@ function enhancedLibrarySearch() {
                     <span style="font-weight:600;color:#3D5A80;font-size:13px;">${b.title}</span>
                     <span style="color:#8B7E74;font-size:12px;"> by ${b.author}</span>
                 </div>
-                <span style="background:rgba(212,167,106,0.15);color:#D4A76A;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;" onclick="showShelfLocation(${b.shelfPhotoIdx})" title="Click to see shelf photo">📍 ${b.shelfLocation}</span>
+                <span style="background:rgba(212,167,106,0.15);color:#D4A76A;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;" onclick="showShelfLocation(${b.shelfPhotoId})" title="Click to see shelf photo">📍 ${escapeHtml(b.shelfLocation)}</span>
             </div>
         `).join('');
         html += `</div>`;
