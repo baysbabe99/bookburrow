@@ -2875,6 +2875,7 @@
                             <label style="font-size:13px;color:#8B7E74;font-weight:700;display:block;margin-bottom:6px;">🔔 Release Alerts:</label>
                             <button class="btn btn-primary" id="prefReleaseAlertsBtn" onclick="toggleReleaseAlerts()" style="font-size:13px;">🔕 Turn On Release Alerts</button>
                             <div style="font-size:11px;color:#8B7E74;margin-top:6px;">Get a browser notification when a book with a release date drops. Fine-tune the timing (day-of / 1 day / 1 week) in Settings → Import/Export.</div>
+                            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#8B7E74;margin-top:10px;cursor:pointer;font-weight:600;"><input type="checkbox" id="prefReleaseMatchOnly" onchange="saveReleaseMatchOnly()" style="accent-color:#7D9B76;width:15px;height:15px;"> ⭐ Only alert me for releases that match my reading preferences</label>
                         </div>
 
                         <div style="margin-bottom:16px;">
@@ -2997,6 +2998,14 @@
 
                     <!-- Upcoming Releases (books in your library with a future release date) -->
                     <div id="dashReleasesSection"></div>
+
+                    <!-- Discover: new & upcoming books from favorite authors (Google Books) -->
+                    <div id="discoverReleasesSection" style="display:none;margin-bottom:28px;">
+                        <h2 class="section-header">🔮 New from Your Favorite Authors</h2>
+                        <p style="color:#8B7E74;font-size:13px;margin-bottom:10px;">Upcoming &amp; recent books by authors you love that aren't on your shelf yet. Add one and any with a release date plugs into your alerts.</p>
+                        <button class="btn btn-secondary" id="discoverReleasesBtn" onclick="discoverUpcomingReleases()" style="font-size:13px;">🔮 Check for new releases</button>
+                        <div id="discoverReleasesBody" style="margin-top:12px;"></div>
+                    </div>
 
                     <!-- 2. Reading Goals (Day / Week / Month / Year) -->
                     <h2 class="section-header">Reading Goals</h2>
@@ -4730,6 +4739,13 @@ function releaseAlertKey(book, leadDays) {
     return `${book.id}|${leadDays}|${book.releaseDate || ''}`;
 }
 
+function saveReleaseMatchOnly() {
+    if (!app || !app.profile) return;
+    app.profile.releaseMatchOnly = !!(document.getElementById('prefReleaseMatchOnly') && document.getElementById('prefReleaseMatchOnly').checked);
+    app.saveData();
+    showNotification(app.profile.releaseMatchOnly ? 'Release alerts now match your preferences ⭐' : 'Release alerts: all tracked books', 1600);
+}
+
 function checkReleaseAlerts() {
     if (!app || !app.releaseAlertsEnabled) return;
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
@@ -4741,6 +4757,8 @@ function checkReleaseAlerts() {
         if (!book.releaseDate) return;
         const daysAway = daysUntilRelease(book.releaseDate);
         if (daysAway === null || daysAway < 0) return;
+        // Optional: only alert for books matching the reader's preferences
+        if (app.profile && app.profile.releaseMatchOnly && typeof bookMatchesPrefs === 'function' && !bookMatchesPrefs(book)) return;
 
         leadTimes.forEach(lead => {
             if (daysAway !== lead) return;
@@ -5021,10 +5039,87 @@ function renderReleasesInto(containerId, opts) {
     el.innerHTML = header + '<div style="margin-bottom:28px;">' + rows + '</div>';
 }
 
+// ===== Discovery: new/upcoming books by favorite authors (Google Books) =====
+function _isFutureDate(s) {
+    if (!s) return false;
+    var m = String(s).match(/^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?/);
+    if (!m) return false;
+    var y = parseInt(m[1]), mo = m[2] ? parseInt(m[2]) - 1 : 11, d = m[3] ? parseInt(m[3]) : 28;
+    var dt = new Date(y, mo, d), today = new Date(); today.setHours(0, 0, 0, 0);
+    return dt > today;
+}
+function _normReleaseDate(s) {
+    var t = String(s || '');
+    var full = t.match(/^(\d{4})-(\d{2})-(\d{2})/); if (full) return full[1] + '-' + full[2] + '-' + full[3];
+    var ym = t.match(/^(\d{4})-(\d{2})$/); if (ym) return ym[1] + '-' + ym[2] + '-01';
+    return '';
+}
+async function discoverUpcomingReleases() {
+    var profile = app.profile || {};
+    var authors = (profile.favoriteAuthors || []).slice(0, 5);
+    var body = document.getElementById('discoverReleasesBody');
+    if (!authors.length) { if (body) body.innerHTML = '<div style="color:#8B7E74;font-size:13px;">Add favorite authors in your Profile to discover their new books.</div>'; return; }
+    if (body) body.innerHTML = '<div style="color:#8B7E74;font-size:13px;padding:8px;">🔮 Searching for new books by ' + authors.map(_esc).join(', ') + '…</div>';
+    var have = new Set(app.books.map(function (b) { return (b.title || '').toLowerCase(); }));
+    var seen = new Set(), found = [];
+    for (var i = 0; i < authors.length; i++) {
+        var author = authors[i];
+        try {
+            var url = 'https://www.googleapis.com/books/v1/volumes?q=' + encodeURIComponent('inauthor:"' + author + '"') + '&orderBy=newest&maxResults=10&printType=books';
+            var res = await fetch(url);
+            var data = await res.json();
+            (data.items || []).forEach(function (it) {
+                var vi = it.volumeInfo || {}, title = vi.title; if (!title) return;
+                var key = title.toLowerCase();
+                if (have.has(key) || seen.has(key)) return;
+                var byAuthor = (vi.authors || []).some(function (a) { return a.toLowerCase().indexOf(author.toLowerCase()) >= 0 || author.toLowerCase().indexOf(a.toLowerCase()) >= 0; });
+                if (!byAuthor) return;
+                seen.add(key);
+                var img = (vi.imageLinks && (vi.imageLinks.thumbnail || vi.imageLinks.smallThumbnail)) || '';
+                found.push({ title: title, author: (vi.authors && vi.authors[0]) || author, date: vi.publishedDate || '', pages: vi.pageCount || 0, genre: (vi.categories && vi.categories[0]) || '', cover: img ? img.replace(/^http:/, 'https:') : '' });
+            });
+        } catch (e) {}
+    }
+    found.sort(function (a, b) { return String(b.date).localeCompare(String(a.date)); });
+    found.sort(function (a, b) { return (_isFutureDate(a.date) ? 0 : 1) - (_isFutureDate(b.date) ? 0 : 1); });
+    window._discoverResults = found.slice(0, 18);
+    renderDiscoverResults();
+}
+function renderDiscoverResults() {
+    var body = document.getElementById('discoverReleasesBody');
+    if (!body) return;
+    var list = window._discoverResults || [];
+    if (!list.length) { body.innerHTML = '<div style="color:#8B7E74;font-size:13px;">No new titles found right now — check back later.</div>'; return; }
+    body.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;">' + list.map(function (b, i) {
+        var future = _isFutureDate(b.date);
+        return '<div style="display:flex;gap:10px;background:#FFF8F0;border:1.5px solid ' + (future ? '#D4A76A' : '#E8DFD5') + ';border-radius:10px;padding:10px;">'
+            + (b.cover ? '<img src="' + _esc(b.cover) + '" style="width:40px;height:60px;object-fit:cover;border-radius:4px;flex-shrink:0;">' : '<div style="width:40px;height:60px;background:#E8DFD5;border-radius:4px;flex-shrink:0;text-align:center;line-height:60px;">📖</div>')
+            + '<div style="flex:1;min-width:0;"><div style="color:#3D5A80;font-weight:700;font-size:12px;">' + _esc(b.title) + '</div>'
+            + '<div style="font-size:11px;color:#8B7E74;">' + _esc(b.author) + (b.date ? ' · ' + _esc(b.date) : '') + '</div>'
+            + (future ? '<div style="font-size:10px;color:#C2705B;font-weight:700;margin-top:2px;">🔜 Upcoming</div>' : '')
+            + '<button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;margin-top:6px;" onclick="addDiscoveredBook(' + i + ')">➕ ' + (future ? 'Track release' : 'Add to TBR') + '</button>'
+            + '</div></div>';
+    }).join('') + '</div>';
+}
+function addDiscoveredBook(i) {
+    var b = (window._discoverResults || [])[i];
+    if (!b) return;
+    var future = _isFutureDate(b.date);
+    var rel = future ? _normReleaseDate(b.date) : '';
+    var book = { id: Date.now() + Math.floor(Math.random() * 1000), title: b.title, author: b.author || '', status: 'want', genre: b.genre || '', pages: b.pages || 0, cover: b.cover || '', isbn: '', rating: 0, dateAdded: new Date().toISOString(), releaseDate: rel, ownershipFormat: [], notes: 'Discovered from a favorite author' };
+    app.books.push(book); app.saveData();
+    showNotification(rel ? 'Tracking "' + b.title + '" — release alert set 🔔' : 'Added "' + b.title + '" to your TBR 📚', 1900);
+    try { if (typeof populateLibraryDropdowns === 'function') populateLibraryDropdowns(); } catch (e) {}
+    window._discoverResults = (window._discoverResults || []).filter(function (x, idx) { return idx !== i; });
+    renderDiscoverResults();
+    try { renderDashboard(); } catch (e) {}
+}
+
 function renderDashboard() {
     if (!app) return;
 
     try { renderReleasesInto('dashReleasesSection', { header: '📅 Upcoming Releases', matchFirst: true }); } catch (e) {}
+    try { var _ds = document.getElementById('discoverReleasesSection'); if (_ds) _ds.style.display = ((app.profile && (app.profile.favoriteAuthors || []).length) ? 'block' : 'none'); } catch (e) {}
 
     // Update welcome message with user's name
     const welcome = document.querySelector('.welcome-message h1');
@@ -8926,6 +9021,8 @@ function renderProfile() {
     document.querySelectorAll('.prefPub-cb').forEach(c => { c.checked = pubs.includes(c.value); });
     const pubInput = document.getElementById('favPublishers');
     if (pubInput) pubInput.value = pubs.filter(p => !pubChipVals.includes(p)).join(', ');
+    const rmoCb = document.getElementById('prefReleaseMatchOnly');
+    if (rmoCb) rmoCb.checked = !!profile.releaseMatchOnly;
 
     // Favorites section
     const genreSingleInput = document.getElementById('favGenreSingle');
