@@ -11158,11 +11158,13 @@ function renderRecommendations() {
     const moodEmoji = { cozy:'🧸', dark:'🌑', funny:'😂', emotional:'💧', adventurous:'⚔️', 'thought-provoking':'🧠' };
 
     container.innerHTML = whyPanelHtml + friendInputHtml + friendHtml + `
+        <div id="recBulkBar" style="display:none;gap:8px;flex-wrap:wrap;align-items:center;background:#FEF3E2;border:2px solid rgba(125,155,118,0.45);border-radius:12px;padding:10px 14px;margin-bottom:14px;position:sticky;top:8px;z-index:5;"></div>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;">
-            ${recs.slice(0, 30).map(rec => `
+            ${recs.slice(0, 50).map(rec => `
                 <div style="background:#FEF3E2;border-radius:12px;padding:16px;border:2px solid ${rec._score >= 5 ? 'rgba(125,155,118,0.5)' : '#E8DFD5'};transition:all 0.2s;position:relative;" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 20px rgba(0,0,0,0.08)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+                    <input type="checkbox" class="rec-select" ${(window._recSelected && window._recSelected[rec.title.toLowerCase()]) ? 'checked' : ''} onchange="toggleRecSelect(this)" data-title="${_esc(rec.title)}" data-author="${_esc(rec.author)}" data-genre="${_esc(rec.genre)}" data-pages="${rec.pages}" title="Select for bulk action" style="position:absolute;top:10px;left:10px;width:18px;height:18px;accent-color:#7D9B76;cursor:pointer;z-index:2;">
                     ${rec._score >= 5 ? '<div style="position:absolute;top:8px;right:8px;background:#7D9B76;color:white;font-size:10px;padding:2px 6px;border-radius:8px;font-weight:700;">Great Match</div>' : ''}
-                    <div style="font-weight:700;color:#3D5A80;font-size:15px;margin-bottom:4px;padding-right:${rec._score >= 5 ? '70px' : '0'};">${rec.title}</div>
+                    <div style="font-weight:700;color:#3D5A80;font-size:15px;margin-bottom:4px;padding-left:26px;padding-right:${rec._score >= 5 ? '70px' : '0'};">${rec.title}</div>
                     <div style="color:#8B7E74;font-size:13px;margin-bottom:6px;">by ${rec.author} · ${rec.pages}p</div>
                     <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;">
                         <span style="background:rgba(125,155,118,0.15);color:#7D9B76;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${rec.genre}</span>
@@ -11172,10 +11174,11 @@ function renderRecommendations() {
                     ${rec.content.length > 0 ? `<div style="font-size:10px;color:#F43F5E;margin-bottom:4px;">⚠️ ${rec.content.join(', ')}</div>` : ''}
                     <div style="color:#C2705B;font-size:12px;font-style:italic;">💡 ${rec._reason}</div>
                     <div style="color:#8B7E74;font-size:12px;margin-top:2px;">"${rec.why}"</div>
-                    <div style="display:flex;gap:6px;margin-top:10px;">
-                        <button class="btn btn-primary" style="flex:1;font-size:12px;padding:6px 10px;" onclick="addRecommendation('${rec.title.replace(/'/g,"\\'")}','${rec.author.replace(/'/g,"\\'")}','${rec.genre.replace(/'/g,"\\'")}',${rec.pages},'want')">📖 To Be Read</button>
-                        <button class="btn btn-secondary" style="flex:1;font-size:12px;padding:6px 10px;" onclick="addRecommendation('${rec.title.replace(/'/g,"\\'")}','${rec.author.replace(/'/g,"\\'")}','${rec.genre.replace(/'/g,"\\'")}',${rec.pages},'buy')">🛒 Want to Buy</button>
-                        <button class="btn btn-secondary" style="flex:1;font-size:12px;padding:6px 10px;" onclick="ownRec('${rec.title.replace(/'/g,"\\'")}','${rec.author.replace(/'/g,"\\'")}','${rec.genre.replace(/'/g,"\\'")}',${rec.pages})">📦 Own it</button>
+                    <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">
+                        <button class="btn btn-primary" style="flex:1;min-width:96px;font-size:12px;padding:6px 8px;" onclick="addRecommendation('${rec.title.replace(/'/g,"\\'")}','${rec.author.replace(/'/g,"\\'")}','${rec.genre.replace(/'/g,"\\'")}',${rec.pages},'want')">📖 To Be Read</button>
+                        <button class="btn btn-secondary" style="flex:1;min-width:72px;font-size:12px;padding:6px 8px;" onclick="addRecommendation('${rec.title.replace(/'/g,"\\'")}','${rec.author.replace(/'/g,"\\'")}','${rec.genre.replace(/'/g,"\\'")}',${rec.pages},'read')">✅ Read</button>
+                        <button class="btn btn-secondary" style="flex:1;min-width:96px;font-size:12px;padding:6px 8px;" onclick="addRecommendation('${rec.title.replace(/'/g,"\\'")}','${rec.author.replace(/'/g,"\\'")}','${rec.genre.replace(/'/g,"\\'")}',${rec.pages},'buy')">🛒 Want to Buy</button>
+                        <button class="btn btn-secondary" style="flex:1;min-width:72px;font-size:12px;padding:6px 8px;" onclick="ownRec('${rec.title.replace(/'/g,"\\'")}','${rec.author.replace(/'/g,"\\'")}','${rec.genre.replace(/'/g,"\\'")}',${rec.pages})">📦 Own it</button>
                     </div>
                     <div style="display:flex;gap:5px;margin-top:6px;align-items:center;">
                         <button onclick="rateRec('${rec.title.replace(/'/g,"\\'")}','like')" title="More like this" style="padding:5px 9px;border:1.5px solid ${fb[rec.title.toLowerCase()]==='like'?'#7D9B76':'#E8DFD5'};border-radius:8px;background:${fb[rec.title.toLowerCase()]==='like'?'rgba(125,155,118,0.18)':'#FFF8F0'};cursor:pointer;font-size:13px;">👍</button>
@@ -11186,6 +11189,55 @@ function renderRecommendations() {
                 </div>
             `).join('')}
         </div>`;
+    try { renderRecBulkBar(); } catch (e) {}
+}
+
+// ---- Recommendations: multi-select + bulk add ----
+function _pushRecBook(title, author, genre, pages, status) {
+    if (app.books.some(b => (b.title || '').toLowerCase() === String(title).toLowerCase())) return false;
+    const book = {
+        id: app.getNextId(), title: title, author: author || '', genre: genre || '', pages: pages || 0, isbn: '',
+        publisher: '', publicationYear: null, language: 'English', format: '',
+        series: '', description: '', status: status || 'want', rating: 0,
+        notes: 'Added from recommendations', dateAdded: new Date().toISOString()
+    };
+    if (status === 'read') book.dateFinished = new Date().toISOString();
+    app.books.push(book);
+    return true;
+}
+function toggleRecSelect(cb) {
+    if (!window._recSelected) window._recSelected = {};
+    const key = (cb.dataset.title || '').toLowerCase();
+    if (cb.checked) window._recSelected[key] = { title: cb.dataset.title, author: cb.dataset.author || '', genre: cb.dataset.genre || '', pages: parseInt(cb.dataset.pages) || 0 };
+    else delete window._recSelected[key];
+    renderRecBulkBar();
+}
+function renderRecBulkBar() {
+    const bar = document.getElementById('recBulkBar');
+    if (!bar) return;
+    const sel = window._recSelected || {};
+    const n = Object.keys(sel).length;
+    if (!n) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+    bar.style.display = 'flex';
+    bar.innerHTML = '<span style="font-weight:700;color:#3D5A80;font-size:13px;align-self:center;">' + n + ' selected</span>'
+        + '<button class="btn btn-primary" style="font-size:12px;padding:6px 10px;" onclick="bulkAddRecs(\'want\')">📖 To Be Read</button>'
+        + '<button class="btn btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="bulkAddRecs(\'read\')">✅ Read</button>'
+        + '<button class="btn btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="bulkAddRecs(\'buy\')">🛒 Want to Buy</button>'
+        + '<button style="font-size:12px;padding:6px 10px;border:1.5px solid #E8DFD5;border-radius:8px;background:transparent;color:#8B7E74;cursor:pointer;font-weight:600;font-family:Nunito,sans-serif;" onclick="clearRecSelection()">Clear</button>';
+}
+function clearRecSelection() { window._recSelected = {}; renderRecommendations(); }
+function bulkAddRecs(status) {
+    const sel = window._recSelected || {};
+    const keys = Object.keys(sel);
+    if (!keys.length) return;
+    let added = 0;
+    keys.forEach(k => { if (_pushRecBook(sel[k].title, sel[k].author, sel[k].genre, sel[k].pages, status)) added++; });
+    window._recSelected = {};
+    if (added) app.addXP(added * 5);
+    app.saveData();
+    const word = status === 'read' ? 'Read' : (status === 'buy' ? 'Want to Buy' : 'To Be Read');
+    showNotification(added + ' book' + (added === 1 ? '' : 's') + ' added to ' + word + '! 📚', 1800);
+    renderRecommendations();
 }
 
 // 🔎 "Find more for me" — pull extra recs from Open Library by your favorite genres/authors.
