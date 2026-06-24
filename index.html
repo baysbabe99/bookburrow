@@ -11223,6 +11223,7 @@ function renderRecBulkBar() {
         + '<button class="btn btn-primary" style="font-size:12px;padding:6px 10px;" onclick="bulkAddRecs(\'want\')">📖 To Be Read</button>'
         + '<button class="btn btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="bulkAddRecs(\'read\')">✅ Read</button>'
         + '<button class="btn btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="bulkAddRecs(\'buy\')">🛒 Want to Buy</button>'
+        + '<button style="font-size:12px;padding:6px 10px;border:1.5px solid #F0C4C4;border-radius:8px;background:transparent;color:#C2705B;cursor:pointer;font-weight:700;font-family:Nunito,sans-serif;" onclick="bulkDismissRecs()">🚫 Not interested</button>'
         + '<button style="font-size:12px;padding:6px 10px;border:1.5px solid #E8DFD5;border-radius:8px;background:transparent;color:#8B7E74;cursor:pointer;font-weight:600;font-family:Nunito,sans-serif;" onclick="clearRecSelection()">Clear</button>';
 }
 function clearRecSelection() { window._recSelected = {}; renderRecommendations(); }
@@ -11237,6 +11238,19 @@ function bulkAddRecs(status) {
     app.saveData();
     const word = status === 'read' ? 'Read' : (status === 'buy' ? 'Want to Buy' : 'To Be Read');
     showNotification(added + ' book' + (added === 1 ? '' : 's') + ' added to ' + word + '! 📚', 1800);
+    renderRecommendations();
+}
+function bulkDismissRecs() {
+    const sel = window._recSelected || {};
+    const keys = Object.keys(sel);
+    if (!keys.length) return;
+    if (!app.profile) app.profile = {};
+    if (!app.profile.recDismissed) app.profile.recDismissed = [];
+    keys.forEach(k => { const t = String(sel[k].title).toLowerCase(); if (app.profile.recDismissed.indexOf(t) < 0) app.profile.recDismissed.push(t); });
+    const n = keys.length;
+    window._recSelected = {};
+    app.saveData();
+    showNotification('🚫 Hid ' + n + ' rec' + (n === 1 ? '' : 's'), 1500);
     renderRecommendations();
 }
 
