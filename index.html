@@ -5106,6 +5106,22 @@ async function discoverUpcomingReleases() {
             })(qq);
         } catch (e) {}
     }
+    // Penguin Random House — genuine forthcoming titles (real on-sale dates), via the optional proxy
+    if (typeof NYT_PROXY_URL !== 'undefined' && NYT_PROXY_URL && authors.length) {
+        for (var pi = 0; pi < authors.length; pi++) {
+            try {
+                var purl = NYT_PROXY_URL + (NYT_PROXY_URL.indexOf('?') >= 0 ? '&' : '?') + 'source=prh&author=' + encodeURIComponent(authors[pi]);
+                var pres = await fetch(purl);
+                var pjson = await pres.json();
+                (pjson || []).forEach(function (w) {
+                    var k = String(w.title || '').toLowerCase();
+                    if (!w.title || have.has(k) || seen.has(k)) return;
+                    seen.add(k);
+                    found.push({ title: w.title, author: w.author || '', date: w.onsale || '', pages: w.pages || 0, genre: '', cover: w.cover || '', via: 'PRH' + (w.onsale ? ' · on-sale ' + w.onsale : '') });
+                });
+            } catch (e) {}
+        }
+    }
     found.sort(function (a, b) { return String(b.date).localeCompare(String(a.date)); });
     found.sort(function (a, b) { return (_isFutureDate(a.date) ? 0 : 1) - (_isFutureDate(b.date) ? 0 : 1); });
     window._discoverResults = found.slice(0, 24);
@@ -5150,7 +5166,7 @@ async function loadNytBestsellers() {
     if (typeof NYT_PROXY_URL === 'undefined' || !NYT_PROXY_URL) { if (body) body.innerHTML = '<div style="color:#8B7E74;font-size:13px;">NYT panel isn\'t configured yet — see NYT_BESTSELLERS_SETUP.md.</div>'; return; }
     if (body) body.innerHTML = '<div style="color:#8B7E74;font-size:13px;padding:8px;">📈 Loading NYT best sellers…</div>';
     try {
-        var res = await fetch(NYT_PROXY_URL);
+        var res = await fetch(NYT_PROXY_URL + (NYT_PROXY_URL.indexOf('?') >= 0 ? '&' : '?') + 'source=nyt');
         var data = await res.json();
         var lists = (data && data.results && data.results.lists) || [];
         if (!lists.length) { if (body) body.innerHTML = '<div style="color:#8B7E74;font-size:13px;">No lists returned — check your proxy and NYT key.</div>'; return; }
