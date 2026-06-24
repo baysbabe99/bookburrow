@@ -3663,7 +3663,7 @@
                         <div id="challengeCatTabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;"></div>
                         <!-- Challenge Cards -->
                         <div id="challengeLibrary" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;"></div>
-                        <div style="margin-top:22px;border-top:2px dashed #E8DFD5;padding-top:16px;">
+                        <div id="miniChallengeSection" style="margin-top:22px;border-top:2px dashed #E8DFD5;padding-top:16px;">
                             <h4 style="color:#3D5A80;margin:0 0 4px;">🍂 Mini &amp; Seasonal Challenges</h4>
                             <p style="color:#8B7E74;font-size:12px;margin-bottom:12px;">Bite-sized seasonal &amp; monthly runs that break a bigger challenge down — e.g. a Summer or monthly mini within 52 Books in 52 Weeks.</p>
                             <div id="miniChallengeList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;"></div>
@@ -6945,12 +6945,29 @@ function renderChallengeLibrary() {
         <button onclick="challengeCatFilter='${key}';renderChallengeLibrary();" style="padding:6px 14px;border-radius:20px;border:2px solid ${challengeCatFilter === key ? '#7D9B76' : '#E8DFD5'};background:${challengeCatFilter === key ? 'rgba(125,155,118,0.15)' : 'transparent'};color:${challengeCatFilter === key ? '#7D9B76' : '#8B7E74'};font-family:Nunito,sans-serif;font-size:12px;font-weight:600;cursor:pointer;">${val.emoji} ${val.label}</button>
     `).join('');
 
-    const library = getChallengeLibrary().filter(c => c.cat !== 'mini'); // minis get their own sub-section below
+    const all = getChallengeLibrary();
+    const library = all.filter(c => c.cat !== 'mini'); // minis now nest inside their parent card
+    const allMinis = all.filter(c => c.cat === 'mini');
     const activeIds = app.challenges.map(c => c.libId || '');
     const filtered = challengeCatFilter === 'all' ? library : library.filter(c => c.cat === challengeCatFilter);
 
     libEl.innerHTML = filtered.map(c => {
         const isActive = activeIds.includes(c.id);
+        const kids = allMinis.filter(m => m.parent === c.id);
+        const kidsHtml = kids.length ? (
+            '<div style="margin-top:12px;border-top:1.5px dashed #E8DFD5;padding-top:10px;">'
+            + '<div style="font-size:11px;font-weight:700;color:#7D9B76;margin-bottom:8px;">🔗 Spin-offs you can add (' + kids.length + ')</div>'
+            + kids.map(m => {
+                const mActive = activeIds.includes(m.id);
+                return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:7px;">'
+                    + '<span style="font-size:16px;">' + m.emoji + '</span>'
+                    + '<div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:600;color:#3D5A80;">' + m.name + '</div>'
+                    + '<div style="font-size:10px;color:#8B7E74;">🎯 ' + m.target + ' ' + m.goalType + ' · 🎁 ' + m.reward + ' XP</div></div>'
+                    + (mActive ? '<span style="font-size:10px;color:#7D9B76;font-weight:700;">✅ Active</span>' : '<button class="btn btn-secondary" style="font-size:10px;padding:3px 9px;" onclick="startLibraryChallenge(\'' + m.id + '\')">Start</button>')
+                    + '</div>';
+            }).join('')
+            + '</div>'
+        ) : '';
         return `
         <div style="background:${isActive ? 'rgba(125,155,118,0.05)' : '#FFF8F0'};border-radius:12px;padding:14px;border:2px solid ${isActive ? '#7D9B76' : '#E8DFD5'};">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
@@ -6958,47 +6975,39 @@ function renderChallengeLibrary() {
                 <div style="font-weight:700;color:#3D5A80;font-size:14px;">${c.name}</div>
             </div>
             <div style="font-size:12px;color:#8B7E74;margin-bottom:8px;line-height:1.4;">${c.desc}</div>
-            <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;">
+            <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
                 <span style="background:rgba(212,167,106,0.15);color:#D4A76A;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">🎁 ${c.reward} XP</span>
                 <span style="background:rgba(125,155,118,0.1);color:#7D9B76;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">${c.badge} Badge</span>
                 <span style="background:rgba(61,90,128,0.1);color:#3D5A80;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">🎯 ${c.target} ${c.goalType}</span>
             </div>
             ${isActive ? '<div style="color:#7D9B76;font-weight:600;font-size:12px;">✅ Already active</div>' : `<button class="btn btn-primary" style="width:100%;font-size:12px;padding:6px;" onclick="startLibraryChallenge('${c.id}')">Start This Challenge</button>`}
+            ${kidsHtml}
         </div>`;
     }).join('');
 }
 
 // Mini & seasonal challenges shown as their own sub-section under the main challenges.
 function renderMiniChallenges() {
+    // Minis now render nested INSIDE their parent challenge card (see renderChallengeLibrary).
+    // This separate block only catches "orphan" minis whose parent isn't a real challenge; it
+    // hides itself when there are none.
+    var section = document.getElementById('miniChallengeSection');
     var el = document.getElementById('miniChallengeList');
     if (!el) return;
     var lib = getChallengeLibrary();
+    var libIds = {}; lib.forEach(function(c){ libIds[c.id] = true; });
     var activeIds = app.challenges.map(function(c){ return c.libId || ''; });
-    var minis = lib.filter(function(c){ return c.cat === 'mini'; });
-    function card(c) {
+    var orphans = lib.filter(function(c){ return c.cat === 'mini' && !(c.parent && libIds[c.parent]); });
+    if (!orphans.length) { if (section) section.style.display = 'none'; el.innerHTML = ''; return; }
+    if (section) section.style.display = '';
+    el.innerHTML = orphans.map(function(c) {
         var isActive = activeIds.includes(c.id);
         return '<div style="background:' + (isActive ? 'rgba(125,155,118,0.05)' : '#FFF8F0') + ';border-radius:12px;padding:14px;border:2px solid ' + (isActive ? '#7D9B76' : '#E8DFD5') + ';">'
             + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><span style="font-size:24px;">' + c.emoji + '</span><div style="font-weight:700;color:#3D5A80;font-size:14px;">' + c.name + '</div></div>'
             + '<div style="font-size:12px;color:#8B7E74;margin-bottom:8px;line-height:1.4;">' + c.desc + '</div>'
-            + '<div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">'
-            + '<span style="background:rgba(212,167,106,0.15);color:#D4A76A;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">🎁 ' + c.reward + ' XP</span>'
-            + '<span style="background:rgba(125,155,118,0.1);color:#7D9B76;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">' + c.badge + ' Badge</span>'
-            + '<span style="background:rgba(61,90,128,0.1);color:#3D5A80;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">🎯 ' + c.target + ' ' + c.goalType + '</span>'
-            + '</div>'
             + (isActive ? '<div style="color:#7D9B76;font-weight:600;font-size:12px;">✅ Already active</div>' : '<button class="btn btn-primary" style="width:100%;font-size:12px;padding:6px;" onclick="startLibraryChallenge(\'' + c.id + '\')">Start This Challenge</button>')
             + '</div>';
-    }
-    // Group minis under the bigger ("parent") challenge they belong to.
-    var groups = {};
-    minis.forEach(function(m){ var p = m.parent || 'other'; (groups[p] = groups[p] || []).push(m); });
-    var html = '';
-    Object.keys(groups).forEach(function(pid){
-        var parent = lib.find(function(c){ return c.id === pid; });
-        var label = parent ? (parent.emoji + ' ' + parent.name) : 'Standalone minis';
-        html += '<div style="font-size:12px;font-weight:700;color:#7D9B76;margin:8px 0;">🔗 Part of ' + label + '</div>';
-        html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin-bottom:18px;">' + groups[pid].map(card).join('') + '</div>';
-    });
-    el.innerHTML = html;
+    }).join('');
 }
 
 // Build a checklist for challenges that have no real published prompt list:
