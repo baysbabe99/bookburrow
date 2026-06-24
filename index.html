@@ -3465,7 +3465,7 @@
                     <input type="file" id="shelfScanInput" accept="image/*" style="display:none;">
                     <input type="file" id="shelfScanInputMulti" accept="image/*" multiple style="display:none;">
 
-                    <div class="photo-upload-zone" id="photoUploadZone" onclick="document.getElementById('photoInput').click()" style="cursor:pointer;border:3px dashed #E8DFD5;border-radius:16px;padding:30px 20px;text-align:center;transition:all 0.3s ease;">
+                    <div class="photo-upload-zone" id="photoUploadZone" onclick="pickShelfPhotos()" style="cursor:pointer;border:3px dashed #E8DFD5;border-radius:16px;padding:30px 20px;text-align:center;transition:all 0.3s ease;">
                         <div style="font-size:40px;margin-bottom:8px;">📸</div>
                         <p style="font-weight:600;color:#3D5A80;margin-bottom:4px;">Drag & drop bookshelf photos here</p>
                         <small style="color:#8B7E74;">or click to select images (JPG, PNG)</small>
@@ -3566,7 +3566,7 @@
                                 <p style="font-size:12px;color:#8B7E74;margin-bottom:10px;">Full backup — everything included.</p>
                                 <div style="display:flex;gap:10px;flex-wrap:wrap;">
                                     <button class="btn btn-primary" onclick="exportFullBackup()">💾 Download Full Backup</button>
-                                    <button class="btn btn-secondary" onclick="document.getElementById('restoreFile').click()">📂 Restore from Backup</button>
+                                    <button class="btn btn-secondary" onclick="pickRestoreFile()">📂 Restore from Backup</button>
                                     <input type="file" id="restoreFile" accept=".json" style="display:none;" onchange="restoreFromBackup(this)">
                                 </div>
                             </div>
@@ -7921,7 +7921,7 @@ function openAppGuide(appId) {
 
         <!-- File upload zone -->
         <div id="appGuideDropZone" style="border:2px dashed #E8DFD5;border-radius:12px;padding:24px;text-align:center;cursor:pointer;transition:all 0.2s;margin-bottom:16px;"
-             onclick="document.getElementById('appGuideFileInput').click()">
+             onclick="_dynFilePicker('.csv,.json,.txt', false, function(inp){ handleAppGuideFile(inp, '${appId}'); })">
             <div style="font-size:32px;margin-bottom:8px;">📁</div>
             <p style="color:#3D5A80;font-weight:700;margin:0 0 4px 0;">Drop your file here or click to upload</p>
             <small style="color:#8B7E74;">Supports CSV and JSON files</small>
@@ -8672,6 +8672,26 @@ function setupPhotoUpload() {
     });
     input.addEventListener('change', () => handlePhotoFiles(input.files));
 }
+
+// Robust file picker: builds a fresh <input> and clicks it within the user gesture.
+// Hidden display:none inputs triggered via .click() fail to open the dialog in some
+// browsers/setups; a freshly-created off-screen input is reliable (same as the Shelf
+// Puzzle fix). onInput receives the input element so callers can read .files.
+function _dynFilePicker(accept, multiple, onInput) {
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    if (accept) inp.accept = accept;
+    if (multiple) inp.multiple = true;
+    inp.style.cssText = 'position:fixed;left:-9999px;top:0;';
+    document.body.appendChild(inp);
+    inp.addEventListener('change', function () {
+        try { onInput(inp); } catch (e) { try { showNotification('Upload failed: ' + (e && e.message ? e.message : e), 2200); } catch (_) {} }
+        setTimeout(function () { try { inp.remove(); } catch (e) {} }, 0);
+    });
+    inp.click();
+}
+function pickShelfPhotos() { _dynFilePicker('image/*', true, function (inp) { handlePhotoFiles(inp.files); }); }
+function pickRestoreFile() { _dynFilePicker('.json', false, function (inp) { restoreFromBackup(inp); }); }
 
 function handlePhotoFiles(files) {
     Array.from(files).forEach(file => {
