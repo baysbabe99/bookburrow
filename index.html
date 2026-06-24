@@ -3246,6 +3246,61 @@
                     <div style="margin-bottom:16px;">
                         <input type="text" id="librarySearch" placeholder="Search your library by title, author, or genre..." oninput="applyLibraryFilters()" style="width:100%;padding:12px 16px;border:2px solid #E8DFD5;border-radius:12px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:14px;">
                     </div>
+
+                    <!-- Library Filter & Sort Bar (matches the Recommendations bar) -->
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:16px;">
+                        <select id="libFilterGenre" onchange="applyLibraryFilters()" style="padding:8px 12px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;cursor:pointer;">
+                            <option value="">All Genres</option>
+                        </select>
+                        <select id="libFilterFormat" onchange="applyLibraryFilters()" style="padding:8px 12px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;cursor:pointer;">
+                            <option value="">All Formats</option>
+                            <option value="Paperback">Paperback</option>
+                            <option value="Hardcover">Hardcover</option>
+                            <option value="eBook">eBook</option>
+                            <option value="Audiobook">Audiobook</option>
+                        </select>
+                        <select id="libFilterLength" onchange="applyLibraryFilters()" style="padding:8px 12px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;cursor:pointer;">
+                            <option value="">Any Length</option>
+                            <option value="short">Short (under 200p)</option>
+                            <option value="medium">Medium (200–400p)</option>
+                            <option value="long">Long (400+)</option>
+                            <option value="epic">Epic (600+)</option>
+                        </select>
+                        <select id="libFilterRating" onchange="applyLibraryFilters()" style="padding:8px 12px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;cursor:pointer;">
+                            <option value="">Any Rating</option>
+                            <option value="5">5 Stars</option>
+                            <option value="4">4+ Stars</option>
+                            <option value="3">3+ Stars</option>
+                            <option value="2">2+ Stars</option>
+                            <option value="1">1+ Stars</option>
+                            <option value="0">Unrated</option>
+                        </select>
+                        <select id="libFilterYear" onchange="applyLibraryFilters()" style="padding:8px 12px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;cursor:pointer;">
+                            <option value="">Any Year</option>
+                        </select>
+                        <select id="sortDropdown" onchange="applyLibraryFilters()" style="padding:8px 12px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;cursor:pointer;">
+                            <option value="title-asc">Sort: Title (A-Z)</option>
+                            <option value="title-desc">Sort: Title (Z-A)</option>
+                            <option value="author-asc">Sort: Author (A-Z)</option>
+                            <option value="author-desc">Sort: Author (Z-A)</option>
+                            <option value="genre-asc">Sort: Genre (A-Z)</option>
+                            <option value="genre-desc">Sort: Genre (Z-A)</option>
+                            <option value="rating-desc">Sort: Rating (High-Low)</option>
+                            <option value="rating-asc">Sort: Rating (Low-High)</option>
+                            <option value="date-desc">Sort: Date Added (Newest)</option>
+                            <option value="date-asc">Sort: Date Added (Oldest)</option>
+                            <option value="pages-desc">Sort: Pages (Most)</option>
+                            <option value="pages-asc">Sort: Pages (Least)</option>
+                            <option value="favorite-desc">Sort: Favorites First</option>
+                        </select>
+                        <label style="display:flex;align-items:center;gap:6px;padding:8px 12px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;font-size:13px;color:#3D5A80;cursor:pointer;font-weight:600;">
+                            <input type="checkbox" id="libFilterFavorite" onchange="applyLibraryFilters()" style="accent-color:#C2705B;width:15px;height:15px;">
+                            ❤️ Favorites
+                        </label>
+                        <button onclick="clearLibraryFilters()" style="padding:8px 12px;border:2px solid #E8DFD5;border-radius:10px;background:transparent;color:#8B7E74;font-family:Nunito,sans-serif;font-size:13px;cursor:pointer;font-weight:600;">Clear</button>
+                        <span id="libFilterCount" style="font-size:12px;color:#8B7E74;align-self:center;margin-left:auto;"></span>
+                    </div>
+
                     <!-- Library Search Results with Location -->
                     <div id="librarySearchLocationResults" style="display:none;margin-bottom:16px;"></div>
 
@@ -3267,21 +3322,6 @@
                             <button class="filter-btn" data-filter="buy">Want to Buy</button>
                         </div>
                         <div class="library-actions">
-                            <select class="sort-dropdown" id="sortDropdown" onchange="applyLibraryFilters()">
-                                <option value="title-asc">Sort by Title (A-Z)</option>
-                                <option value="title-desc">Sort by Title (Z-A)</option>
-                                <option value="author-asc">Sort by Author (A-Z)</option>
-                                <option value="author-desc">Sort by Author (Z-A)</option>
-                                <option value="genre-asc">Sort by Genre (A-Z)</option>
-                                <option value="genre-desc">Sort by Genre (Z-A)</option>
-                                <option value="rating-desc">Sort by Rating (High-Low)</option>
-                                <option value="rating-asc">Sort by Rating (Low-High)</option>
-                                <option value="date-desc">Sort by Date Added (Newest)</option>
-                                <option value="date-asc">Sort by Date Added (Oldest)</option>
-                                <option value="pages-desc">Sort by Pages (Most)</option>
-                                <option value="pages-asc">Sort by Pages (Least)</option>
-                                <option value="favorite-desc">Favorites First</option>
-                            </select>
                             <button class="btn btn-primary" id="openAddBookBtn2">+ Add Book</button>
                             <button class="btn btn-secondary" onclick="toggleBulkMode()">☑️ Bulk Edit</button>
                             <button class="btn btn-secondary" id="viewToggleBtn" onclick="toggleLibraryView()" title="Switch between grid and list view">☰ List View</button>
@@ -3289,44 +3329,6 @@
                         </div>
                     </div>
 
-                    <!-- Extra Filters -->
-                    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
-                        <select id="libFilterGenre" onchange="applyLibraryFilters()" style="padding:6px 10px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:12px;">
-                            <option value="">All Genres</option>
-                        </select>
-                        <select id="libFilterRating" onchange="applyLibraryFilters()" style="padding:6px 10px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:12px;">
-                            <option value="">Any Rating</option>
-                            <option value="5">5 Stars</option>
-                            <option value="4">4+ Stars</option>
-                            <option value="3">3+ Stars</option>
-                            <option value="2">2+ Stars</option>
-                            <option value="1">1+ Stars</option>
-                            <option value="0">Unrated</option>
-                        </select>
-                        <select id="libFilterFormat" onchange="applyLibraryFilters()" style="padding:6px 10px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:12px;">
-                            <option value="">All Formats</option>
-                            <option value="Paperback">Paperback</option>
-                            <option value="Hardcover">Hardcover</option>
-                            <option value="eBook">eBook</option>
-                            <option value="Audiobook">Audiobook</option>
-                        </select>
-                        <select id="libFilterLength" onchange="applyLibraryFilters()" style="padding:6px 10px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:12px;">
-                            <option value="">Any Length</option>
-                            <option value="short">Short (under 200p)</option>
-                            <option value="medium">Medium (200–400p)</option>
-                            <option value="long">Long (400+)</option>
-                            <option value="epic">Epic (600+)</option>
-                        </select>
-                        <select id="libFilterYear" onchange="applyLibraryFilters()" style="padding:6px 10px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:12px;">
-                            <option value="">Any Year</option>
-                        </select>
-                        <label style="display:flex;align-items:center;gap:5px;padding:6px 10px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;font-size:12px;color:#3D5A80;cursor:pointer;font-weight:600;">
-                            <input type="checkbox" id="libFilterFavorite" onchange="applyLibraryFilters()" style="accent-color:#C2705B;width:14px;height:14px;">
-                            ❤️ Favorites Only
-                        </label>
-                        <button onclick="clearLibraryFilters()" style="padding:6px 10px;border:2px solid #E8DFD5;border-radius:8px;background:transparent;color:#8B7E74;font-family:Nunito,sans-serif;font-size:12px;cursor:pointer;font-weight:600;">Clear Filters</button>
-                        <span id="libFilterCount" style="font-size:12px;color:#8B7E74;align-self:center;margin-left:auto;"></span>
-                    </div>
 
                     <div id="bulkActions" style="display:none;background:#FEF3E2;border-radius:12px;padding:12px 16px;margin-bottom:16px;align-items:center;gap:12px;flex-wrap:wrap;border:2px solid #E8DFD5;">
                         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;color:#3D5A80;">
