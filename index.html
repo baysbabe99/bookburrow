@@ -3002,9 +3002,20 @@
                     <!-- Discover: new & upcoming books from favorite authors (Google Books) -->
                     <div id="discoverReleasesSection" style="display:none;margin-bottom:28px;">
                         <h2 class="section-header">🔮 New from Your Favorite Authors</h2>
-                        <p style="color:#8B7E74;font-size:13px;margin-bottom:10px;">Upcoming &amp; recent books by authors you love that aren't on your shelf yet. Add one and any with a release date plugs into your alerts.</p>
+                        <p style="color:#8B7E74;font-size:13px;margin-bottom:10px;">Upcoming &amp; recent books by the authors and genres you love that aren't on your shelf yet. Add one and any with a release date plugs into your alerts.</p>
                         <button class="btn btn-secondary" id="discoverReleasesBtn" onclick="discoverUpcomingReleases()" style="font-size:13px;">🔮 Check for new releases</button>
                         <div id="discoverReleasesBody" style="margin-top:12px;"></div>
+                    </div>
+
+                    <!-- NYT Best Sellers (optional; needs NYT_PROXY_URL — see NYT_BESTSELLERS_SETUP.md) -->
+                    <div id="nytBestsellersSection" style="display:none;margin-bottom:28px;">
+                        <h2 class="section-header">📈 NYT Best Sellers</h2>
+                        <p style="color:#8B7E74;font-size:13px;margin-bottom:10px;">This week's New York Times best sellers. Updated weekly.</p>
+                        <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+                            <select id="nytListSelect" onchange="renderNytList()" style="padding:6px 10px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:12px;display:none;"></select>
+                            <button class="btn btn-secondary" id="nytLoadBtn" onclick="loadNytBestsellers()" style="font-size:13px;">📈 Load best sellers</button>
+                        </div>
+                        <div id="nytBestsellersBody"></div>
                     </div>
 
                     <!-- 2. Reading Goals (Day / Week / Month / Year) -->
@@ -4209,6 +4220,10 @@
         const SUPABASE_URL = 'https://fxbgghqjibtjyadjpmvk.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_Ucgg6fNLLzvWd6RWKtoSOg_jcsncFqs'; // publishable key — safe to expose; protected by RLS
 
+        // Optional: NYT Best Sellers via your own Cloudflare Worker proxy (see NYT_BESTSELLERS_SETUP.md).
+        // The proxy keeps your NYT API key server-side; THIS url is safe to expose. Blank = NYT panel hidden.
+        const NYT_PROXY_URL = '';
+
         const Cloud = {
             _client: null, _loading: null, _uid: null,
             enabled() { return !!(SUPABASE_URL && SUPABASE_ANON_KEY); },
@@ -5057,32 +5072,43 @@ function _normReleaseDate(s) {
 async function discoverUpcomingReleases() {
     var profile = app.profile || {};
     var authors = (profile.favoriteAuthors || []).slice(0, 5);
+    var genres = (profile.favoriteGenres || []).slice(0, 3);
     var body = document.getElementById('discoverReleasesBody');
-    if (!authors.length) { if (body) body.innerHTML = '<div style="color:#8B7E74;font-size:13px;">Add favorite authors in your Profile to discover their new books.</div>'; return; }
-    if (body) body.innerHTML = '<div style="color:#8B7E74;font-size:13px;padding:8px;">🔮 Searching for new books by ' + authors.map(_esc).join(', ') + '…</div>';
+    if (!authors.length && !genres.length) { if (body) body.innerHTML = '<div style="color:#8B7E74;font-size:13px;">Add favorite authors or genres in your Profile to discover new books.</div>'; return; }
+    if (body) body.innerHTML = '<div style="color:#8B7E74;font-size:13px;padding:8px;">🔮 Searching for new &amp; upcoming books (' + authors.concat(genres).map(_esc).join(', ') + ')…</div>';
     var have = new Set(app.books.map(function (b) { return (b.title || '').toLowerCase(); }));
     var seen = new Set(), found = [];
-    for (var i = 0; i < authors.length; i++) {
-        var author = authors[i];
+    var nowYear = new Date().getFullYear();
+    var queries = authors.map(function (a) { return { type: 'author', term: a, q: 'inauthor:"' + a + '"' }; })
+        .concat(genres.map(function (g) { return { type: 'genre', term: g, q: 'subject:"' + g + '"' }; }));
+    for (var i = 0; i < queries.length; i++) {
+        var qq = queries[i];
         try {
-            var url = 'https://www.googleapis.com/books/v1/volumes?q=' + encodeURIComponent('inauthor:"' + author + '"') + '&orderBy=newest&maxResults=10&printType=books';
+            var url = 'https://www.googleapis.com/books/v1/volumes?q=' + encodeURIComponent(qq.q) + '&orderBy=newest&maxResults=12&printType=books';
             var res = await fetch(url);
             var data = await res.json();
-            (data.items || []).forEach(function (it) {
-                var vi = it.volumeInfo || {}, title = vi.title; if (!title) return;
-                var key = title.toLowerCase();
-                if (have.has(key) || seen.has(key)) return;
-                var byAuthor = (vi.authors || []).some(function (a) { return a.toLowerCase().indexOf(author.toLowerCase()) >= 0 || author.toLowerCase().indexOf(a.toLowerCase()) >= 0; });
-                if (!byAuthor) return;
-                seen.add(key);
-                var img = (vi.imageLinks && (vi.imageLinks.thumbnail || vi.imageLinks.smallThumbnail)) || '';
-                found.push({ title: title, author: (vi.authors && vi.authors[0]) || author, date: vi.publishedDate || '', pages: vi.pageCount || 0, genre: (vi.categories && vi.categories[0]) || '', cover: img ? img.replace(/^http:/, 'https:') : '' });
-            });
+            (function (qq) {
+                (data.items || []).forEach(function (it) {
+                    var vi = it.volumeInfo || {}, title = vi.title; if (!title) return;
+                    var key = title.toLowerCase();
+                    if (have.has(key) || seen.has(key)) return;
+                    var date = vi.publishedDate || '';
+                    var yr = parseInt((String(date).match(/^\d{4}/) || [0])[0]) || 0;
+                    if (!(_isFutureDate(date) || yr >= nowYear - 1)) return; // keep it new & upcoming
+                    if (qq.type === 'author') {
+                        var byAuthor = (vi.authors || []).some(function (a) { return a.toLowerCase().indexOf(qq.term.toLowerCase()) >= 0 || qq.term.toLowerCase().indexOf(a.toLowerCase()) >= 0; });
+                        if (!byAuthor) return;
+                    }
+                    seen.add(key);
+                    var img = (vi.imageLinks && (vi.imageLinks.thumbnail || vi.imageLinks.smallThumbnail)) || '';
+                    found.push({ title: title, author: (vi.authors && vi.authors[0]) || (qq.type === 'author' ? qq.term : ''), date: date, pages: vi.pageCount || 0, genre: (vi.categories && vi.categories[0]) || (qq.type === 'genre' ? qq.term : ''), cover: img ? img.replace(/^http:/, 'https:') : '', via: qq.type === 'author' ? ('by ' + qq.term) : ('in ' + qq.term) });
+                });
+            })(qq);
         } catch (e) {}
     }
     found.sort(function (a, b) { return String(b.date).localeCompare(String(a.date)); });
     found.sort(function (a, b) { return (_isFutureDate(a.date) ? 0 : 1) - (_isFutureDate(b.date) ? 0 : 1); });
-    window._discoverResults = found.slice(0, 18);
+    window._discoverResults = found.slice(0, 24);
     renderDiscoverResults();
 }
 function renderDiscoverResults() {
@@ -5096,6 +5122,7 @@ function renderDiscoverResults() {
             + (b.cover ? '<img src="' + _esc(b.cover) + '" style="width:40px;height:60px;object-fit:cover;border-radius:4px;flex-shrink:0;">' : '<div style="width:40px;height:60px;background:#E8DFD5;border-radius:4px;flex-shrink:0;text-align:center;line-height:60px;">📖</div>')
             + '<div style="flex:1;min-width:0;"><div style="color:#3D5A80;font-weight:700;font-size:12px;">' + _esc(b.title) + '</div>'
             + '<div style="font-size:11px;color:#8B7E74;">' + _esc(b.author) + (b.date ? ' · ' + _esc(b.date) : '') + '</div>'
+            + (b.via ? '<div style="font-size:10px;color:#7D9B76;font-weight:600;">' + _esc(b.via) + '</div>' : '')
             + (future ? '<div style="font-size:10px;color:#C2705B;font-weight:700;margin-top:2px;">🔜 Upcoming</div>' : '')
             + '<button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;margin-top:6px;" onclick="addDiscoveredBook(' + i + ')">➕ ' + (future ? 'Track release' : 'Add to TBR') + '</button>'
             + '</div></div>';
@@ -5115,11 +5142,65 @@ function addDiscoveredBook(i) {
     try { renderDashboard(); } catch (e) {}
 }
 
+// ===== NYT Best Sellers (via optional Cloudflare Worker proxy; NYT_PROXY_URL) =====
+function _titleCase(s) { return String(s || '').toLowerCase().replace(/\b\w/g, function (c) { return c.toUpperCase(); }); }
+async function loadNytBestsellers() {
+    var body = document.getElementById('nytBestsellersBody');
+    var sel = document.getElementById('nytListSelect');
+    if (typeof NYT_PROXY_URL === 'undefined' || !NYT_PROXY_URL) { if (body) body.innerHTML = '<div style="color:#8B7E74;font-size:13px;">NYT panel isn\'t configured yet — see NYT_BESTSELLERS_SETUP.md.</div>'; return; }
+    if (body) body.innerHTML = '<div style="color:#8B7E74;font-size:13px;padding:8px;">📈 Loading NYT best sellers…</div>';
+    try {
+        var res = await fetch(NYT_PROXY_URL);
+        var data = await res.json();
+        var lists = (data && data.results && data.results.lists) || [];
+        if (!lists.length) { if (body) body.innerHTML = '<div style="color:#8B7E74;font-size:13px;">No lists returned — check your proxy and NYT key.</div>'; return; }
+        window._nytLists = lists;
+        if (sel) {
+            sel.innerHTML = lists.map(function (l, i) { return '<option value="' + i + '">' + _esc(l.display_name || l.list_name) + '</option>'; }).join('');
+            sel.style.display = 'inline-block';
+        }
+        renderNytList();
+    } catch (e) {
+        if (body) body.innerHTML = '<div style="color:#C2705B;font-size:13px;">Couldn\'t reach the NYT proxy. Double-check the URL in NYT_BESTSELLERS_SETUP.md.</div>';
+    }
+}
+function renderNytList() {
+    var body = document.getElementById('nytBestsellersBody');
+    var sel = document.getElementById('nytListSelect');
+    var lists = window._nytLists || [];
+    if (!body || !lists.length) return;
+    var idx = sel ? (parseInt(sel.value) || 0) : 0;
+    var list = lists[idx]; if (!list) return;
+    var books = list.books || [];
+    body.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;">' + books.map(function (b, i) {
+        var have = app.books.some(function (x) { return (x.title || '').toLowerCase() === String(b.title || '').toLowerCase(); });
+        var q = encodeURIComponent((b.title || '') + ' ' + (b.author || ''));
+        return '<div style="display:flex;gap:10px;background:#FFF8F0;border:1.5px solid #E8DFD5;border-radius:10px;padding:10px;">'
+            + (b.book_image ? '<img src="' + _esc(b.book_image) + '" style="width:42px;height:62px;object-fit:cover;border-radius:4px;flex-shrink:0;">' : '<div style="width:42px;height:62px;background:#E8DFD5;border-radius:4px;flex-shrink:0;text-align:center;line-height:62px;">📖</div>')
+            + '<div style="flex:1;min-width:0;"><div style="color:#3D5A80;font-weight:700;font-size:12px;">#' + (b.rank || (i + 1)) + ' ' + _esc(_titleCase(b.title || '')) + '</div>'
+            + '<div style="font-size:11px;color:#8B7E74;">' + _esc(b.author || '') + '</div>'
+            + '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">'
+            + (have ? '<span style="font-size:10px;color:#7D9B76;font-weight:700;align-self:center;">✓ In library</span>' : '<button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="addNytBook(' + idx + ',' + i + ')">➕ Add to TBR</button>')
+            + '<a href="https://bookshop.org/search?keywords=' + q + '" target="_blank" rel="noopener" class="btn btn-secondary" style="font-size:11px;padding:3px 8px;text-decoration:none;">🛍️ Buy</a>'
+            + '</div></div></div>';
+    }).join('') + '</div>';
+}
+function addNytBook(listIdx, bookIdx) {
+    var list = (window._nytLists || [])[listIdx]; if (!list) return;
+    var b = (list.books || [])[bookIdx]; if (!b) return;
+    var book = { id: Date.now() + Math.floor(Math.random() * 1000), title: _titleCase(b.title || ''), author: b.author || '', status: 'want', genre: '', pages: 0, isbn: b.primary_isbn13 || '', cover: b.book_image || '', rating: 0, dateAdded: new Date().toISOString(), releaseDate: '', ownershipFormat: [], notes: 'From NYT Best Sellers' };
+    app.books.push(book); app.saveData();
+    showNotification('Added "' + book.title + '" to your TBR 📚', 1800);
+    try { if (typeof populateLibraryDropdowns === 'function') populateLibraryDropdowns(); } catch (e) {}
+    renderNytList();
+}
+
 function renderDashboard() {
     if (!app) return;
 
     try { renderReleasesInto('dashReleasesSection', { header: '📅 Upcoming Releases', matchFirst: true }); } catch (e) {}
-    try { var _ds = document.getElementById('discoverReleasesSection'); if (_ds) _ds.style.display = ((app.profile && (app.profile.favoriteAuthors || []).length) ? 'block' : 'none'); } catch (e) {}
+    try { var _ds = document.getElementById('discoverReleasesSection'); if (_ds) _ds.style.display = ((app.profile && ((app.profile.favoriteAuthors || []).length || (app.profile.favoriteGenres || []).length)) ? 'block' : 'none'); } catch (e) {}
+    try { var _nyt = document.getElementById('nytBestsellersSection'); if (_nyt) _nyt.style.display = ((typeof NYT_PROXY_URL !== 'undefined' && NYT_PROXY_URL) ? 'block' : 'none'); } catch (e) {}
 
     // Update welcome message with user's name
     const welcome = document.querySelector('.welcome-message h1');
