@@ -10440,9 +10440,32 @@ function renderRecommendations() {
     if (!container) return;
 
     const profile = app.profile || {};
-    const favGenres = profile.favoriteGenres || [];
-    const favTropes = profile.favoriteTropes || [];
-    const favAuthors = (profile.favoriteAuthors || []).map(a => a.toLowerCase());
+    // ---- Fold in the reader's FAVORITES from their Profile + hearted library books ----
+    // (favorited books, favorite single genre, favorite series, and the two "favorite book"
+    //  fields — the latter three are matched into the catalog by title to borrow genre/author/tropes.)
+    const _recByTitle = {};
+    (typeof recDB !== 'undefined' ? recDB : []).forEach(r => { _recByTitle[String(r.title || '').toLowerCase()] = r; });
+    const _favBooks = (app.books || []).filter(b => b.favorite);
+    const _favTitleHits = [profile.favoriteBookRecommended, profile.favoriteBookToRecommend]
+        .concat(profile.favoriteSeries || [])
+        .filter(Boolean)
+        .map(t => _recByTitle[String(t).toLowerCase().trim()])
+        .filter(Boolean);
+    const favGenres = [...new Set([
+        ...(profile.favoriteGenres || []),
+        ...(profile.favoriteGenreSingle ? [profile.favoriteGenreSingle] : []),
+        ..._favBooks.map(b => b.genre).filter(Boolean),
+        ..._favTitleHits.map(r => r.genre).filter(Boolean)
+    ])];
+    const favTropes = [...new Set([
+        ...(profile.favoriteTropes || []),
+        ..._favTitleHits.flatMap(r => r.tropes || [])
+    ])];
+    const favAuthors = [...new Set([
+        ...(profile.favoriteAuthors || []).map(a => a.toLowerCase()),
+        ..._favBooks.map(b => (b.author || '').toLowerCase()).filter(Boolean),
+        ..._favTitleHits.map(r => (r.author || '').toLowerCase()).filter(Boolean)
+    ])];
     const avoidContent = profile.contentToAvoid || [];
     const prefPages = profile.preferredPages || [];
     const favPubs = (profile.favoritePublishers || []).map(p => String(p).toLowerCase()).filter(Boolean);
@@ -10595,7 +10618,8 @@ function renderRecommendations() {
         (profile.favoriteAuthors || []).slice(0, 3).join(', '),
         (profile.favoriteTropes || []).slice(0, 3).join(', '),
         (profile.favoritePublishers || []).slice(0, 3).join(', '),
-        _prefLenBits ? ('length: ' + _prefLenBits) : ''
+        _prefLenBits ? ('length: ' + _prefLenBits) : '',
+        _favBooks.length ? ('❤️ ' + _favBooks.length + ' favorite' + (_favBooks.length === 1 ? '' : 's') + ' on your shelf') : ''
     ].filter(Boolean).join(' · ');
     const avoidBits = [ disG.join(', '), (avoidContent || []).join(', ') ].filter(Boolean).join(' · ');
     const whyPanelHtml = '<div style="background:#FEF3E2;border-radius:12px;padding:14px;margin-bottom:16px;border:2px solid rgba(125,155,118,0.3);">'
