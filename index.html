@@ -3252,6 +3252,18 @@
                         <select id="libFilterGenre" onchange="applyLibraryFilters()" style="padding:8px 12px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;cursor:pointer;">
                             <option value="">All Genres</option>
                         </select>
+                        <select id="libFilterTrope" onchange="applyLibraryFilters()" style="padding:8px 12px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;cursor:pointer;">
+                            <option value="">All Tropes</option>
+                        </select>
+                        <select id="libFilterMood" onchange="applyLibraryFilters()" style="padding:8px 12px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;cursor:pointer;">
+                            <option value="">All Moods</option>
+                            <option value="cozy">Cozy & Comforting</option>
+                            <option value="dark">Dark & Intense</option>
+                            <option value="funny">Funny & Light</option>
+                            <option value="emotional">Emotional & Moving</option>
+                            <option value="adventurous">Adventurous & Epic</option>
+                            <option value="thought-provoking">Thought-Provoking</option>
+                        </select>
                         <select id="libFilterFormat" onchange="applyLibraryFilters()" style="padding:8px 12px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;cursor:pointer;">
                             <option value="">All Formats</option>
                             <option value="Paperback">Paperback</option>
@@ -5555,6 +5567,23 @@ function getTimeAgo(date) {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
+// Tropes/Moods aren't stored on user books, so derive them from the recommendation
+// catalog (recDB) by title — books in the catalog can be filtered by trope/mood.
+var _recMetaIndex = null;
+function _recMeta() {
+    if (_recMetaIndex) return _recMetaIndex;
+    _recMetaIndex = {};
+    try { (typeof recDB !== 'undefined' ? recDB : []).forEach(function (r) { _recMetaIndex[String(r.title || '').toLowerCase()] = { tropes: r.tropes || [], mood: r.mood || '' }; }); } catch (e) {}
+    return _recMetaIndex;
+}
+function _libBookMeta(b) {
+    var tropes = Array.isArray(b.tropes) ? b.tropes : [];
+    var mood = b.mood || '';
+    if (tropes.length || mood) return { tropes: tropes, mood: mood };
+    var m = _recMeta()[String(b.title || '').toLowerCase()];
+    return m ? { tropes: m.tropes || [], mood: m.mood || '' } : { tropes: [], mood: '' };
+}
+
 function populateLibraryDropdowns() {
     const genreSelect = document.getElementById('libFilterGenre');
     const yearSelect = document.getElementById('libFilterYear');
@@ -5568,6 +5597,15 @@ function populateLibraryDropdowns() {
 
     genreSelect.innerHTML = '<option value="">All Genres</option>' + genres.map(g => `<option value="${g}" ${g === currentGenre ? 'selected' : ''}>${g}</option>`).join('');
     yearSelect.innerHTML = '<option value="">All Years</option>' + years.map(y => `<option value="${y}" ${String(y) === currentYear ? 'selected' : ''}>${y}</option>`).join('');
+
+    // Tropes — only those present across the library (via own data or catalog match)
+    const tropeSelect = document.getElementById('libFilterTrope');
+    if (tropeSelect) {
+        const set = {};
+        app.books.forEach(b => { _libBookMeta(b).tropes.forEach(t => { if (t) set[t] = true; }); });
+        const curT = tropeSelect.value;
+        tropeSelect.innerHTML = '<option value="">All Tropes</option>' + Object.keys(set).sort().map(t => `<option value="${t}" ${t === curT ? 'selected' : ''}>${t}</option>`).join('');
+    }
 }
 
 function applyLibraryFilters() {
@@ -5578,6 +5616,8 @@ function applyLibraryFilters() {
     const formatFilter = document.getElementById('libFilterFormat')?.value || '';
     const lengthFilter = document.getElementById('libFilterLength')?.value || '';
     const yearFilter = document.getElementById('libFilterYear')?.value || '';
+    const tropeFilter = document.getElementById('libFilterTrope')?.value || '';
+    const moodFilter = document.getElementById('libFilterMood')?.value || '';
     const sortBy = document.getElementById('sortDropdown')?.value || 'title-asc';
     const favOnly = document.getElementById('libFilterFavorite')?.checked || false;
 
@@ -5626,6 +5666,10 @@ function applyLibraryFilters() {
     // Year filter
     if (yearFilter) books = books.filter(b => String(b.publicationYear) === yearFilter);
 
+    // Trope / Mood filters (derived from the catalog by title where the book has no own data)
+    if (tropeFilter) books = books.filter(b => _libBookMeta(b).tropes.indexOf(tropeFilter) >= 0);
+    if (moodFilter) books = books.filter(b => _libBookMeta(b).mood === moodFilter);
+
     // Sorting
     const dashIdx = sortBy.lastIndexOf('-');
     const sortField = sortBy.substring(0, dashIdx);
@@ -5653,6 +5697,8 @@ function applyLibraryFilters() {
     if (formatFilter) filterCount++;
     if (lengthFilter) filterCount++;
     if (yearFilter) filterCount++;
+    if (tropeFilter) filterCount++;
+    if (moodFilter) filterCount++;
     if (favOnly) filterCount++;
     const countEl = document.getElementById('libFilterCount');
     if (countEl) countEl.textContent = filterCount > 0 ? `${filterCount} filter${filterCount > 1 ? 's' : ''} active · ${books.length} book${books.length !== 1 ? 's' : ''}` : `${books.length} book${books.length !== 1 ? 's' : ''}`;
@@ -5676,6 +5722,10 @@ function clearLibraryFilters() {
     if (length) length.value = '';
     const year = document.getElementById('libFilterYear');
     if (year) year.value = '';
+    const trope = document.getElementById('libFilterTrope');
+    if (trope) trope.value = '';
+    const mood = document.getElementById('libFilterMood');
+    if (mood) mood.value = '';
     const fav = document.getElementById('libFilterFavorite');
     if (fav) fav.checked = false;
     const sort = document.getElementById('sortDropdown');
