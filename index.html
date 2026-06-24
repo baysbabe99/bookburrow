@@ -9035,10 +9035,22 @@ async function callShelfVision(images, mode) {
 // ---- capture entry ----
 function startShelfScan(mode) {
     _shelfScan = { mode: mode, images: [], pieces: [], photoId: null };
-    const inp = document.getElementById(mode === 'multi' ? 'shelfScanInputMulti' : 'shelfScanInput');
-    if (!inp) return;
-    inp.value = '';
-    inp.onchange = () => _onScanFiles(inp.files);
+    // Build the file input on the fly and click it within this user gesture.
+    // (More reliable than a static hidden input, which gets moved around the
+    // DOM when the Photo Shelf section is relocated into its tab — that could
+    // leave the picker unable to open on some setups.)
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = 'image/*';
+    if (mode === 'multi') inp.multiple = true;
+    inp.style.position = 'fixed';
+    inp.style.left = '-9999px';
+    inp.style.top = '0';
+    document.body.appendChild(inp);
+    inp.addEventListener('change', function () {
+        try { _onScanFiles(inp.files); } catch (e) { showNotification('Upload failed: ' + (e && e.message ? e.message : e), 2200); }
+        setTimeout(function () { try { inp.remove(); } catch (e) {} }, 0);
+    });
     inp.click();
 }
 async function _onScanFiles(files) {
