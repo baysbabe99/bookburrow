@@ -4711,6 +4711,7 @@
             this.connectedApps = data.connectedApps || {};
             this.shelfPhotos = data.shelfPhotos || [];
             this.shelfVisionUrl = data.shelfVisionUrl || '';
+            this.bookcase = data.bookcase || null;
             this.lastLogin = data.lastLogin || null;
             this.streak = data.streak || 0;
             this.profile = data.profile || {};
@@ -4767,6 +4768,7 @@
         this.connectedApps = {};
         this.shelfPhotos = [];
         this.shelfVisionUrl = '';
+        this.bookcase = null;
         this.profile = { avatar: '😊', name: '', theme: 'cozy', favoriteGenres: [], favoriteAuthors: [], preferredPages: '', preferredFormat: '', favoritePublishers: [] };
         this.streak = 1;
         this.lastLogin = new Date().toISOString();
@@ -4799,7 +4801,7 @@
         localStorage.setItem(profileDataKey(), JSON.stringify({
             books: this.books, xp: this.xp, loans: this.loans, borrows: this.borrows,
             challenges: this.challenges, achievements: this.achievements, yearlyGoal: this.yearlyGoal,
-            connectedApps: this.connectedApps, shelfPhotos: this.shelfPhotos, shelfVisionUrl: this.shelfVisionUrl,
+            connectedApps: this.connectedApps, shelfPhotos: this.shelfPhotos, shelfVisionUrl: this.shelfVisionUrl, bookcase: this.bookcase,
             lastLogin: this.lastLogin, streak: this.streak, profile: this.profile,
             friends: this.friends, friendCode: this.friendCode, gifts: this.gifts,
             releaseAlertsEnabled: this.releaseAlertsEnabled,
