@@ -8846,19 +8846,39 @@ function updatePhotoLabel(idx, label) {
     app.saveData();
 }
 
+// Shared cleanup when a shelf photo/puzzle is removed: unlink books + any bookcase cubby.
+function _purgeShelfPhotoRefs(removed) {
+    if (!removed) return;
+    app.books.forEach(b => {
+        if (b.shelfPhotoId === removed.id) { b.shelfPhotoId = null; b.shelfLocation = ''; b.shelfOrder = undefined; }
+    });
+    if (app.bookcase && Array.isArray(app.bookcase.cells)) {
+        app.bookcase.cells.forEach(c => { if (c.shelfPhotoId === removed.id) c.shelfPhotoId = null; });
+    }
+}
 function deletePhoto(idx) {
     if (confirm('Delete this photo?')) {
         const removed = app.shelfPhotos[idx];
         app.shelfPhotos.splice(idx, 1);
-        if (removed) {
-            // Clear shelf info on any books that pointed at the deleted photo
-            app.books.forEach(b => {
-                if (b.shelfPhotoId === removed.id) { b.shelfPhotoId = null; b.shelfLocation = ''; }
-            });
-        }
+        _purgeShelfPhotoRefs(removed);
         app.saveData();
         renderPhotoGallery();
+        try { renderShelfPuzzles(); } catch (e) {}
     }
+}
+// Delete a saved Shelf Puzzle / scanned shelf by id (the books stay in the library).
+function deleteShelfPuzzle(photoId) {
+    const i = (app.shelfPhotos || []).findIndex(p => p.id === photoId);
+    if (i < 0) return;
+    if (!confirm('Delete this shelf? The books stay in your library — only the saved shelf and its order are removed.')) return;
+    const removed = app.shelfPhotos[i];
+    app.shelfPhotos.splice(i, 1);
+    _purgeShelfPhotoRefs(removed);
+    app.saveData();
+    renderShelfPuzzles();
+    try { renderPhotoGallery(); } catch (e) {}
+    if (_vshelfView === 'shelves' || _vshelfView === 'bookcase') { try { renderVirtualShelf(); } catch (e) {} }
+    showNotification('Shelf deleted', 1500);
 }
 
 function openPhotoTagModal(idx) {
@@ -9603,6 +9623,7 @@ function renderShelfPuzzles() {
               '<button class="btn btn-secondary" style="margin-left:auto;font-size:11px;padding:4px 8px;" onclick="openShelfVirtual(' + photo.id + ')">📚 Virtual shelf</button>' +
               '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="openShelfPhotoTags(' + photo.id + ')">🔍 Explore photo</button>' +
               '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="editShelfPuzzle(' + photo.id + ')">✏️ Edit</button>' +
+              '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;border-color:#C2705B;color:#C2705B;" onclick="deleteShelfPuzzle(' + photo.id + ')">🗑️ Delete</button>' +
             '</div>' +
             '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;">' + tiles + '</div>' +
         '</div>';
@@ -14864,6 +14885,7 @@ function _bookcaseBlueprintHtml() {
             ? _cubbySpinesHtml(_shelfBooksInOrder(photo))
             : '<button onclick="_fillBookcaseCell(' + c.id + ')" title="Scan books into this shelf" style="width:100%;height:100%;border:1px dashed rgba(255,240,220,0.45);background:rgba(0,0,0,0.14);color:#FCE9D0;font-size:13px;border-radius:3px;cursor:pointer;padding:0;">＋</button>';
         cellsHtml += '<div style="position:absolute;left:' + (c.x * 100) + '%;top:' + (c.y * 100) + '%;width:' + (c.w * 100) + '%;height:' + (c.h * 100) + '%;box-sizing:border-box;padding:1px;">' +
+            '<button onclick="_deleteBookcaseCell(' + c.id + ')" title="Delete this shelf" style="position:absolute;top:2px;right:2px;z-index:3;width:16px;height:16px;line-height:13px;text-align:center;border:none;border-radius:3px;background:rgba(120,40,30,0.78);color:#fff;font-size:11px;cursor:pointer;padding:0;">✕</button>' +
             '<div style="width:100%;height:100%;background:rgba(38,24,12,0.34);border:1px solid rgba(18,10,5,0.55);border-radius:2px;box-shadow:inset 0 0 8px rgba(0,0,0,0.5);overflow:hidden;">' + inner + '</div></div>';
     });
     return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">' +
@@ -14876,6 +14898,15 @@ function _bookcaseBlueprintHtml() {
 function _removeBookcase() {
     if (!confirm('Remove this bookcase blueprint? Your scanned shelves and books stay in your library.')) return;
     app.bookcase = null; app.saveData(); renderVirtualShelf();
+}
+// Delete one shelf (cubby) from the bookcase. Books stay in the library.
+function _deleteBookcaseCell(id) {
+    if (!app.bookcase || !Array.isArray(app.bookcase.cells)) return;
+    const cell = app.bookcase.cells.find(c => c.id === id);
+    if (cell && cell.shelfPhotoId != null && !confirm('Delete this shelf from your bookcase? The books stay in your library.')) return;
+    app.bookcase.cells = app.bookcase.cells.filter(c => c.id !== id);
+    app.saveData();
+    renderVirtualShelf();
 }
 // ---- Manual bookcase builder (paint your exact shelf layout) ----
 function _startBookcaseBuilder() {
