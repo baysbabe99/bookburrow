@@ -2058,6 +2058,7 @@
         .vspine { display:flex; align-items:center; justify-content:center; gap:1px; writing-mode:vertical-rl; text-orientation:mixed; color:#fff; font-weight:700; cursor:pointer; flex-shrink:0; border-radius:2px 4px 0 0; padding:10px 2px; white-space:nowrap; overflow:hidden; text-shadow:0 1px 2px rgba(0,0,0,0.6); box-shadow: inset 4px 0 6px rgba(255,255,255,0.18), inset -5px 0 9px rgba(0,0,0,0.4), 0 3px 5px rgba(0,0,0,0.35); transition: transform .15s ease, box-shadow .15s ease; }
         .vspine:hover { transform: translateY(-12px); box-shadow: inset 4px 0 6px rgba(255,255,255,0.2), inset -5px 0 9px rgba(0,0,0,0.4), 0 10px 16px rgba(0,0,0,0.45); z-index:3; }
         .vspine .va { font-weight:600; opacity:0.82; }
+        @keyframes bcSpin { from { transform: perspective(1200px) rotateY(85deg); opacity:0.25; } to { transform: perspective(1200px) rotateY(0deg); opacity:1; } }
 
         /* ── INTERACTIVE SHELF PHOTO (hover tags) ──────── */
         .shelf-hotspot { position:absolute; border:2px solid transparent; border-radius:3px; cursor:pointer; transition: background .12s, border-color .12s; }
@@ -4711,7 +4712,7 @@
             this.connectedApps = data.connectedApps || {};
             this.shelfPhotos = data.shelfPhotos || [];
             this.shelfVisionUrl = data.shelfVisionUrl || '';
-            this.bookcase = data.bookcase || null;
+            this.bookcases = Array.isArray(data.bookcases) ? data.bookcases : ((data.bookcase && data.bookcase.cells) ? [{ id: 'bc' + Date.now(), name: 'My Bookcase', sides: [{ cells: data.bookcase.cells, aspectW: data.bookcase.aspectW || 5, aspectH: data.bookcase.aspectH || 8 }] }] : []);
             this.lastLogin = data.lastLogin || null;
             this.streak = data.streak || 0;
             this.profile = data.profile || {};
@@ -4768,7 +4769,7 @@
         this.connectedApps = {};
         this.shelfPhotos = [];
         this.shelfVisionUrl = '';
-        this.bookcase = null;
+        this.bookcases = [];
         this.profile = { avatar: '😊', name: '', theme: 'cozy', favoriteGenres: [], favoriteAuthors: [], preferredPages: '', preferredFormat: '', favoritePublishers: [] };
         this.streak = 1;
         this.lastLogin = new Date().toISOString();
@@ -4801,7 +4802,7 @@
         localStorage.setItem(profileDataKey(), JSON.stringify({
             books: this.books, xp: this.xp, loans: this.loans, borrows: this.borrows,
             challenges: this.challenges, achievements: this.achievements, yearlyGoal: this.yearlyGoal,
-            connectedApps: this.connectedApps, shelfPhotos: this.shelfPhotos, shelfVisionUrl: this.shelfVisionUrl, bookcase: this.bookcase,
+            connectedApps: this.connectedApps, shelfPhotos: this.shelfPhotos, shelfVisionUrl: this.shelfVisionUrl, bookcases: this.bookcases,
             lastLogin: this.lastLogin, streak: this.streak, profile: this.profile,
             friends: this.friends, friendCode: this.friendCode, gifts: this.gifts,
             releaseAlertsEnabled: this.releaseAlertsEnabled,
@@ -8854,9 +8855,7 @@ function _purgeShelfPhotoRefs(removed) {
     app.books.forEach(b => {
         if (b.shelfPhotoId === removed.id) { b.shelfPhotoId = null; b.shelfLocation = ''; b.shelfOrder = undefined; }
     });
-    if (app.bookcase && Array.isArray(app.bookcase.cells)) {
-        app.bookcase.cells.forEach(c => { if (c.shelfPhotoId === removed.id) c.shelfPhotoId = null; });
-    }
+    (app.bookcases || []).forEach(bc => (bc.sides || []).forEach(s => (s.cells || []).forEach(c => { if (c.shelfPhotoId === removed.id) c.shelfPhotoId = null; })));
 }
 function deletePhoto(idx) {
     if (confirm('Delete this photo?')) {
@@ -8975,7 +8974,10 @@ function savePhotoTags(idx) {
 // SHELF PUZZLE (AI scan + ordered, library-linked shelves)
 // ============================================
 let _shelfScan = { mode: null, images: [], pieces: [], photoId: null };
-let _pendingFillCell = null;          // bookcase cubby id waiting to be filled by the next scan
+let _pendingFill = null;              // { bcId, side, cellId } cubby waiting to be filled by the next scan
+let _activeBcId = (function () { try { return localStorage.getItem('bookburrow_active_bc') || null; } catch (e) { return null; } })();
+let _activeSide = 0;                  // which side of a (possibly spinning) bookcase is showing
+let _bcJustSpun = false;             // one-shot flag to play the spin animation on next render
 let _lastSavedShelfPhotoId = null;    // id of the shelf photo saved by the last commit
 let _vshelfView = (function () { try { return localStorage.getItem('bookburrow_vshelf_view') || 'genre'; } catch (e) { return 'genre'; } })(); // remembered Virtual Shelf view
 let _bcBuild = null;                   // manual bookcase-builder grid state {rows, cols, off:{}}
@@ -9103,7 +9105,7 @@ async function callShelfVision(images, mode) {
 // ---- capture entry ----
 function startShelfScan(mode) {
     _shelfScan = { mode: mode, images: [], pieces: [], photoId: null };
-    if (mode !== 'cellfill') _pendingFillCell = null;
+    if (mode !== 'cellfill') _pendingFill = null;
     // Build the file input on the fly and click it within this user gesture.
     // (More reliable than a static hidden input, which gets moved around the
     // DOM when the Photo Shelf section is relocated into its tab — that could
@@ -9239,17 +9241,20 @@ async function _runLayoutScan() {
     const cells = _structureCells(boxes);
     let aspectW = 4, aspectH = 3;
     try { const dim = await _imageSize(img); aspectW = dim.w; aspectH = dim.h; } catch (e) {}
-    app.bookcase = { image: img, cells: cells, aspectW: aspectW, aspectH: aspectH, dateAdded: new Date().toISOString() };
+    _bcMigrate();
+    const bc = { id: _newBookcaseId(), name: 'Bookcase ' + (_bcList().length + 1), sides: [{ cells: cells, aspectW: aspectW, aspectH: aspectH }] };
+    app.bookcases.push(bc); _activeBcId = bc.id; _activeSide = 0;
     app.saveData();
     closeModal('shelfScanModal');
     _vshelfView = 'bookcase';
-    try { localStorage.setItem('bookburrow_vshelf_view', 'bookcase'); } catch (e) {}
+    try { localStorage.setItem('bookburrow_vshelf_view', 'bookcase'); localStorage.setItem('bookburrow_active_bc', bc.id); } catch (e) {}
     switchLibraryTab('vshelf');
     showNotification('Bookcase mapped & saved ✓ ' + cells.length + ' shelves', 2200);
 }
 // Tap an empty cubby → scan a section into it (links the saved shelf to that cell).
 function _fillBookcaseCell(cellId) {
-    _pendingFillCell = cellId;
+    const bc = _activeBc(); if (!bc) return;
+    _pendingFill = { bcId: bc.id, side: _activeSide, cellId: cellId };
     startShelfScan('cellfill');
 }
 
@@ -9506,10 +9511,12 @@ function _commitShelfScan() {
     }
     if (added > 0) { app.addXP(added * 10); if (added > 3) triggerConfetti(); }
     let filledCell = false;
-    if (_pendingFillCell != null && app.bookcase) {
-        const cell = (app.bookcase.cells || []).find(c => c.id === _pendingFillCell);
+    if (_pendingFill && Array.isArray(app.bookcases)) {
+        const bc = app.bookcases.find(b => b.id === _pendingFill.bcId);
+        const side = bc && bc.sides && bc.sides[_pendingFill.side];
+        const cell = side && (side.cells || []).find(c => c.id === _pendingFill.cellId);
         if (cell && _lastSavedShelfPhotoId != null) { cell.shelfPhotoId = _lastSavedShelfPhotoId; filledCell = true; }
-        _pendingFillCell = null;
+        _pendingFill = null;
     }
     app.saveData();
     try { updateXPDisplay(); } catch (e) {}
@@ -14868,61 +14875,114 @@ function _cubbySpinesHtml(books) {
             return '<div title="' + tip + '"' + click + ' style="flex:0 0 auto;width:9px;height:100%;border-radius:1px 2px 0 0;cursor:pointer;' + bg + 'box-shadow:inset -2px 0 4px rgba(0,0,0,0.35);"></div>';
         }).join('') + '</div>';
 }
-// The "My Bookcase" blueprint: a wooden case shaped like the user's real one (AI-detected cells).
+// ---- Bookcases collection: accessors + active selection ----
+function _newBookcaseId() { return 'bc' + Date.now() + Math.floor(Math.random() * 1000); }
+function _bcList() { if (!Array.isArray(app.bookcases)) app.bookcases = []; return app.bookcases; }
+function _bcMigrate() {
+    if (app.bookcase && app.bookcase.cells && (!Array.isArray(app.bookcases) || !app.bookcases.length)) {
+        app.bookcases = [{ id: _newBookcaseId(), name: 'My Bookcase', sides: [{ cells: app.bookcase.cells, aspectW: app.bookcase.aspectW || 5, aspectH: app.bookcase.aspectH || 8 }] }];
+        app.bookcase = null; try { app.saveData(); } catch (e) {}
+    }
+    if (!Array.isArray(app.bookcases)) app.bookcases = [];
+}
+function _activeBc() {
+    _bcMigrate(); const l = _bcList(); if (!l.length) return null;
+    let bc = l.find(b => b.id === _activeBcId); if (!bc) { bc = l[0]; _activeBcId = bc.id; }
+    if (!Array.isArray(bc.sides) || !bc.sides.length) bc.sides = [{ cells: [], aspectW: 5, aspectH: 8 }];
+    if (_activeSide >= bc.sides.length) _activeSide = 0;
+    return bc;
+}
+function _activeSideObj() { const bc = _activeBc(); return bc ? bc.sides[_activeSide] : null; }
+function setActiveBookcase(id) { _activeBcId = id; _activeSide = 0; _bcEditing = false; try { localStorage.setItem('bookburrow_active_bc', id); } catch (e) {} renderVirtualShelf(); }
+function _addBookcase() { _bcBuild = { rows: 8, cols: 5, off: {}, target: { isNew: true } }; _bcEditing = true; _vshelfView = 'bookcase'; renderVirtualShelf(); }
+function _addBookcaseSide() { const bc = _activeBc(); if (!bc) return; if (bc.sides.length >= 4) { showNotification('A spinning bookcase can have up to 4 sides', 1800); return; } _bcBuild = { rows: 8, cols: 5, off: {}, target: { bcId: bc.id, newSide: true } }; _bcEditing = true; renderVirtualShelf(); }
+function _renameBookcase() { const bc = _activeBc(); if (!bc) return; const n = prompt('Bookcase name:', bc.name || 'Bookcase'); if (n == null) return; bc.name = (n.trim() || bc.name); app.saveData(); renderVirtualShelf(); }
+function _spinBookcase(step) { const bc = _activeBc(); if (!bc || bc.sides.length < 2) return; _activeSide = ((_activeSide + (step || 1)) % bc.sides.length + bc.sides.length) % bc.sides.length; _bcJustSpun = true; renderVirtualShelf(); }
+function _deleteSide() { const bc = _activeBc(); if (!bc || bc.sides.length <= 1) return; if (!confirm('Delete this side of the bookcase? The books stay in your library.')) return; bc.sides.splice(_activeSide, 1); _activeSide = 0; app.saveData(); renderVirtualShelf(); }
+// The "My Bookcase" view: pick a bookcase, spin its sides, render the active side as a wooden case.
 function _bookcaseBlueprintHtml() {
-    const bc = app.bookcase;
-    if (!bc || !Array.isArray(bc.cells) || !bc.cells.length) {
+    _bcMigrate();
+    const list = _bcList();
+    if (!list.length) {
         return '<div style="text-align:center;padding:34px;color:#8B7E74;">' +
             '<div style="font-size:34px;">🏗️</div>' +
             '<p style="margin:10px 0 4px;color:#3D5A80;font-weight:700;">Build a virtual bookcase shaped like yours</p>' +
-            '<p style="font-size:13px;margin:0 0 14px;">Map your bookcase\'s shelves, then fill each one with a quick section scan. Let the AI map it from one photo, or build the exact shape by hand.</p>' +
-            '<button class="btn btn-primary" onclick="startShelfScan(\'layout\')">🏗️ Scan my bookcase (AI)</button> ' +
-            '<button class="btn btn-secondary" onclick="_startBookcaseBuilder()">✏️ Build by hand</button></div>';
+            '<p style="font-size:13px;margin:0 0 14px;">Map your shelves, then fill each one with a quick section scan. Build the exact shape by hand, or let the AI map it from one photo.</p>' +
+            '<button class="btn btn-primary" onclick="_startBookcaseBuilder()">✏️ Build by hand</button> ' +
+            '<button class="btn btn-secondary" onclick="startShelfScan(\'layout\')">🏗️ Scan a bookcase (AI)</button></div>';
     }
-    const aspW = bc.aspectW || 4, aspH = bc.aspectH || 3;
-    const filled = bc.cells.filter(c => c.shelfPhotoId != null).length;
+    const bc = _activeBc();
+    const side = bc.sides[_activeSide] || bc.sides[0];
+    const aspW = side.aspectW || 5, aspH = side.aspectH || 8;
+    const cells = side.cells || [];
+    const filled = cells.filter(c => c.shelfPhotoId != null).length;
+    let chips = list.map(b => '<button onclick="setActiveBookcase(\'' + b.id + '\')" style="font-size:12px;padding:4px 10px;border-radius:14px;border:1.5px solid ' + (b.id === bc.id ? '#7D9B76' : '#E8DFD5') + ';background:' + (b.id === bc.id ? 'rgba(125,155,118,0.15)' : '#FFF8F0') + ';color:#3D5A80;cursor:pointer;font-weight:700;">📚 ' + escapeHtml(b.name || 'Bookcase') + '</button>').join(' ');
+    chips += ' <button onclick="_addBookcase()" style="font-size:12px;padding:4px 10px;border-radius:14px;border:1.5px dashed #D4A76A;background:#FFF8F0;color:#D4A76A;cursor:pointer;font-weight:700;">➕ Add bookcase</button>';
+    let spin = '';
+    if (bc.sides.length > 1) {
+        let dots = '';
+        for (let i = 0; i < bc.sides.length; i++) dots += '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + (i === _activeSide ? '#7D9B76' : '#D9CBB8') + ';"></span>';
+        spin = '<div style="display:flex;align-items:center;justify-content:center;gap:10px;margin:4px 0 10px;">' +
+            '<button class="btn btn-secondary" style="font-size:13px;padding:4px 10px;" onclick="_spinBookcase(-1)">‹</button>' +
+            '<span style="display:flex;gap:5px;align-items:center;">' + dots + '</span>' +
+            '<button class="btn btn-secondary" style="font-size:13px;padding:4px 10px;" onclick="_spinBookcase(1)">⟳ Spin</button>' +
+            '<span style="font-size:11px;color:#8B7E74;">side ' + (_activeSide + 1) + '/' + bc.sides.length + '</span>' +
+            '</div>';
+    }
     let cellsHtml = '';
-    bc.cells.forEach(c => {
+    cells.forEach(c => {
         const photo = (c.shelfPhotoId != null) ? (app.shelfPhotos || []).find(p => p.id === c.shelfPhotoId) : null;
-        const inner = photo
-            ? _cubbySpinesHtml(_shelfBooksInOrder(photo))
+        const inner = photo ? _cubbySpinesHtml(_shelfBooksInOrder(photo))
             : '<button onclick="_fillBookcaseCell(' + c.id + ')" title="Scan books into this shelf" style="width:100%;height:100%;border:1px dashed rgba(255,240,220,0.45);background:rgba(0,0,0,0.14);color:#FCE9D0;font-size:13px;border-radius:3px;cursor:pointer;padding:0;">＋</button>';
         cellsHtml += '<div style="position:absolute;left:' + (c.x * 100) + '%;top:' + (c.y * 100) + '%;width:' + (c.w * 100) + '%;height:' + (c.h * 100) + '%;box-sizing:border-box;padding:1px;">' +
             '<button onclick="_deleteBookcaseCell(' + c.id + ')" title="Delete this shelf" style="position:absolute;top:2px;right:2px;z-index:3;width:16px;height:16px;line-height:13px;text-align:center;border:none;border-radius:3px;background:rgba(120,40,30,0.78);color:#fff;font-size:11px;cursor:pointer;padding:0;">✕</button>' +
             '<div style="width:100%;height:100%;background:rgba(38,24,12,0.34);border:1px solid rgba(18,10,5,0.55);border-radius:2px;box-shadow:inset 0 0 8px rgba(0,0,0,0.5);overflow:hidden;">' + inner + '</div></div>';
     });
-    return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">' +
-        '<span style="font-size:12px;color:#8B7E74;">' + bc.cells.length + ' shelves · ' + filled + ' filled · tap an empty shelf to scan books into it</span>' +
-        '<span style="display:flex;gap:6px;flex-wrap:wrap;"><button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_startBookcaseBuilder()">✏️ Edit shape</button>' +
-        '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="startShelfScan(\'layout\')">🔄 Re-scan (AI)</button>' +
-        '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_removeBookcase()">🗑️ Remove</button></span></div>' +
-        '<div style="position:relative;width:100%;max-width:680px;max-height:78vh;margin:0 auto;aspect-ratio:' + aspW + '/' + aspH + ';background:linear-gradient(180deg,#5e3d22,#4a2e18);border:7px solid #3f2814;border-radius:10px;box-shadow:inset 0 0 40px rgba(0,0,0,0.45),0 12px 30px rgba(0,0,0,0.25);overflow:hidden;">' + cellsHtml + '</div>';
+    const spun = _bcJustSpun; _bcJustSpun = false;
+    const caseDiv = '<div id="bcCaseWrap" style="position:relative;width:100%;max-width:680px;max-height:74vh;margin:0 auto;aspect-ratio:' + aspW + '/' + aspH + ';background:linear-gradient(180deg,#5e3d22,#4a2e18);border:7px solid #3f2814;border-radius:10px;box-shadow:inset 0 0 40px rgba(0,0,0,0.45),0 12px 30px rgba(0,0,0,0.25);overflow:hidden;' + (spun ? 'animation:bcSpin 0.5s ease;' : '') + '">' + cellsHtml + '</div>';
+    const controls = '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0;">' +
+        '<span style="font-size:12px;color:#8B7E74;">' + cells.length + ' shelves · ' + filled + ' filled · tap ＋ to scan books in</span>' +
+        '<span style="display:flex;gap:6px;flex-wrap:wrap;">' +
+          '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_startBookcaseBuilder()">✏️ Edit shape</button>' +
+          '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_addBookcaseSide()">➕ Add side</button>' +
+          (bc.sides.length > 1 ? '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_deleteSide()">🗑️ Side</button>' : '') +
+          '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_renameBookcase()">✎ Rename</button>' +
+          '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_removeBookcase()">🗑️ Bookcase</button>' +
+        '</span></div>';
+    return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">' + chips + '</div>' + controls + spin + caseDiv;
 }
 function _removeBookcase() {
-    if (!confirm('Remove this bookcase blueprint? Your scanned shelves and books stay in your library.')) return;
-    app.bookcase = null; app.saveData(); renderVirtualShelf();
+    const bc = _activeBc(); if (!bc) return;
+    if (!confirm('Remove the bookcase "' + (bc.name || 'Bookcase') + '"? Your scanned shelves and books stay in your library.')) return;
+    app.bookcases = _bcList().filter(b => b.id !== bc.id);
+    _activeBcId = app.bookcases.length ? app.bookcases[0].id : null; _activeSide = 0;
+    try { localStorage.setItem('bookburrow_active_bc', _activeBcId || ''); } catch (e) {}
+    app.saveData(); renderVirtualShelf();
 }
-// Delete one shelf (cubby) from the bookcase. Books stay in the library.
+// Delete one shelf (cubby) from the active side. Books stay in the library.
 function _deleteBookcaseCell(id) {
-    if (!app.bookcase || !Array.isArray(app.bookcase.cells)) return;
-    const cell = app.bookcase.cells.find(c => c.id === id);
-    if (cell && cell.shelfPhotoId != null && !confirm('Delete this shelf from your bookcase? The books stay in your library.')) return;
-    app.bookcase.cells = app.bookcase.cells.filter(c => c.id !== id);
+    const side = _activeSideObj(); if (!side || !Array.isArray(side.cells)) return;
+    const cell = side.cells.find(c => c.id === id);
+    if (cell && cell.shelfPhotoId != null && !confirm('Delete this shelf? The books stay in your library.')) return;
+    side.cells = side.cells.filter(c => c.id !== id);
     app.saveData();
     renderVirtualShelf();
 }
 // ---- Manual bookcase builder (paint your exact shelf layout) ----
 function _startBookcaseBuilder() {
-    const bc = app.bookcase;
-    if (bc && bc.manual && Array.isArray(bc.cells) && bc.cells.length) {
+    const bc = _activeBc();
+    const side = bc ? bc.sides[_activeSide] : null;
+    if (side && Array.isArray(side.cells) && side.cells.length) {
         let rows = 0, cols = 0;
-        bc.cells.forEach(c => { rows = Math.max(rows, c.row + 1); cols = Math.max(cols, c.col + 1); });
+        side.cells.forEach(c => { rows = Math.max(rows, c.row + 1); cols = Math.max(cols, c.col + 1); });
         const off = {};
         for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) off[r + '_' + c] = 1;
-        bc.cells.forEach(c => { delete off[c.row + '_' + c.col]; });
-        _bcBuild = { rows: rows || 8, cols: cols || 5, off: off };
+        side.cells.forEach(c => { delete off[c.row + '_' + c.col]; });
+        _bcBuild = { rows: rows || 8, cols: cols || 5, off: off, target: { bcId: bc.id, side: _activeSide } };
+    } else if (bc) {
+        _bcBuild = { rows: 8, cols: 5, off: {}, target: { bcId: bc.id, side: _activeSide } };
     } else {
-        _bcBuild = { rows: 8, cols: 5, off: {} };
+        _bcBuild = { rows: 8, cols: 5, off: {}, target: { isNew: true } };
     }
     _bcEditing = true; _vshelfView = 'bookcase';
     switchLibraryTab('vshelf');
@@ -14941,9 +15001,20 @@ function _bcBuildSave() {
         cells.push({ x: c / b.cols, y: r / b.rows, w: 1 / b.cols, h: 1 / b.rows, row: r, col: c, id: id++, shelfPhotoId: null });
     }
     if (!cells.length) { showNotification('Add at least one shelf', 1500); return; }
-    app.bookcase = { image: null, cells: cells, aspectW: b.cols, aspectH: b.rows, manual: true, dateAdded: new Date().toISOString() };
+    _bcMigrate();
+    const newSide = { cells: cells, aspectW: b.cols, aspectH: b.rows };
+    const t = (b && b.target) || { isNew: true };
+    if (t.isNew) {
+        const nb = { id: _newBookcaseId(), name: 'Bookcase ' + (_bcList().length + 1), sides: [newSide] };
+        app.bookcases.push(nb); _activeBcId = nb.id; _activeSide = 0;
+    } else {
+        const bc = app.bookcases.find(x => x.id === t.bcId) || _activeBc();
+        if (!bc) { const nb = { id: _newBookcaseId(), name: 'Bookcase ' + (_bcList().length + 1), sides: [newSide] }; app.bookcases.push(nb); _activeBcId = nb.id; _activeSide = 0; }
+        else if (t.newSide) { bc.sides.push(newSide); _activeBcId = bc.id; _activeSide = bc.sides.length - 1; }
+        else { const si = (t.side != null) ? t.side : _activeSide; bc.sides[si] = newSide; _activeBcId = bc.id; _activeSide = si; }
+    }
     app.saveData(); _bcEditing = false; _vshelfView = 'bookcase';
-    try { localStorage.setItem('bookburrow_vshelf_view', 'bookcase'); } catch (e) {}
+    try { localStorage.setItem('bookburrow_vshelf_view', 'bookcase'); localStorage.setItem('bookburrow_active_bc', _activeBcId || ''); } catch (e) {}
     renderVirtualShelf();
     showNotification('Bookcase saved ✓ ' + cells.length + ' shelves', 2000);
 }
