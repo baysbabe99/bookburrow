@@ -9218,8 +9218,8 @@ async function _runLayoutScan() {
         _openScanModal(
             '<div style="padding:24px;text-align:center;"><div style="font-size:34px;">🔌</div>' +
             '<p style="color:#3D5A80;font-weight:700;margin:10px 0 6px;">AI scan isn\'t set up yet</p>' +
-            '<p style="color:#8B7E74;font-size:13px;margin:0 0 14px;">The bookcase blueprint needs the AI connection (see SHELF_VISION_SETUP.md).</p>' +
-            '<button class="btn btn-secondary" onclick="closeModal(\'shelfScanModal\');toggleShelfAiSetup()">⚙️ Open AI setup</button></div>', 'Bookcase blueprint');
+            '<p style="color:#8B7E74;font-size:13px;margin:0 0 14px;">The AI blueprint needs the AI connection — or just build the shape by hand.</p>' +
+            '<button class="btn btn-secondary" onclick="closeModal(\'shelfScanModal\');toggleShelfAiSetup()">⚙️ Open AI setup</button> <button class="btn btn-primary" onclick="closeModal(\'shelfScanModal\');_startBookcaseBuilder()">✏️ Build by hand</button></div>', 'Bookcase blueprint');
         return;
     }
     const img = _shelfScan.images[0];
@@ -9228,12 +9228,12 @@ async function _runLayoutScan() {
     let data;
     try { data = await callShelfVision([img], 'layout'); }
     catch (e) {
-        _openScanModal('<div style="padding:24px;text-align:center;color:#C2705B;">Couldn\'t reach the AI scanner (' + escapeHtml(String(e.message || e)) + ').<br>Check the Worker URL in ⚙️ AI scan setup.</div>', 'Bookcase blueprint');
+        _openScanModal('<div style="padding:24px;text-align:center;"><p style="color:#C2705B;margin:0 0 12px;">Couldn\'t reach the AI scanner (' + escapeHtml(String(e.message || e)) + ').</p><button class="btn btn-secondary" onclick="closeModal(\'shelfScanModal\');toggleShelfAiSetup()">⚙️ AI setup</button> <button class="btn btn-primary" onclick="closeModal(\'shelfScanModal\');_startBookcaseBuilder()">✏️ Build by hand</button></div>', 'Bookcase blueprint');
         return;
     }
     const boxes = ((data && data.compartments) || []).map(c => _normBox01(c.box)).filter(Boolean);
     if (boxes.length < 2) {
-        _openScanModal('<div style="padding:24px;text-align:center;color:#C2705B;">Couldn\'t map the shelf layout. Try a straight-on photo of the whole bookcase with the shelves clearly visible.</div>', 'Bookcase blueprint');
+        _openScanModal('<div style="padding:24px;text-align:center;"><p style="color:#C2705B;margin:0 0 14px;">Couldn\'t map the shelf layout from this photo — big or busy walls are hard for the AI to read. Build the exact shape by hand instead (quick and reliable).</p><button class="btn btn-primary" onclick="closeModal(\'shelfScanModal\');_startBookcaseBuilder()">✏️ Build by hand</button></div>', 'Bookcase blueprint');
         return;
     }
     const cells = _structureCells(boxes);
