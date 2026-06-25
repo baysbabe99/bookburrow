@@ -8956,6 +8956,8 @@ let _shelfScan = { mode: null, images: [], pieces: [], photoId: null };
 let _pendingFillCell = null;          // bookcase cubby id waiting to be filled by the next scan
 let _lastSavedShelfPhotoId = null;    // id of the shelf photo saved by the last commit
 let _vshelfView = 'genre';            // current Virtual Shelf view (genre/author/title/status/added/shelves/bookcase)
+let _bcBuild = null;                   // manual bookcase-builder grid state {rows, cols, off:{}}
+let _bcEditing = false;                // true while the manual bookcase builder is open
 
 function getShelfVisionUrl() {
     return (app && app.shelfVisionUrl) || (typeof SHELF_VISION_URL !== 'undefined' ? SHELF_VISION_URL : '') || '';
@@ -14849,8 +14851,9 @@ function _bookcaseBlueprintHtml() {
         return '<div style="text-align:center;padding:34px;color:#8B7E74;">' +
             '<div style="font-size:34px;">🏗️</div>' +
             '<p style="margin:10px 0 4px;color:#3D5A80;font-weight:700;">Build a virtual bookcase shaped like yours</p>' +
-            '<p style="font-size:13px;margin:0 0 14px;">Take one photo of your whole bookcase. The AI maps the shelves, then you fill each one with a quick section scan.</p>' +
-            '<button class="btn btn-primary" onclick="startShelfScan(\'layout\')">🏗️ Scan my bookcase</button></div>';
+            '<p style="font-size:13px;margin:0 0 14px;">Map your bookcase\'s shelves, then fill each one with a quick section scan. Let the AI map it from one photo, or build the exact shape by hand.</p>' +
+            '<button class="btn btn-primary" onclick="startShelfScan(\'layout\')">🏗️ Scan my bookcase (AI)</button> ' +
+            '<button class="btn btn-secondary" onclick="_startBookcaseBuilder()">✏️ Build by hand</button></div>';
     }
     const aspW = bc.aspectW || 4, aspH = bc.aspectH || 3;
     const filled = bc.cells.filter(c => c.shelfPhotoId != null).length;
@@ -14865,15 +14868,73 @@ function _bookcaseBlueprintHtml() {
     });
     return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">' +
         '<span style="font-size:12px;color:#8B7E74;">' + bc.cells.length + ' shelves · ' + filled + ' filled · tap an empty shelf to scan books into it</span>' +
-        '<span style="display:flex;gap:6px;"><button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="startShelfScan(\'layout\')">🔄 Re-scan shape</button>' +
+        '<span style="display:flex;gap:6px;flex-wrap:wrap;"><button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_startBookcaseBuilder()">✏️ Edit shape</button>' +
+        '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="startShelfScan(\'layout\')">🔄 Re-scan (AI)</button>' +
         '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_removeBookcase()">🗑️ Remove</button></span></div>' +
-        '<div style="position:relative;width:100%;max-width:920px;margin:0 auto;aspect-ratio:' + aspW + '/' + aspH + ';background:linear-gradient(180deg,#5e3d22,#4a2e18);border:7px solid #3f2814;border-radius:10px;box-shadow:inset 0 0 40px rgba(0,0,0,0.45),0 12px 30px rgba(0,0,0,0.25);overflow:hidden;">' + cellsHtml + '</div>';
+        '<div style="position:relative;width:100%;max-width:680px;max-height:78vh;margin:0 auto;aspect-ratio:' + aspW + '/' + aspH + ';background:linear-gradient(180deg,#5e3d22,#4a2e18);border:7px solid #3f2814;border-radius:10px;box-shadow:inset 0 0 40px rgba(0,0,0,0.45),0 12px 30px rgba(0,0,0,0.25);overflow:hidden;">' + cellsHtml + '</div>';
 }
 function _removeBookcase() {
     if (!confirm('Remove this bookcase blueprint? Your scanned shelves and books stay in your library.')) return;
     app.bookcase = null; app.saveData(); renderVirtualShelf();
 }
-function setVshelfView(v) { _vshelfView = v; renderVirtualShelf(); }
+// ---- Manual bookcase builder (paint your exact shelf layout) ----
+function _startBookcaseBuilder() {
+    const bc = app.bookcase;
+    if (bc && bc.manual && Array.isArray(bc.cells) && bc.cells.length) {
+        let rows = 0, cols = 0;
+        bc.cells.forEach(c => { rows = Math.max(rows, c.row + 1); cols = Math.max(cols, c.col + 1); });
+        const off = {};
+        for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) off[r + '_' + c] = 1;
+        bc.cells.forEach(c => { delete off[c.row + '_' + c.col]; });
+        _bcBuild = { rows: rows || 8, cols: cols || 5, off: off };
+    } else {
+        _bcBuild = { rows: 8, cols: 5, off: {} };
+    }
+    _bcEditing = true; _vshelfView = 'bookcase';
+    switchLibraryTab('vshelf');
+}
+function _bcSetDims(rows, cols) {
+    if (rows != null) _bcBuild.rows = Math.max(1, Math.min(14, parseInt(rows) || 8));
+    if (cols != null) _bcBuild.cols = Math.max(1, Math.min(10, parseInt(cols) || 5));
+    renderVirtualShelf();
+}
+function _bcToggle(r, c) { const k = r + '_' + c; if (_bcBuild.off[k]) delete _bcBuild.off[k]; else _bcBuild.off[k] = 1; renderVirtualShelf(); }
+function _bcCancel() { _bcEditing = false; renderVirtualShelf(); }
+function _bcBuildSave() {
+    const b = _bcBuild; const cells = []; let id = 0;
+    for (let r = 0; r < b.rows; r++) for (let c = 0; c < b.cols; c++) {
+        if (b.off[r + '_' + c]) continue;
+        cells.push({ x: c / b.cols, y: r / b.rows, w: 1 / b.cols, h: 1 / b.rows, row: r, col: c, id: id++, shelfPhotoId: null });
+    }
+    if (!cells.length) { showNotification('Add at least one shelf', 1500); return; }
+    app.bookcase = { image: null, cells: cells, aspectW: b.cols, aspectH: b.rows, manual: true, dateAdded: new Date().toISOString() };
+    app.saveData(); _bcEditing = false; renderVirtualShelf();
+    showNotification('Bookcase built: ' + cells.length + ' shelves 🏗️', 2000);
+}
+function _bookcaseBuilderHtml() {
+    const b = _bcBuild || { rows: 8, cols: 5, off: {} };
+    let grid = '';
+    for (let r = 0; r < b.rows; r++) {
+        grid += '<div style="display:flex;gap:3px;justify-content:center;">';
+        for (let c = 0; c < b.cols; c++) {
+            const off = b.off[r + '_' + c];
+            grid += '<button onclick="_bcToggle(' + r + ',' + c + ')" title="' + (off ? 'gap — tap to add a shelf' : 'shelf — tap to make a gap') + '" style="width:42px;height:26px;border-radius:4px;border:1px ' + (off ? 'dashed #D9CBB8' : 'solid #8a5a34') + ';background:' + (off ? 'transparent' : 'linear-gradient(180deg,#6e4a2a,#4a2e18)') + ';cursor:pointer;padding:0;"></button>';
+        }
+        grid += '</div>';
+    }
+    return '<div style="text-align:center;">' +
+        '<p style="color:#8B7E74;font-size:13px;margin:0 0 10px;">Tap cells to match your bookcase. <strong>Filled</strong> = a shelf; <strong>empty</strong> = a gap (like around a door). Set how tall and wide first.</p>' +
+        '<div style="display:flex;gap:14px;justify-content:center;align-items:center;margin-bottom:12px;flex-wrap:wrap;">' +
+          '<label style="font-size:12px;color:#3D5A80;font-weight:700;">Shelves tall <input type="number" min="1" max="14" value="' + b.rows + '" onchange="_bcSetDims(this.value,null)" style="width:54px;padding:4px;border:2px solid #E8DFD5;border-radius:8px;"></label>' +
+          '<label style="font-size:12px;color:#3D5A80;font-weight:700;">Columns wide <input type="number" min="1" max="10" value="' + b.cols + '" onchange="_bcSetDims(null,this.value)" style="width:54px;padding:4px;border:2px solid #E8DFD5;border-radius:8px;"></label>' +
+        '</div>' +
+        '<div style="display:flex;flex-direction:column;gap:3px;align-items:center;margin-bottom:14px;">' + grid + '</div>' +
+        '<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">' +
+          '<button class="btn btn-primary" onclick="_bcBuildSave()">✅ Build this bookcase</button>' +
+          '<button class="btn btn-secondary" onclick="_bcCancel()">Cancel</button>' +
+        '</div></div>';
+}
+function setVshelfView(v) { _vshelfView = v; _bcEditing = false; renderVirtualShelf(); }
 function renderVirtualShelf() {
     const host = document.getElementById('libraryTab-vshelf');
     if (!host) return;
@@ -14888,7 +14949,7 @@ function renderVirtualShelf() {
         '</select></div>';
 
     if (sort === 'bookcase') {
-        host.innerHTML = html + _bookcaseBlueprintHtml() + '</div>';
+        host.innerHTML = html + (_bcEditing ? _bookcaseBuilderHtml() : _bookcaseBlueprintHtml()) + '</div>';
         return;
     }
     if (!all.length) {
