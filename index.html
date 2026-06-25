@@ -6428,7 +6428,8 @@ function _recentMatchLib(r) {
 function _paintRecentlyScanned() {
     const box = document.getElementById('recentlyScannedBox');
     if (!box) return;
-    const cloud = (_recentCloudCache || []).slice(0, 12);
+    // Hide misread scans (invalid ISBNs — not 978/979 + checksum) so the box only shows real books.
+    const cloud = (_recentCloudCache || []).filter(r => isValidIsbn13(isbn13(r.isbn || ''))).slice(0, 12);
     let items;
     if (cloud.length) {
         items = cloud.map(r => ({ r: r, lib: _recentMatchLib(r) }));
