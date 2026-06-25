@@ -3463,10 +3463,11 @@
                             <span id="shelfScanStatus" style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;"></span>
                             <button class="btn btn-secondary" style="margin-left:auto;font-size:12px;padding:5px 10px;" onclick="toggleShelfAiSetup()">⚙️ AI scan setup</button>
                         </div>
-                        <p style="color:#8B7E74;font-size:13px;margin:8px 0 14px;">Photograph a shelf and rebuild it here in order — then link every book to your library.</p>
+                        <p style="color:#8B7E74;font-size:13px;margin:8px 0 14px;">Photograph one shelf — or a whole bookcase — and rebuild it here in order, then link every book to your library.</p>
                         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                            <button class="btn btn-primary" style="font-size:13px;" onclick="startShelfScan('auto')">📷 Whole shelf — auto-split</button>
-                            <button class="btn btn-secondary" style="font-size:13px;" onclick="startShelfScan('tap')">👆 Whole shelf — tap in order</button>
+                            <button class="btn btn-primary" style="font-size:13px;" onclick="startShelfScan('bookcase')">🗄️ Whole bookcase — one photo, all shelves</button>
+                            <button class="btn btn-primary" style="font-size:13px;" onclick="startShelfScan('auto')">📷 One shelf — auto-split</button>
+                            <button class="btn btn-secondary" style="font-size:13px;" onclick="startShelfScan('tap')">👆 One shelf — tap in order</button>
                             <button class="btn btn-secondary" style="font-size:13px;" onclick="startShelfScan('multi')">🖼️ Individual photos in order</button>
                         </div>
                         <div id="shelfAiSetup" style="display:none;margin-top:14px;padding:12px;background:#FFF8F0;border:1px dashed #E8DFD5;border-radius:12px;">
@@ -9098,13 +9099,13 @@ async function _onScanFiles(files) {
     _openScanModal('<div style="padding:30px;text-align:center;color:#8B7E74;">Loading photos…</div>');
     try {
         const raw = await Promise.all(arr.map(_readImageFile));
-        const maxDim = _shelfScan.mode === 'multi' ? 800 : 2048;
+        const maxDim = _shelfScan.mode === 'multi' ? 800 : (_shelfScan.mode === 'bookcase' ? 2560 : 2048);
         _shelfScan.images = await Promise.all(raw.map(d => _downscaleDataUrl(d, maxDim)));
     } catch (e) {
         _openScanModal('<div style="padding:30px;text-align:center;color:#C2705B;">Couldn\'t read those images.</div>');
         return;
     }
-    if (_shelfScan.mode === 'auto') return _runAutoSplit();
+    if (_shelfScan.mode === 'auto' || _shelfScan.mode === 'bookcase') return _runAutoSplit();
     if (_shelfScan.mode === 'tap') return _renderTapMode();
     if (_shelfScan.mode === 'multi') return _renderMultiMode();
 }
@@ -9131,10 +9132,11 @@ async function _runAutoSplit() {
         return;
     }
     const imgs = _shelfScan.images;
+    const bookcase = _shelfScan.mode === 'bookcase';
     _shelfScan.pieces = [];
     let order = 0, reachError = '';
     for (let s = 0; s < imgs.length; s++) {
-        _openScanModal('<div style="padding:30px;text-align:center;color:#8B7E74;"><div style="font-size:30px;">🧩</div><p style="margin-top:10px;">Reading ' + (imgs.length > 1 ? ('shelf ' + (s + 1) + ' of ' + imgs.length) : 'the shelf') + ' with AI… this can take a few seconds.</p></div>', 'Auto-split a shelf');
+        _openScanModal('<div style="padding:30px;text-align:center;color:#8B7E74;"><div style="font-size:30px;">🧩</div><p style="margin-top:10px;">Reading ' + (bookcase ? 'the whole bookcase' : (imgs.length > 1 ? ('shelf ' + (s + 1) + ' of ' + imgs.length) : 'the shelf')) + ' with AI… this can take a few seconds.</p></div>', bookcase ? 'Scan a bookcase' : 'Auto-split a shelf');
         try {
             const data = await callShelfVision([imgs[s]], 'shelf');
             parseVisionBooks(data).forEach(b => { _shelfScan.pieces.push({ title: b.title, author: b.author, box: b.box, src: s, order: order++ }); });
@@ -9146,10 +9148,37 @@ async function _runAutoSplit() {
         const msg = reachError
             ? ('Couldn\'t reach the AI scanner (' + escapeHtml(reachError) + ').<br>Check the Worker URL in ⚙️ AI scan setup.')
             : 'AI didn\'t find any titles. Try sharper, straight-on photos — or tap in order.';
-        _openScanModal('<div style="padding:24px;text-align:center;color:#C2705B;">' + msg + '<br><br><button class="btn btn-primary" onclick="_renderTapMode()">👆 Tap in order</button></div>', 'Auto-split a shelf');
+        _openScanModal('<div style="padding:24px;text-align:center;color:#C2705B;">' + msg + '<br><br><button class="btn btn-primary" onclick="_renderTapMode()">👆 Tap in order</button></div>', bookcase ? 'Scan a bookcase' : 'Auto-split a shelf');
         return;
     }
+    if (bookcase) _assignRowsFromBoxes(_shelfScan.pieces);
     _renderReview();
+}
+
+// Group whole-bookcase pieces into real rows using each book's box y-position.
+// Sets piece.row (0-based, top→bottom) and reorders pieces row-major (left→right within each row).
+function _assignRowsFromBoxes(pieces) {
+    const boxed = pieces.filter(p => p.box && p.box.length >= 4);
+    if (boxed.length < Math.max(2, pieces.length * 0.5)) return false; // too few boxes — leave as one shelf
+    const hs = boxed.map(p => p.box[3]).filter(h => h > 0).sort((a, b) => a - b);
+    const medH = hs.length ? hs[Math.floor(hs.length / 2)] : 0.2;
+    const thr = Math.max(0.04, medH * 0.6);
+    const items = boxed.map(p => ({ p: p, yc: p.box[1] + p.box[3] / 2, x: p.box[0] })).sort((a, b) => a.yc - b.yc);
+    const rows = [];
+    let cur = [], mean = null;
+    items.forEach(it => {
+        if (cur.length === 0) { cur.push(it); mean = it.yc; return; }
+        if ((it.yc - mean) <= thr) { cur.push(it); mean = cur.reduce((t, o) => t + o.yc, 0) / cur.length; }
+        else { rows.push(cur); cur = [it]; mean = it.yc; }
+    });
+    if (cur.length) rows.push(cur);
+    rows.forEach(r => r.sort((a, b) => a.x - b.x)); // left→right within a row
+    let ord = 0;
+    rows.forEach((r, ri) => r.forEach(it => { it.p.row = ri; it.p.order = ord++; }));
+    const unboxed = pieces.filter(p => !(p.box && p.box.length >= 4));
+    unboxed.forEach(p => { p.row = rows.length; p.order = ord++; }); // box-less books → trailing row
+    pieces.sort((a, b) => (a.order || 0) - (b.order || 0));
+    return true;
 }
 
 // ---- TAP IN ORDER (manual) ----
@@ -9270,7 +9299,8 @@ function _removePiece(i) {
 function _defaultShelfLabel() {
     const existing = (_shelfScan.photoId && app.shelfPhotos.find(p => p.id === _shelfScan.photoId));
     if (existing) return existing.label;
-    return 'Shelf ' + ((app.shelfPhotos ? app.shelfPhotos.length : 0) + 1);
+    const n = (app.shelfPhotos ? app.shelfPhotos.length : 0) + 1;
+    return (_shelfScan.mode === 'bookcase' ? 'Bookcase ' : 'Shelf ') + n;
 }
 function _pieceThumbHtml(p, w, h) {
     if (p.img) return '<img src="' + p.img + '" style="width:' + w + 'px;height:' + h + 'px;object-fit:cover;border-radius:6px;flex-shrink:0;">';
@@ -9287,13 +9317,18 @@ function _renderReview() {
     _shelfScan.pieces = pieces.map((p, i) => Object.assign({}, p, { order: i }));
     refreshLibraryTitlesDatalist();
     const multiShelf = _shelfScan.mode === 'auto' && _shelfScan.images.length > 1;
+    const isBookcase = _shelfScan.mode === 'bookcase';
+    const rowCount = isBookcase ? (_shelfScan.pieces.reduce((m, p) => Math.max(m, (p.row != null ? p.row : 0)), 0) + 1) : 0;
     const base = app.shelfPhotos ? app.shelfPhotos.length : 0;
-    let lastSrc = -1;
+    let lastSrc = -1, lastRow = -1;
     const rows = _shelfScan.pieces.map((p, i) => {
         let divider = '';
         if (multiShelf && p.src !== lastSrc) {
             lastSrc = p.src;
             divider = '<div style="font-size:12px;font-weight:700;color:#C2705B;margin:12px 0 4px;">🧩 Shelf ' + (base + (p.src || 0) + 1) + '</div>';
+        } else if (isBookcase && p.row !== lastRow) {
+            lastRow = p.row;
+            divider = '<div style="font-size:12px;font-weight:700;color:#C2705B;margin:12px 0 4px;">📚 Row ' + ((p.row || 0) + 1) + '</div>';
         }
         const match = app.books.find(b => isImportDuplicate(b, { title: p.title, author: p.author, isbn: '' }));
         const badge = match
@@ -9309,13 +9344,13 @@ function _renderReview() {
     }).join('');
     const nameField = multiShelf
         ? '<p style="font-size:12px;color:#8B7E74;margin:0 0 12px;">Saving as <strong>' + _shelfScan.images.length + ' shelves</strong> (auto-named Shelf ' + (base + 1) + '–' + (base + _shelfScan.images.length) + ').</p>'
-        : '<label style="font-size:12px;font-weight:700;color:#8B7E74;">Shelf name</label><input id="scanShelfLabel" value="' + escapeHtml(_defaultShelfLabel()) + '" style="width:100%;padding:7px 9px;margin:4px 0 12px;border:2px solid #E8DFD5;border-radius:8px;font-family:Nunito,sans-serif;font-size:13px;color:#3D5A80;">';
+        : '<label style="font-size:12px;font-weight:700;color:#8B7E74;">' + (isBookcase ? 'Bookcase name' : 'Shelf name') + '</label><input id="scanShelfLabel" value="' + escapeHtml(_defaultShelfLabel()) + '" style="width:100%;padding:7px 9px;margin:4px 0 ' + (isBookcase ? '6' : '12') + 'px;border:2px solid #E8DFD5;border-radius:8px;font-family:Nunito,sans-serif;font-size:13px;color:#3D5A80;">' + (isBookcase ? '<p style="font-size:12px;color:#8B7E74;margin:0 0 12px;">Detected <strong>' + rowCount + ' row' + (rowCount === 1 ? '' : 's') + '</strong> — saved as one bookcase. Fix any title below.</p>' : '');
     _openScanModal(
         '<p style="color:#8B7E74;font-size:13px;margin:0 0 10px;">In shelf order. Fix any title (autocompletes from your library), then save. Matched books link to your library; new ones are added.</p>' +
         nameField +
         '<div style="max-height:340px;overflow:auto;">' + rows + '</div>' +
         '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">' +
-          '<button class="btn btn-primary" onclick="_commitShelfScan()">🧩 Save ' + (multiShelf ? 'shelves' : 'shelf') + ' &amp; link library</button>' +
+          '<button class="btn btn-primary" onclick="_commitShelfScan()">' + (isBookcase ? '📚 Save bookcase' : ('🧩 Save ' + (multiShelf ? 'shelves' : 'shelf'))) + ' &amp; link library</button>' +
           (_shelfScan.mode === 'tap' ? '<button class="btn btn-secondary" onclick="_renderTapMode()">← Back to tapping</button>' : '') +
           (_shelfScan.mode === 'multi' ? '<button class="btn btn-secondary" onclick="_renderMultiMode()">← Back</button>' : '') +
           '<button class="btn btn-secondary" onclick="closeModal(\'shelfScanModal\')">Cancel</button>' +
@@ -9343,9 +9378,10 @@ function _saveShelfFromPieces(image, label, pieces, existingPhotoId) {
             };
             app.books.push(lib); added++;
         }
-        return { title: p.title, author: p.author, box: p.box || null, img: p.img || null, order: i, libraryId: lib.id };
+        return { title: p.title, author: p.author, box: p.box || null, img: p.img || null, order: i, row: (p.row != null ? p.row : null), libraryId: lib.id };
     });
     photo.taggedBooks = photo.pieces.map(p => ({ title: p.title, author: p.author }));
+    photo.isBookcase = photo.pieces.some(p => p.row != null);
     if (isNew) app.shelfPhotos.push(photo);
     return added;
 }
@@ -9427,6 +9463,7 @@ function openShelfVirtual(photoId) {
     if (!photo) { showNotification('Shelf not found', 1200); return; }
     const books = _shelfBooksInOrder(photo);
     if (!books.length) { showNotification('No books on this shelf yet', 1500); return; }
+    const rows = _shelfRows(photo);
     closeShelfVirtual();
     const ov = document.createElement('div');
     ov.id = 'shelfVirtualOverlay';
@@ -9437,17 +9474,17 @@ function openShelfVirtual(photoId) {
     ov.innerHTML =
         '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;color:#fff;flex-wrap:wrap;">' +
           '<div><span style="font-family:Quicksand,sans-serif;font-size:18px;font-weight:700;">📚 ' + escapeHtml(photo.label) + '</span> ' +
-          '<span class="vhname" style="font-size:12px;color:#E8DFD5;">' + books.length + ' books · in shelf order · hover to see a title</span></div>' +
+          '<span class="vhname" style="font-size:12px;color:#E8DFD5;">' + books.length + ' books · ' + (rows ? (rows.length + ' rows') : 'in shelf order') + ' · hover to see a title</span></div>' +
           '<button onclick="closeShelfVirtual()" style="background:#fff;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-weight:700;color:#3D5A80;">✕ Close</button>' +
         '</div>' +
-        '<div id="shelfVirtualBody">' + _vBookcaseHtml(books) + '</div>';
+        '<div id="shelfVirtualBody">' + (rows ? _vBookcaseHtmlRows(rows) : _vBookcaseHtml(books)) + '</div>';
     document.body.appendChild(ov);
     // Fill any missing cover art, then refresh this overlay's spines.
     try {
         resolveMissingCovers().then(function () {
             const o = document.getElementById('shelfVirtualOverlay');
             const body = document.getElementById('shelfVirtualBody');
-            if (o && body && o.dataset.photoId === String(photoId)) body.innerHTML = _vBookcaseHtml(_shelfBooksInOrder(photo));
+            if (o && body && o.dataset.photoId === String(photoId)) body.innerHTML = (rows ? _vBookcaseHtmlRows(_shelfRows(photo)) : _vBookcaseHtml(_shelfBooksInOrder(photo)));
         });
     } catch (e) {}
 }
@@ -14685,6 +14722,32 @@ function _shelfBooksInOrder(photo) {
         return lib || { id: p.libraryId, title: p.title || 'Untitled', author: p.author || '', genre: '', pages: 0 };
     }).filter(Boolean);
 }
+// Books grouped into real rows for a "whole bookcase" scan (uses each piece's `row`).
+// Returns an array of rows (each an array of book records), or null if this photo has no row info.
+function _shelfRows(photo) {
+    const pcs = (photo && photo.pieces) ? photo.pieces : [];
+    if (!pcs.some(p => p.row != null)) return null;
+    const sorted = pcs.slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+    const map = {}, order = [];
+    sorted.forEach(p => {
+        const r = (p.row != null) ? p.row : 0;
+        if (!map[r]) { map[r] = []; order.push(r); }
+        const lib = (p.libraryId != null) ? app.books.find(b => b.id === p.libraryId) : null;
+        map[r].push(lib || { id: p.libraryId, title: p.title || 'Untitled', author: p.author || '', genre: '', pages: 0 });
+    });
+    return order.sort((a, b) => a - b).map(r => map[r]);
+}
+// Render pre-split rows (one .vshelf-row per real shelf) in the wooden bookcase.
+function _vBookcaseHtmlRows(rows) {
+    let html = '<div class="vbookcase">';
+    rows.forEach(r => {
+        html += '<div class="vshelf-row">';
+        r.forEach(b => { html += _vSpineHtml(b); });
+        html += '</div><div class="vshelf-board"></div>';
+    });
+    html += '</div>';
+    return html;
+}
 function renderVirtualShelf() {
     const host = document.getElementById('libraryTab-vshelf');
     if (!host) return;
@@ -14713,8 +14776,10 @@ function renderVirtualShelf() {
             photos.forEach(photo => {
                 const sb = _shelfBooksInOrder(photo);
                 sb.forEach(b => { if (b && typeof b.id === 'number') used.add(b.id); });
-                html += '<div style="margin:4px 0 6px;font-family:Quicksand,sans-serif;font-size:15px;font-weight:700;color:#3D5A80;">📚 ' + escapeHtml(photo.label) + ' <span style="font-size:11px;color:#8B7E74;font-weight:400;">' + sb.length + ' books, in order</span></div>';
-                html += _vBookcaseHtml(sb) + '<div style="height:16px;"></div>';
+                const rws = _shelfRows(photo);
+                const meta = rws ? (sb.length + ' books · ' + rws.length + ' rows') : (sb.length + ' books, in order');
+                html += '<div style="margin:4px 0 6px;font-family:Quicksand,sans-serif;font-size:15px;font-weight:700;color:#3D5A80;">📚 ' + escapeHtml(photo.label) + ' <span style="font-size:11px;color:#8B7E74;font-weight:400;">' + meta + '</span></div>';
+                html += (rws ? _vBookcaseHtmlRows(rws) : _vBookcaseHtml(sb)) + '<div style="height:16px;"></div>';
             });
             const others = all.filter(b => !used.has(b.id));
             if (others.length) {
