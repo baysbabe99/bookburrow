@@ -2305,6 +2305,7 @@
             display: flex;
             gap: 8px;
             align-items: center;
+            flex-wrap: wrap;
             margin-bottom: 16px;
             padding: 10px 14px;
             background: rgba(194, 112, 91, 0.08);
@@ -3340,6 +3341,7 @@
                         <input type="text" id="libraryISBNInput" placeholder="Quick add: enter ISBN barcode...">
                         <button class="btn btn-primary" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="inlineScanLookup('libraryISBNInput')">Scan ISBN</button>
                         <button class="btn btn-secondary" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="startInlineCamera('library')">Use Camera</button>
+                        <a class="btn btn-secondary" href="./scan.html" target="_blank" rel="noopener" title="Open the phone scanner" style="font-size:12px;padding:6px 14px;white-space:nowrap;text-decoration:none;">📱 Phone</a>
                     </div>
 
                     <div class="library-controls">
@@ -3400,6 +3402,7 @@
                         <input type="text" id="searchISBNInput" placeholder="Quick add by ISBN barcode...">
                         <button class="btn btn-primary" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="inlineScanLookup('searchISBNInput')">Scan ISBN</button>
                         <button class="btn btn-secondary" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="startInlineCamera('search')">Use Camera</button>
+                        <a class="btn btn-secondary" href="./scan.html" target="_blank" rel="noopener" title="Open the phone scanner" style="font-size:12px;padding:6px 14px;white-space:nowrap;text-decoration:none;">📱 Phone</a>
                     </div>
                     <div class="search-container">
                         <input type="text" class="search-input" id="searchInput" placeholder="Search by title, author, ISBN, or keyword...">
@@ -3632,6 +3635,7 @@
                         <input type="text" id="loanISBNInput" placeholder="Scan ISBN to add a loan or borrow...">
                         <button class="btn btn-primary" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="inlineScanLookup('loanISBNInput')">Scan ISBN</button>
                         <button class="btn btn-secondary" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="startInlineCamera('loans')">Use Camera</button>
+                        <a class="btn btn-secondary" href="./scan.html" target="_blank" rel="noopener" title="Open the phone scanner" style="font-size:12px;padding:6px 14px;white-space:nowrap;text-decoration:none;">📱 Phone</a>
                     </div>
                     <!-- Loan Stats -->
                     <div id="loanStats" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;"></div>
