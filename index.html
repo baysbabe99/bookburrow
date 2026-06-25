@@ -8977,7 +8977,7 @@ function savePhotoTags(idx) {
 let _shelfScan = { mode: null, images: [], pieces: [], photoId: null };
 let _pendingFillCell = null;          // bookcase cubby id waiting to be filled by the next scan
 let _lastSavedShelfPhotoId = null;    // id of the shelf photo saved by the last commit
-let _vshelfView = 'genre';            // current Virtual Shelf view (genre/author/title/status/added/shelves/bookcase)
+let _vshelfView = (function () { try { return localStorage.getItem('bookburrow_vshelf_view') || 'genre'; } catch (e) { return 'genre'; } })(); // remembered Virtual Shelf view
 let _bcBuild = null;                   // manual bookcase-builder grid state {rows, cols, off:{}}
 let _bcEditing = false;                // true while the manual bookcase builder is open
 
@@ -9243,8 +9243,9 @@ async function _runLayoutScan() {
     app.saveData();
     closeModal('shelfScanModal');
     _vshelfView = 'bookcase';
+    try { localStorage.setItem('bookburrow_vshelf_view', 'bookcase'); } catch (e) {}
     switchLibraryTab('vshelf');
-    showNotification('Bookcase mapped: ' + cells.length + ' shelves 🏗️', 2200);
+    showNotification('Bookcase mapped & saved ✓ ' + cells.length + ' shelves', 2200);
 }
 // Tap an empty cubby → scan a section into it (links the saved shelf to that cell).
 function _fillBookcaseCell(cellId) {
@@ -14941,8 +14942,10 @@ function _bcBuildSave() {
     }
     if (!cells.length) { showNotification('Add at least one shelf', 1500); return; }
     app.bookcase = { image: null, cells: cells, aspectW: b.cols, aspectH: b.rows, manual: true, dateAdded: new Date().toISOString() };
-    app.saveData(); _bcEditing = false; renderVirtualShelf();
-    showNotification('Bookcase built: ' + cells.length + ' shelves 🏗️', 2000);
+    app.saveData(); _bcEditing = false; _vshelfView = 'bookcase';
+    try { localStorage.setItem('bookburrow_vshelf_view', 'bookcase'); } catch (e) {}
+    renderVirtualShelf();
+    showNotification('Bookcase saved ✓ ' + cells.length + ' shelves', 2000);
 }
 function _bookcaseBuilderHtml() {
     const b = _bcBuild || { rows: 8, cols: 5, off: {} };
@@ -14955,19 +14958,22 @@ function _bookcaseBuilderHtml() {
         }
         grid += '</div>';
     }
+    const actions = '<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:10px 0;">' +
+        '<button class="btn btn-primary" onclick="_bcBuildSave()">✅ Save bookcase</button>' +
+        '<button class="btn btn-secondary" onclick="_bcCancel()">Cancel</button>' +
+        '</div>';
     return '<div style="text-align:center;">' +
-        '<p style="color:#8B7E74;font-size:13px;margin:0 0 10px;">Tap cells to match your bookcase. <strong>Filled</strong> = a shelf; <strong>empty</strong> = a gap (like around a door). Set how tall and wide first.</p>' +
-        '<div style="display:flex;gap:14px;justify-content:center;align-items:center;margin-bottom:12px;flex-wrap:wrap;">' +
+        '<p style="color:#8B7E74;font-size:13px;margin:0 0 10px;">Tap cells to match your bookcase. <strong>Filled</strong> = a shelf; <strong>empty</strong> = a gap (like around a door). Set how tall and wide, then <strong>Save</strong>.</p>' +
+        '<div style="display:flex;gap:14px;justify-content:center;align-items:center;margin-bottom:10px;flex-wrap:wrap;">' +
           '<label style="font-size:12px;color:#3D5A80;font-weight:700;">Shelves tall <input type="number" min="1" max="14" value="' + b.rows + '" onchange="_bcSetDims(this.value,null)" style="width:54px;padding:4px;border:2px solid #E8DFD5;border-radius:8px;"></label>' +
           '<label style="font-size:12px;color:#3D5A80;font-weight:700;">Columns wide <input type="number" min="1" max="10" value="' + b.cols + '" onchange="_bcSetDims(null,this.value)" style="width:54px;padding:4px;border:2px solid #E8DFD5;border-radius:8px;"></label>' +
         '</div>' +
-        '<div style="display:flex;flex-direction:column;gap:3px;align-items:center;margin-bottom:14px;">' + grid + '</div>' +
-        '<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">' +
-          '<button class="btn btn-primary" onclick="_bcBuildSave()">✅ Build this bookcase</button>' +
-          '<button class="btn btn-secondary" onclick="_bcCancel()">Cancel</button>' +
-        '</div></div>';
+        actions +
+        '<div style="display:flex;flex-direction:column;gap:3px;align-items:center;margin:8px 0 14px;">' + grid + '</div>' +
+        actions +
+        '</div>';
 }
-function setVshelfView(v) { _vshelfView = v; _bcEditing = false; renderVirtualShelf(); }
+function setVshelfView(v) { _vshelfView = v; _bcEditing = false; try { localStorage.setItem('bookburrow_vshelf_view', v); } catch (e) {} renderVirtualShelf(); }
 function renderVirtualShelf() {
     const host = document.getElementById('libraryTab-vshelf');
     if (!host) return;

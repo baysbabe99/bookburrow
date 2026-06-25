@@ -2,7 +2,7 @@
    Network-first for the app shell (fresh when online, cached when offline),
    cache-first for Google Fonts, pass-through for book-search/cover APIs.
    Bump VERSION on each deploy so old caches are purged. */
-const VERSION = 'bookburrow-v3.33.1';
+const VERSION = 'bookburrow-v3.34.0';
 const CORE = ['./', './index.html'];
 
 self.addEventListener('install', (event) => {
