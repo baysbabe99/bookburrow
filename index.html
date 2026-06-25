@@ -8960,7 +8960,7 @@ function _purgeShelfPhotoRefs(removed) {
     app.books.forEach(b => {
         if (b.shelfPhotoId === removed.id) { b.shelfPhotoId = null; b.shelfLocation = ''; b.shelfOrder = undefined; }
     });
-    (app.bookcases || []).forEach(bc => (bc.sides || []).forEach(s => (s.cells || []).forEach(c => { if (c.shelfPhotoId === removed.id) c.shelfPhotoId = null; })));
+    (app.bookcases || []).forEach(bc => (bc.sides || []).forEach(s => (s.cells || []).forEach(c => { if (c.shelfPhotoId === removed.id) c.shelfPhotoId = null; if (c.framePhotoId === removed.id) c.framePhotoId = null; })));
 }
 function deletePhoto(idx) {
     if (confirm('Delete this photo?')) {
@@ -9367,11 +9367,14 @@ function _fillBookcaseCell(cellId) {
 // Tap ＋ → choose how to fill the shelf: pick from library (no photo) or scan a photo.
 function _openCellFillChooser() {
     _openScanModal('<div style="padding:22px;text-align:center;">' +
-        '<p style="color:#3D5A80;font-weight:700;margin:0 0 14px;">Add books to this shelf</p>' +
-        '<button class="btn btn-primary" onclick="_cellFillFromLibrary()">📚 Pick from my library</button> ' +
+        '<p style="color:#3D5A80;font-weight:700;margin:0 0 14px;">Add to this shelf</p>' +
+        '<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">' +
+        '<button class="btn btn-primary" onclick="_cellFillFromLibrary()">📚 Pick from my library</button>' +
         '<button class="btn btn-secondary" onclick="_cellFillScan()">📷 Scan a photo</button>' +
-        '<p style="color:#8B7E74;font-size:12px;margin:14px 0 0;">Most of your books are already in your library — picking is fastest (no photo needed).</p>' +
-        '</div>', 'Add books to a shelf');
+        '<button class="btn btn-secondary" onclick="_cellFillPhoto()">🖼️ Add a photo</button>' +
+        '</div>' +
+        '<p style="color:#8B7E74;font-size:12px;margin:14px 0 0;">Books from your library, a fresh scan, or frame a picture from your Photo Shelf.</p>' +
+        '</div>', 'Add to a shelf');
 }
 function _cellFillScan() { _pendingFill = _fillTarget; startShelfScan('cellfill'); }
 function _cellFillFromLibrary() {
@@ -9411,6 +9414,31 @@ function _commitCellLibrary() {
     closeModal('shelfScanModal');
     _vshelfView = 'bookcase'; switchLibraryTab('vshelf');
     showNotification(ids.length + ' book' + (ids.length === 1 ? '' : 's') + ' added to the shelf ✓', 1800);
+}
+// Frame a Photo Shelf picture in a cubby (instead of book spines).
+function _cellFillPhoto() {
+    const photos = (app.shelfPhotos || []).filter(p => p.data);
+    if (!photos.length) {
+        _openScanModal('<div style="padding:24px;text-align:center;color:#8B7E74;">No photos yet — add some in the 📷 Photo Shelf section first.<br><br><button class="btn btn-secondary" onclick="_openCellFillChooser()">← Back</button></div>', 'Add a photo');
+        return;
+    }
+    const grid = photos.map(p => '<div onclick="_commitCellPhoto(' + p.id + ')" title="' + escapeHtml(p.label || 'Photo') + '" style="cursor:pointer;border:2px solid #E8DFD5;border-radius:10px;overflow:hidden;background:#FEF3E2;">' +
+        '<img src="' + p.data + '" style="width:100%;height:90px;object-fit:cover;display:block;">' +
+        '<div style="font-size:11px;color:#3D5A80;padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(p.label || 'Photo') + '</div></div>').join('');
+    _openScanModal('<div style="padding:4px 2px;"><p style="color:#8B7E74;font-size:13px;margin:0 0 10px;">Pick a photo to frame on this shelf:</p>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;max-height:54vh;overflow:auto;">' + grid + '</div>' +
+        '<div style="margin-top:12px;text-align:right;"><button class="btn btn-secondary" onclick="_openCellFillChooser()">← Back</button></div></div>', 'Add a photo');
+}
+function _commitCellPhoto(photoId) {
+    const t = _fillTarget; if (!t) return;
+    const bc = (app.bookcases || []).find(b => b.id === t.bcId);
+    const side = bc && bc.sides && bc.sides[t.side];
+    const cell = side && (side.cells || []).find(c => c.id === t.cellId);
+    if (cell) { cell.framePhotoId = photoId; cell.bookIds = null; cell.shelfPhotoId = null; }
+    app.saveData();
+    closeModal('shelfScanModal');
+    _vshelfView = 'bookcase'; switchLibraryTab('vshelf');
+    showNotification('Photo framed on the shelf ✓', 1600);
 }
 
 // Group whole-bookcase pieces into real rows using each book's box y-position.
@@ -15094,7 +15122,7 @@ function _bookcaseBlueprintHtml() {
     const side = bc.sides[_activeSide] || bc.sides[0];
     const aspW = side.aspectW || 5, aspH = side.aspectH || 8;
     const cells = side.cells || [];
-    const filled = cells.filter(c => (c.bookIds && c.bookIds.length) || c.shelfPhotoId != null).length;
+    const filled = cells.filter(c => c.framePhotoId != null || (c.bookIds && c.bookIds.length) || c.shelfPhotoId != null).length;
     let chips = list.map(b => '<button onclick="setActiveBookcase(\'' + b.id + '\')" style="font-size:12px;padding:4px 10px;border-radius:14px;border:1.5px solid ' + (b.id === bc.id ? '#7D9B76' : '#E8DFD5') + ';background:' + (b.id === bc.id ? 'rgba(125,155,118,0.15)' : '#FFF8F0') + ';color:#3D5A80;cursor:pointer;font-weight:700;">📚 ' + escapeHtml(b.name || 'Bookcase') + '</button>').join(' ');
     chips += ' <button onclick="_addBookcase()" style="font-size:12px;padding:4px 10px;border-radius:14px;border:1.5px dashed #D4A76A;background:#FFF8F0;color:#D4A76A;cursor:pointer;font-weight:700;">➕ Add bookcase</button>';
     let spin = '';
@@ -15110,11 +15138,14 @@ function _bookcaseBlueprintHtml() {
     }
     let cellsHtml = '';
     cells.forEach(c => {
-        const fromLib = (c.bookIds && c.bookIds.length) ? c.bookIds.map(id => (app.books || []).find(b => b.id === id)).filter(Boolean) : null;
-        const photo = (!fromLib && c.shelfPhotoId != null) ? (app.shelfPhotos || []).find(p => p.id === c.shelfPhotoId) : null;
+        const framePhoto = (c.framePhotoId != null) ? (app.shelfPhotos || []).find(p => p.id === c.framePhotoId) : null;
+        const fromLib = (!framePhoto && c.bookIds && c.bookIds.length) ? c.bookIds.map(id => (app.books || []).find(b => b.id === id)).filter(Boolean) : null;
+        const photo = (!framePhoto && !fromLib && c.shelfPhotoId != null) ? (app.shelfPhotos || []).find(p => p.id === c.shelfPhotoId) : null;
         const cbooks = fromLib || (photo ? _shelfBooksInOrder(photo) : null);
-        const inner = (cbooks && cbooks.length) ? _cubbySpinesHtml(cbooks)
-            : '<button onclick="_fillBookcaseCell(' + c.id + ')" title="Add books to this shelf" style="width:100%;height:100%;border:1px dashed rgba(255,240,220,0.45);background:rgba(0,0,0,0.14);color:#FCE9D0;font-size:13px;border-radius:3px;cursor:pointer;padding:0;">＋</button>';
+        const inner = framePhoto
+            ? '<div onclick="openShelfPhotoTags(' + framePhoto.id + ')" title="' + escapeHtml(framePhoto.label || 'Photo') + '" style="width:100%;height:100%;background-image:url(' + framePhoto.data + ');background-size:cover;background-position:center;border:2px solid rgba(255,250,240,0.5);box-sizing:border-box;cursor:pointer;"></div>'
+            : (cbooks && cbooks.length) ? _cubbySpinesHtml(cbooks)
+            : '<button onclick="_fillBookcaseCell(' + c.id + ')" title="Add to this shelf" style="width:100%;height:100%;border:1px dashed rgba(255,240,220,0.45);background:rgba(0,0,0,0.14);color:#FCE9D0;font-size:13px;border-radius:3px;cursor:pointer;padding:0;">＋</button>';
         cellsHtml += '<div style="position:absolute;left:' + (c.x * 100) + '%;top:' + (c.y * 100) + '%;width:' + (c.w * 100) + '%;height:' + (c.h * 100) + '%;box-sizing:border-box;padding:1px;">' +
             '<button onclick="_deleteBookcaseCell(' + c.id + ')" title="Delete this shelf" style="position:absolute;top:2px;right:2px;z-index:3;width:16px;height:16px;line-height:13px;text-align:center;border:none;border-radius:3px;background:rgba(120,40,30,0.78);color:#fff;font-size:11px;cursor:pointer;padding:0;">✕</button>' +
             '<div style="width:100%;height:100%;background:rgba(38,24,12,0.34);border:1px solid rgba(18,10,5,0.55);border-radius:2px;box-shadow:inset 0 0 8px rgba(0,0,0,0.5);overflow:hidden;">' + inner + '</div></div>';
