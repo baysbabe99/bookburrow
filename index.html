@@ -5149,7 +5149,7 @@ function navigateTo(section) {
     if (section === 'profile') { renderProfile(); renderApps(); }
     if (section === 'dashboard') renderDashboard();
     if (section === 'recommendations') renderRecommendations();
-    if (section === 'library') { switchLibraryTab(currentLibraryTab); }
+    if (section === 'library') { switchLibraryTab(currentLibraryTab); try { autoImportCloudScans(); } catch (e) {} }
     if (section === 'quests') { renderChallenges(); renderAchievements(); renderGoals(); renderDragonJourney(); }
     if (section === 'friends') initializeFriends();
 }
@@ -8726,6 +8726,39 @@ function addScannedBook(isbn) {
 }
 
 // Pull books scanned on another device (e.g. the phone scanner) from the cloud `books` table
+let _autoImportRunning = false;
+// Auto-pull phone-scanned books from the cloud into the library so they appear without a manual import.
+async function autoImportCloudScans() {
+    if (!Cloud.enabled() || _autoImportRunning || !window.app) return;
+    _autoImportRunning = true;
+    try {
+        const rows = await Cloud.loadScannedBooks();
+        let added = 0;
+        rows.forEach(r => {
+            if (!r.title) return; // skip misreads / no-detail rows — add a title on the scanner to bring them in
+            const incoming = { title: r.title || '', author: r.author || '', isbn: r.isbn || '' };
+            const dup = app.books.some(lb => (r.isbn && (lb.isbn || '').replace(/[^0-9Xx]/g, '') === r.isbn) || isImportDuplicate(lb, incoming));
+            if (dup) return;
+            const year = r.published_date ? (parseInt((r.published_date.match(/\d{4}/) || [])[0]) || null) : null;
+            app.books.push({
+                id: app.getNextId(), title: r.title, author: r.author || 'Unknown',
+                genre: r.genre || '', pages: r.page_count || 0, isbn: r.isbn || '', cover: r.cover_url || '',
+                publisher: r.publisher || '', publicationYear: year, language: r.language || 'English', format: '', series: '',
+                description: r.description || '', status: 'want', rating: 0,
+                notes: 'Imported from cloud scan', dateAdded: r.date_added || new Date().toISOString()
+            });
+            added++;
+        });
+        if (added) {
+            app.saveData();
+            if (typeof updateXPDisplay === 'function') updateXPDisplay();
+            if (currentSection === 'library') { try { applyLibraryFilters(); } catch (e) { try { renderLibraryBooks('all'); } catch (e2) {} } }
+            showNotification(`📥 ${added} scanned book${added > 1 ? 's' : ''} added to your library`, 2200);
+        }
+    } catch (e) {}
+    _autoImportRunning = false;
+}
+
 async function importCloudScans() {
     if (!Cloud.enabled()) { showNotification('Cloud sync not set up', 1800); return; }
     showNotification('☁️ Checking other devices…', 1400);
@@ -15576,6 +15609,7 @@ function initializeApp() {
     setupSearch();
     setupPhotoUpload();
     setupImportExport();
+    setTimeout(function () { try { autoImportCloudScans(); } catch (e) {} }, 1800);
     updateXPDisplay();
     renderProfile();
     renderProfileSwitcher();
