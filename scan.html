@@ -124,12 +124,12 @@
   function buzz(){ try{ navigator.vibrate && navigator.vibrate(55); }catch(e){}
     const f = document.getElementById('flash'); f.classList.remove('on'); void f.offsetWidth; f.classList.add('on'); }
 
-  // Full book metadata: Google Books first (pages, genre, language, description, cover),
-  // then Open Library to fill any gaps.
+  // Full book metadata: Google Books (country param) first, then Open Library
+  // edition + work record (description / subjects / cover) to fill any gaps.
   async function lookup(isbn){
     const m = { isbn, title:'', author:'', publisher:'', published_date:'', cover_url:'', description:'', page_count:0, genre:'', language:'' };
     try{
-      const gj = await (await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`)).json();
+      const gj = await (await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&country=US`)).json();
       const vi = gj && gj.items && gj.items[0] && gj.items[0].volumeInfo;
       if (vi){
         m.title = vi.title || '';
@@ -144,21 +144,26 @@
         if (vi.imageLinks){ const c = vi.imageLinks.thumbnail || vi.imageLinks.smallThumbnail || ''; m.cover_url = c.replace(/^http:/,'https:').replace(/&edge=curl/,''); }
       }
     }catch(e){}
-    if (!m.title || !m.author || !m.cover_url || !m.page_count || !m.description){
+    if (!m.title || !m.author || !m.page_count || !m.description || !m.genre || !m.publisher){
       try{
-        const r = await fetch(`https://openlibrary.org/isbn/${isbn}.json`);
-        if (r.ok){
-          const d = await r.json();
+        const d = await (await fetch(`https://openlibrary.org/isbn/${isbn}.json`)).json();
+        if (d && typeof d === 'object'){
           if (!m.title) m.title = d.title || '';
           if (!m.page_count) m.page_count = d.number_of_pages || 0;
           if (!m.publisher) m.publisher = (d.publishers && d.publishers[0]) || '';
           if (!m.published_date) m.published_date = d.publish_date || '';
-          if (!m.description) m.description = typeof d.description === 'string' ? d.description : (d.description && d.description.value) || '';
-          if (!m.cover_url && d.covers && d.covers[0]) m.cover_url = `https://covers.openlibrary.org/b/id/${d.covers[0]}-L.jpg`;
-          if (!m.author && d.authors && d.authors[0]){ try{ const ar = await fetch(`https://openlibrary.org${d.authors[0].key}.json`); m.author = (await ar.json()).name || ''; }catch(e){} }
+          if (!m.description && d.description) m.description = typeof d.description === 'string' ? d.description : (d.description.value || '');
+          if (!m.author && d.authors && d.authors[0] && d.authors[0].key){ try{ const a = await (await fetch(`https://openlibrary.org${d.authors[0].key}.json`)).json(); m.author = a.name || ''; }catch(e){} }
+          if ((!m.description || !m.genre) && d.works && d.works[0] && d.works[0].key){
+            try{ const w = await (await fetch(`https://openlibrary.org${d.works[0].key}.json`)).json();
+              if (!m.description && w.description) m.description = typeof w.description === 'string' ? w.description : (w.description.value || '');
+              if (!m.genre && w.subjects && w.subjects[0]) m.genre = w.subjects[0];
+            }catch(e){}
+          }
         }
       }catch(e){}
     }
+    if (!m.cover_url) m.cover_url = `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg?default=false`;
     if (m.language === 'en') m.language = 'English';
     return m;
   }

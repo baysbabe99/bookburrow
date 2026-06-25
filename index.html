@@ -2299,6 +2299,41 @@
             align-items: center;
             gap: 6px;
         }
+        /* Shelf Map dropdown box (collapsed book list) */
+        .shelf-map-details > summary {
+            list-style: none;
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            background: #FFF8F0;
+            border: 1.5px solid #E8DFD5;
+            border-radius: 10px;
+            padding: 8px 12px;
+            font-size: 12px;
+            font-weight: 700;
+            color: #7D9B76;
+        }
+        .shelf-map-details > summary::-webkit-details-marker { display: none; }
+        .shelf-map-details > summary .chev {
+            color: #8B7E74;
+            font-size: 11px;
+            transition: transform 0.2s ease;
+        }
+        .shelf-map-details[open] > summary .chev { transform: rotate(180deg); }
+        .shelf-map-details[open] > summary {
+            border-bottom-left-radius: 0;
+            border-bottom-right-radius: 0;
+            border-bottom-color: transparent;
+        }
+        .shelf-map-details > .shelf-map-rows {
+            border: 1.5px solid #E8DFD5;
+            border-top: none;
+            border-radius: 0 0 10px 10px;
+            padding: 8px 10px;
+        }
 
         /* Inline scanner mini */
         .inline-scanner-bar {
@@ -3339,9 +3374,9 @@
                     <div class="inline-scanner-bar">
                         <span style="font-size:22px;">📷</span>
                         <input type="text" id="libraryISBNInput" placeholder="Quick add: enter ISBN barcode...">
-                        <button class="btn btn-primary" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="inlineScanLookup('libraryISBNInput')">Scan ISBN</button>
+                        <button class="btn btn-secondary" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="inlineScanLookup('libraryISBNInput')">Look up</button>
                         <button class="btn btn-secondary" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="startInlineCamera('library')">Use Camera</button>
-                        <a class="btn btn-secondary" href="./scan.html" target="_blank" rel="noopener" title="Open the phone scanner" style="font-size:12px;padding:6px 14px;white-space:nowrap;text-decoration:none;">📱 Phone</a>
+                        <a class="btn btn-primary" href="./scan.html" target="_blank" rel="noopener" title="Scan ISBNs with the phone scanner" style="font-size:12px;padding:6px 14px;white-space:nowrap;text-decoration:none;">📷 Scan ISBN</a>
                     </div>
 
                     <div class="library-controls">
@@ -3400,9 +3435,9 @@
                     <div class="inline-scanner-bar">
                         <span style="font-size:22px;">📷</span>
                         <input type="text" id="searchISBNInput" placeholder="Quick add by ISBN barcode...">
-                        <button class="btn btn-primary" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="inlineScanLookup('searchISBNInput')">Scan ISBN</button>
+                        <button class="btn btn-secondary" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="inlineScanLookup('searchISBNInput')">Look up</button>
                         <button class="btn btn-secondary" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="startInlineCamera('search')">Use Camera</button>
-                        <a class="btn btn-secondary" href="./scan.html" target="_blank" rel="noopener" title="Open the phone scanner" style="font-size:12px;padding:6px 14px;white-space:nowrap;text-decoration:none;">📱 Phone</a>
+                        <a class="btn btn-primary" href="./scan.html" target="_blank" rel="noopener" title="Scan ISBNs with the phone scanner" style="font-size:12px;padding:6px 14px;white-space:nowrap;text-decoration:none;">📷 Scan ISBN</a>
                     </div>
                     <div class="search-container">
                         <input type="text" class="search-input" id="searchInput" placeholder="Search by title, author, ISBN, or keyword...">
@@ -3633,9 +3668,9 @@
                     <div class="inline-scanner-bar">
                         <span style="font-size:22px;">📷</span>
                         <input type="text" id="loanISBNInput" placeholder="Scan ISBN to add a loan or borrow...">
-                        <button class="btn btn-primary" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="inlineScanLookup('loanISBNInput')">Scan ISBN</button>
+                        <button class="btn btn-secondary" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="inlineScanLookup('loanISBNInput')">Look up</button>
                         <button class="btn btn-secondary" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="startInlineCamera('loans')">Use Camera</button>
-                        <a class="btn btn-secondary" href="./scan.html" target="_blank" rel="noopener" title="Open the phone scanner" style="font-size:12px;padding:6px 14px;white-space:nowrap;text-decoration:none;">📱 Phone</a>
+                        <a class="btn btn-primary" href="./scan.html" target="_blank" rel="noopener" title="Scan ISBNs with the phone scanner" style="font-size:12px;padding:6px 14px;white-space:nowrap;text-decoration:none;">📷 Scan ISBN</a>
                     </div>
                     <!-- Loan Stats -->
                     <div id="loanStats" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;"></div>
@@ -8518,9 +8553,9 @@ let _lastScanLookup = null; // remembers the last looked-up book so the Add butt
 // language, description, cover), then Open Library to fill any gaps.
 async function fetchBookMeta(isbn) {
     const m = { isbn: isbn, title: '', author: '', publisher: '', published_date: '', cover_url: '', description: '', page_count: 0, genre: '', language: '' };
+    // Google Books (the country param is required or it can return nothing)
     try {
-        const gr = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`);
-        const gj = await gr.json();
+        const gj = await (await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&country=US`)).json();
         const vi = gj && gj.items && gj.items[0] && gj.items[0].volumeInfo;
         if (vi) {
             m.title = vi.title || '';
@@ -8532,29 +8567,34 @@ async function fetchBookMeta(isbn) {
             m.page_count = vi.pageCount || 0;
             m.genre = (vi.categories && vi.categories[0]) || '';
             m.language = vi.language || '';
-            if (vi.imageLinks) {
-                const c = vi.imageLinks.thumbnail || vi.imageLinks.smallThumbnail || '';
-                m.cover_url = c.replace(/^http:/, 'https:').replace(/&edge=curl/, '');
-            }
+            if (vi.imageLinks) { const c = vi.imageLinks.thumbnail || vi.imageLinks.smallThumbnail || ''; m.cover_url = c.replace(/^http:/, 'https:').replace(/&edge=curl/, ''); }
         }
     } catch (e) {}
-    if (!m.title || !m.author || !m.cover_url || !m.page_count || !m.description) {
+    // Open Library — fill gaps from the edition, then the work (which holds description + subjects/genre)
+    if (!m.title || !m.author || !m.page_count || !m.description || !m.genre || !m.publisher) {
         try {
-            const r = await fetch(`https://openlibrary.org/isbn/${isbn}.json`);
-            if (r.ok) {
-                const d = await r.json();
+            const d = await (await fetch(`https://openlibrary.org/isbn/${isbn}.json`)).json();
+            if (d && typeof d === 'object') {
                 if (!m.title) m.title = d.title || '';
                 if (!m.page_count) m.page_count = d.number_of_pages || 0;
                 if (!m.publisher) m.publisher = (d.publishers && d.publishers[0]) || '';
                 if (!m.published_date) m.published_date = d.publish_date || '';
-                if (!m.description) m.description = typeof d.description === 'string' ? d.description : (d.description && d.description.value) || '';
-                if (!m.cover_url && d.covers && d.covers[0]) m.cover_url = `https://covers.openlibrary.org/b/id/${d.covers[0]}-L.jpg`;
-                if (!m.author && d.authors && d.authors[0]) {
-                    try { const ar = await fetch(`https://openlibrary.org${d.authors[0].key}.json`); m.author = (await ar.json()).name || ''; } catch (e) {}
+                if (!m.description && d.description) m.description = typeof d.description === 'string' ? d.description : (d.description.value || '');
+                if (!m.author && d.authors && d.authors[0] && d.authors[0].key) {
+                    try { const a = await (await fetch(`https://openlibrary.org${d.authors[0].key}.json`)).json(); m.author = a.name || ''; } catch (e) {}
+                }
+                if ((!m.description || !m.genre) && d.works && d.works[0] && d.works[0].key) {
+                    try {
+                        const w = await (await fetch(`https://openlibrary.org${d.works[0].key}.json`)).json();
+                        if (!m.description && w.description) m.description = typeof w.description === 'string' ? w.description : (w.description.value || '');
+                        if (!m.genre && w.subjects && w.subjects[0]) m.genre = w.subjects[0];
+                    } catch (e) {}
                 }
             }
         } catch (e) {}
     }
+    // Cover straight from the ISBN if we still have none (404s gracefully when no cover exists)
+    if (!m.cover_url) m.cover_url = `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg?default=false`;
     if (m.language === 'en') m.language = 'English';
     if (!m.title) m.title = 'Unknown Title';
     if (!m.author) m.author = 'Unknown';
@@ -8576,7 +8616,7 @@ async function lookupISBN(isbn) {
     const desc = m.description || '';
     resultEl.innerHTML = `
         <div style="background:#FEF3E2;border-radius:12px;padding:20px;display:flex;gap:16px;align-items:start;">
-            ${m.cover_url ? `<img src="${m.cover_url}" alt="Cover" style="width:100px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);">` : '<div style="width:100px;height:140px;background:#E8DFD5;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:32px;">📖</div>'}
+            ${m.cover_url ? `<img src="${m.cover_url}" alt="Cover" onerror="this.onerror=null;this.style.display='none'" style="width:100px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);">` : '<div style="width:100px;height:140px;background:#E8DFD5;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:32px;">📖</div>'}
             <div style="flex:1;">
                 <div style="font-weight:700;color:#3D5A80;font-size:18px;margin-bottom:4px;">${m.title}</div>
                 <div style="color:#8B7E74;margin-bottom:4px;">by ${m.author}</div>
@@ -8989,6 +9029,21 @@ function deleteShelfPuzzle(photoId) {
     try { renderPhotoGallery(); } catch (e) {}
     if (_vshelfView === 'shelves' || _vshelfView === 'bookcase') { try { renderVirtualShelf(); } catch (e) {} }
     showNotification('Shelf deleted', 1500);
+}
+
+// Delete a shelf map entry (removes the saved shelf photo; books stay in the library).
+function deleteShelfMap(photoId) {
+    const i = (app.shelfPhotos || []).findIndex(p => p.id === photoId);
+    if (i < 0) return;
+    if (!confirm('Delete this shelf map? The books stay in your library.')) return;
+    const removed = app.shelfPhotos[i];
+    app.shelfPhotos.splice(i, 1);
+    _purgeShelfPhotoRefs(removed);
+    app.saveData();
+    renderShelfMap();
+    try { renderPhotoGallery(); } catch (e) {}
+    try { renderShelfPuzzles(); } catch (e) {}
+    showNotification('Shelf map deleted', 1500);
 }
 
 function openPhotoTagModal(idx) {
@@ -12984,13 +13039,15 @@ function renderShelfMap() {
         <div class="shelf-map-card">
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
                 <img src="${photo.data}" alt="${escapeHtml(photo.label)}" style="width:60px;height:45px;object-fit:cover;border-radius:8px;cursor:pointer;flex-shrink:0;" onclick="openPhotoLightbox(${realIdx})">
-                <div>
+                <div style="flex:1;min-width:0;">
                     <h4 style="margin:0;font-size:15px;color:#3D5A80;">📍 ${escapeHtml(photo.label)}</h4>
                     <div style="font-size:12px;color:#8B7E74;">${photo.taggedBooks.length} book${photo.taggedBooks.length !== 1 ? 's' : ''}</div>
                 </div>
+                <button onclick="deleteShelfMap(${photo.id})" title="Delete this shelf map" aria-label="Delete this shelf map" style="flex-shrink:0;background:none;border:1.5px solid #F0C4C4;color:#C2705B;border-radius:8px;padding:5px 9px;font-size:13px;line-height:1;cursor:pointer;">🗑️</button>
             </div>
-            <details open class="shelf-map-details">
-                <summary style="cursor:pointer;list-style:none;font-size:12px;color:#7D9B76;font-weight:700;padding:4px 0;user-select:none;">📚 ${photo.taggedBooks.length} book${photo.taggedBooks.length !== 1 ? 's' : ''} <span style="color:#8B7E74;font-weight:600;font-size:11px;">— tap to show/hide</span></summary>
+            <details class="shelf-map-details">
+                <summary><span>📚 ${photo.taggedBooks.length} book${photo.taggedBooks.length !== 1 ? 's' : ''}</span><span class="chev">▾</span></summary>
+                <div class="shelf-map-rows">
                 ${Object.entries(rows).map(([rowNum, books]) => `
                 <div style="margin-bottom:8px;">
                     <div style="font-size:11px;color:#D4A76A;font-weight:700;margin-bottom:4px;">Row ${rowNum}</div>
@@ -13002,6 +13059,7 @@ function renderShelfMap() {
                     </div>
                 </div>
             `).join('')}
+                </div>
             </details>
         </div>`;
     }).join('');
