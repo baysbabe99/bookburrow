@@ -4373,6 +4373,12 @@
             }
             return s;
         }
+        // True only for a real 13-digit book ISBN (978/979 prefix + valid checksum) — rejects misreads & price/UPC barcodes.
+        function isValidIsbn13(s) {
+            if (!/^\d{13}$/.test(s) || !/^97[89]/.test(s)) return false;
+            let sum = 0; for (let i = 0; i < 13; i++) sum += (i % 2 ? 3 : 1) * (+s[i]);
+            return sum % 10 === 0;
+        }
 
         const Cloud = {
             _client: null, _loading: null, _uid: null,
@@ -8640,6 +8646,11 @@ async function fetchBookMeta(isbn) {
 async function lookupISBN(isbn) {
     const cleanISBN = isbn.replace(/-/g, '');
     const resultEl = document.getElementById('scanResult');
+    if (!isValidIsbn13(isbn13(cleanISBN))) {
+        if (resultEl) resultEl.innerHTML = '<div style="text-align:center;padding:20px;color:#C2705B;">📕 That barcode isn’t a book ISBN. Scan the barcode that starts with <strong>978</strong> (the ISBN — not the price/UPC barcode), or type the ISBN manually.</div>';
+        showNotification('Not a valid ISBN — try the 978 barcode', 2200);
+        return;
+    }
     if (resultEl) resultEl.innerHTML = '<div style="text-align:center;padding:20px;color:#8B7E74;">🔍 Looking up book…</div>';
     const m = await fetchBookMeta(cleanISBN);
     _lastScanLookup = Object.assign({}, m, { isbn: cleanISBN });

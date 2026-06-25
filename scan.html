@@ -128,6 +128,11 @@
     }
     return s;
   }
+  function isValidIsbn13(s){
+    if(!/^\d{13}$/.test(s) || !/^97[89]/.test(s)) return false;
+    let sum=0; for(let i=0;i<13;i++) sum += (i%2?3:1)*(+s[i]);
+    return sum%10===0;
+  }
   let toastTimer;
   function toast(msg){
     const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show');
@@ -240,7 +245,7 @@
 
   async function handleISBN(raw){
     const isbn = isbn13(raw);
-    if (isbn.length < 10){ toast('That doesn’t look like an ISBN'); return; }
+    if (!isValidIsbn13(isbn)){ toast('Not a book ISBN — scan the barcode that starts with 978'); return; }
     const now = Date.now();
     if (recent.get(isbn) && now - recent.get(isbn) < 4000) return;  // ignore the same barcode held in frame
     recent.set(isbn, now);
