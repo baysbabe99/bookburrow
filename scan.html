@@ -55,6 +55,18 @@
   li.item .a{color:var(--muted);font-size:12px}
   li.item .tag{margin-left:auto;font-size:11px;font-weight:700;color:var(--green);white-space:nowrap}
   li.item .tag.warn{color:var(--gold)}
+  li.card{display:flex;flex-direction:column;gap:8px;background:var(--card);border-radius:12px;padding:12px}
+  li.card .chead{display:flex;gap:12px;align-items:center}
+  li.card img,li.card .ph{width:38px;height:54px;border-radius:6px;object-fit:cover;flex-shrink:0;background:var(--line);display:flex;align-items:center;justify-content:center;font-size:20px}
+  li.card .isbn{color:var(--muted);font-size:12px;margin-top:2px}
+  li.card .tag{font-size:11px;font-weight:700;color:var(--green)}
+  li.card .tag.warn{color:var(--gold)}
+  li.card label{display:flex;flex-direction:column;font-size:11px;font-weight:700;color:var(--muted);gap:3px}
+  li.card input,li.card textarea{font-family:inherit;font-size:14px;font-weight:400;color:var(--ink);padding:8px 10px;border:2px solid var(--line);border-radius:9px;background:#fff;width:100%;box-sizing:border-box}
+  li.card input:focus,li.card textarea:focus{outline:none;border-color:var(--gold)}
+  li.card textarea{resize:vertical}
+  li.card .two{display:flex;gap:8px}
+  li.card .two label{flex:1;min-width:0}
   .note{margin-top:22px;background:var(--card);border-radius:12px;padding:14px;font-size:13px;color:var(--muted);line-height:1.45}
   .note b{color:var(--ink)}
   #toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);
@@ -181,15 +193,49 @@
   const recent = new Map();         // ISBN -> timestamp (ignore rapid repeats)
   let count = 0;
 
-  function addToList(book, ok){
-    const li = document.createElement('li'); li.className = 'item';
-    li.innerHTML =
-      (book.cover_url ? `<img src="${book.cover_url}" alt="">` : `<div class="ph">📖</div>`) +
-      `<div><div class="t">${esc(book.title) || 'Unknown title'}</div>` +
-      `<div class="a">${esc(book.author) || 'ISBN ' + book.isbn}</div></div>` +
-      `<span class="tag${book.title ? '' : ' warn'}">${ok ? (book.title ? 'Saved' : 'Saved · no details') : 'Save failed'}</span>`;
+  // Each scan becomes an editable card: fields are pre-filled, tweak anything, then Save re-upserts.
+  let _cardSeq = 0; const _cards = {};
+  function addCard(book, ok){
+    const id = ++_cardSeq; _cards[id] = Object.assign({}, book);
+    const li = document.createElement('li'); li.className = 'card';
+    const cover = book.cover_url ? `<img src="${esc(book.cover_url)}" alt="" onerror="this.onerror=null;this.style.display='none'">` : `<div class="ph">📖</div>`;
+    li.innerHTML = `
+      <div class="chead">${cover}
+        <div style="flex:1;min-width:0;">
+          <span class="tag${ok ? '' : ' warn'}" id="tag${id}">${ok ? 'Saved ✓' : 'Save failed'}</span>
+          <div class="isbn">ISBN ${esc(book.isbn)}</div>
+        </div>
+      </div>
+      <label>Title<input id="f_title_${id}" value="${esc(book.title)}"></label>
+      <label>Author<input id="f_author_${id}" value="${esc(book.author)}"></label>
+      <div class="two">
+        <label>Pages<input id="f_pages_${id}" type="number" inputmode="numeric" value="${book.page_count || ''}"></label>
+        <label>Genre<input id="f_genre_${id}" value="${esc(book.genre)}"></label>
+      </div>
+      <div class="two">
+        <label>Publisher<input id="f_pub_${id}" value="${esc(book.publisher)}"></label>
+        <label>Published<input id="f_date_${id}" value="${esc(book.published_date)}"></label>
+      </div>
+      <label>Description<textarea id="f_desc_${id}" rows="3">${esc(book.description)}</textarea></label>
+      <button class="btn btn-primary block" onclick="saveCard(${id}, this)">💾 Save changes</button>`;
     document.getElementById('list').prepend(li);
   }
+  window.saveCard = async (id, btn) => {
+    const val = s => { const el = document.getElementById(s); return el ? el.value.trim() : ''; };
+    const b = Object.assign({}, _cards[id], {
+      title: val('f_title_' + id), author: val('f_author_' + id),
+      publisher: val('f_pub_' + id), published_date: val('f_date_' + id),
+      description: val('f_desc_' + id), genre: val('f_genre_' + id),
+      page_count: parseInt(val('f_pages_' + id), 10) || null
+    });
+    _cards[id] = b;
+    btn.disabled = true; const prev = btn.textContent; btn.textContent = 'Saving…';
+    const ok = await saveRow(b);
+    const tag = document.getElementById('tag' + id); if (tag){ tag.textContent = ok ? 'Saved ✓' : 'Save failed'; tag.className = 'tag' + (ok ? '' : ' warn'); }
+    btn.disabled = false; btn.textContent = ok ? '✓ Saved' : 'Retry save';
+    setTimeout(() => { if (btn.textContent === '✓ Saved') btn.textContent = prev; }, 1500);
+    toast(ok ? 'Updated ✓' : 'Save failed');
+  };
   function esc(s){ return (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
   async function handleISBN(raw){
@@ -205,10 +251,10 @@
     const ok = await saveRow(book);
     if (ok){
       saved.add(isbn); count++; document.getElementById('count').textContent = count;
-      addToList(book, true);
+      addCard(book, true);
       toast(book.title ? `Saved: ${book.title}` : 'Saved ISBN');
     } else {
-      addToList(book, false);
+      addCard(book, false);
       toast(client ? 'Save failed — check the books table' : 'Cloud unavailable');
     }
   }
