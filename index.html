@@ -15012,7 +15012,31 @@ function _activeBc() {
 }
 function _activeSideObj() { const bc = _activeBc(); return bc ? bc.sides[_activeSide] : null; }
 function setActiveBookcase(id) { _activeBcId = id; _activeSide = 0; _bcEditing = false; try { localStorage.setItem('bookburrow_active_bc', id); } catch (e) {} renderVirtualShelf(); }
-function _addBookcase() { _bcBuild = { rows: 8, cols: 5, off: {}, target: { isNew: true } }; _bcEditing = true; _vshelfView = 'bookcase'; renderVirtualShelf(); }
+function _addBookcase() {
+    _openScanModal('<div style="padding:22px;text-align:center;">' +
+        '<p style="color:#3D5A80;font-weight:700;margin:0 0 14px;">Add a bookcase</p>' +
+        '<button class="btn btn-primary" onclick="_addBookcaseKind(1)">📚 Regular bookcase</button> ' +
+        '<button class="btn btn-secondary" onclick="_addSpinningChoose()">🔄 Spinning bookcase</button>' +
+        '<p style="color:#8B7E74;font-size:12px;margin:14px 0 0;">A spinning bookcase has 2–4 sides you rotate through.</p>' +
+        '</div>', 'Add a bookcase');
+}
+function _addSpinningChoose() {
+    _openScanModal('<div style="padding:22px;text-align:center;">' +
+        '<p style="color:#3D5A80;font-weight:700;margin:0 0 6px;">Spinning bookcase</p>' +
+        '<p style="color:#8B7E74;font-size:13px;margin:0 0 14px;">How many sides?</p>' +
+        '<div style="display:flex;gap:8px;justify-content:center;">' +
+          '<button class="btn btn-primary" onclick="_addBookcaseKind(2)">2 sides</button>' +
+          '<button class="btn btn-primary" onclick="_addBookcaseKind(3)">3 sides</button>' +
+          '<button class="btn btn-primary" onclick="_addBookcaseKind(4)">4 sides</button>' +
+        '</div>' +
+        '<p style="color:#8B7E74;font-size:12px;margin:14px 0 0;">You\'ll build the first side now; rotate with ⟳ Spin to build the others.</p>' +
+        '</div>', 'Spinning bookcase');
+}
+function _addBookcaseKind(sides) {
+    closeModal('shelfScanModal');
+    _bcBuild = { rows: 8, cols: 5, off: {}, target: { isNew: true, sides: (sides > 1 ? Math.min(4, sides) : 1) } };
+    _bcEditing = true; _vshelfView = 'bookcase'; renderVirtualShelf();
+}
 function _addBookcaseSide() { const bc = _activeBc(); if (!bc) return; if (bc.sides.length >= 4) { showNotification('A spinning bookcase can have up to 4 sides', 1800); return; } _bcBuild = { rows: 8, cols: 5, off: {}, target: { bcId: bc.id, newSide: true } }; _bcEditing = true; renderVirtualShelf(); }
 function _renameBookcase() { const bc = _activeBc(); if (!bc) return; const n = prompt('Bookcase name:', bc.name || 'Bookcase'); if (n == null) return; bc.name = (n.trim() || bc.name); app.saveData(); renderVirtualShelf(); }
 function _spinBookcase(step) { const bc = _activeBc(); if (!bc || bc.sides.length < 2) return; _activeSide = ((_activeSide + (step || 1)) % bc.sides.length + bc.sides.length) % bc.sides.length; _bcJustSpun = true; renderVirtualShelf(); }
@@ -15064,7 +15088,7 @@ function _bookcaseBlueprintHtml() {
         '<span style="font-size:12px;color:#8B7E74;">' + cells.length + ' shelves · ' + filled + ' filled · tap ＋ to scan books in</span>' +
         '<span style="display:flex;gap:6px;flex-wrap:wrap;">' +
           '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_startBookcaseBuilder()">✏️ Edit shape</button>' +
-          '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_addBookcaseSide()">➕ Add side</button>' +
+          '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_addBookcaseSide()">' + (bc.sides.length === 1 ? '🔄 Make it spin' : '➕ Add side') + '</button>' +
           (bc.sides.length > 1 ? '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_deleteSide()">🗑️ Side</button>' : '') +
           '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_renameBookcase()">✎ Rename</button>' +
           '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_removeBookcase()">🗑️ Bookcase</button>' +
@@ -15125,7 +15149,10 @@ function _bcBuildSave() {
     const newSide = { cells: cells, aspectW: b.cols, aspectH: b.rows };
     const t = (b && b.target) || { isNew: true };
     if (t.isNew) {
-        const nb = { id: _newBookcaseId(), name: 'Bookcase ' + (_bcList().length + 1), sides: [newSide] };
+        const n = (t.sides && t.sides > 1) ? Math.min(4, t.sides) : 1;
+        const sidesArr = [newSide];
+        for (let s = 1; s < n; s++) sidesArr.push({ cells: [], aspectW: b.cols, aspectH: b.rows });
+        const nb = { id: _newBookcaseId(), name: (n > 1 ? 'Spinning bookcase ' : 'Bookcase ') + (_bcList().length + 1), sides: sidesArr };
         app.bookcases.push(nb); _activeBcId = nb.id; _activeSide = 0;
     } else {
         const bc = app.bookcases.find(x => x.id === t.bcId) || _activeBc();
