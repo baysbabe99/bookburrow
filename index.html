@@ -3441,6 +3441,10 @@
                         </label>
                     </div>
                     <div id="scanResult" class="scan-result"></div>
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:14px 0;padding:12px;background:#FEF3E2;border-radius:12px;">
+                        <span style="font-size:13px;color:#8B7E74;flex:1;min-width:160px;">📱 Scanned on your phone? Pull those books in.</span>
+                        <button class="btn btn-secondary" style="font-size:13px;white-space:nowrap;" onclick="importCloudScans()">☁️ Import scans</button>
+                    </div>
                     <!-- Scan History -->
                     <div id="scanHistory" style="margin-top:20px;display:none;">
                         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -4302,6 +4306,29 @@
         // (Photo Shelf → ⚙️ AI scan setup), which is stored per-reader and overrides this default.
         const SHELF_VISION_URL = '';
 
+        // ── Scan-a-Book cloud table ──────────────────────────────────────────
+        // Per-row Supabase `books` table that BOTH the in-app scanner and the
+        // companion phone scanner (scan.html) write to. Keep BOOKS_COLUMN_MAP in
+        // sync with bookburrow-books-table.sql and scan.html — the SQL is built
+        // to match it exactly, so scans save with zero extra changes.
+        const BOOKS_COLUMN_MAP = {
+            isbn: 'isbn', title: 'title', author: 'author', publisher: 'publisher',
+            published_date: 'published_date', cover_url: 'cover_url', description: 'description'
+        };
+        // Normalize any ISBN-10/13 (or EAN-13 barcode) to a 13-digit string for the
+        // table's UNIQUE isbn column, so re-scanning updates instead of duplicating.
+        function isbn13(raw) {
+            let s = (raw || '').toString().replace(/[^0-9xX]/g, '').toUpperCase();
+            if (s.length === 13) return s;
+            if (s.length === 10) {
+                const core = '978' + s.slice(0, 9);
+                let sum = 0;
+                for (let i = 0; i < 12; i++) sum += (i % 2 ? 3 : 1) * parseInt(core[i], 10);
+                return core + ((10 - (sum % 10)) % 10);
+            }
+            return s;
+        }
+
         const Cloud = {
             _client: null, _loading: null, _uid: null,
             enabled() { return !!(SUPABASE_URL && SUPABASE_ANON_KEY); },
@@ -4325,6 +4352,17 @@
             async signOut() { const c = await this.load(); if (c) { try { await c.auth.signOut(); } catch (e) {} } },
             async loadShelf(uid) { const c = await this.load(); if (!c) return null; try { const { data } = await c.from('shelves').select('data').eq('user_id', uid).maybeSingle(); return data ? data.data : null; } catch (e) { return null; } },
             async saveShelf(uid, payload) { const c = await this.load(); if (!c) return; try { await c.from('shelves').upsert({ user_id: uid, data: payload, updated_at: new Date().toISOString() }); } catch (e) {} },
+            // ---- Scan-a-Book: per-row cloud `books` table (bookburrow-books-table.sql) ----
+            // Works with the anon key (no login needed) — RLS Option A allows anon insert/update.
+            async saveScannedBook(b) {
+                const c = await this.load(); if (!c || !b || !b.isbn) return false;
+                const row = {}; for (const k in BOOKS_COLUMN_MAP) { const v = b[k]; row[BOOKS_COLUMN_MAP[k]] = (v != null && v !== '') ? v : null; }
+                try { const { error } = await c.from('books').upsert(row, { onConflict: 'isbn' }); return !error; } catch (e) { return false; }
+            },
+            async loadScannedBooks() {
+                const c = await this.load(); if (!c) return [];
+                try { const { data } = await c.from('books').select('*').order('date_added', { ascending: false }); return data || []; } catch (e) { return []; }
+            },
             // ---- Two-way cloud friends (profiles + friendships tables) ----
             myCode() { return Cloud._uid ? 'BB-' + Cloud._uid.replace(/-/g, '').slice(0, 8).toUpperCase() : null; },
             async ensureProfile(displayName) { const c = await this.load(); if (!c || !Cloud._uid) return; try { await c.from('profiles').upsert({ id: Cloud._uid, display_name: displayName || 'Reader', friend_code: this.myCode() }); } catch (e) {} },
@@ -8468,6 +8506,7 @@ function manualISBNLookup() {
     lookupISBN(isbn);
 }
 
+let _lastScanLookup = null; // remembers the last looked-up book so addScannedBook can mirror its cover/desc to the cloud
 function lookupISBN(isbn) {
     const cleanISBN = isbn.replace(/-/g, '');
     const resultEl = document.getElementById('scanResult');
@@ -8492,6 +8531,7 @@ function lookupISBN(isbn) {
             const coverId = data.covers ? data.covers[0] : null;
             const coverUrl = coverId ? `https://covers.openlibrary.org/b/id/${coverId}-M.jpg` : null;
             const desc = typeof data.description === 'string' ? data.description : (data.description?.value || '');
+            _lastScanLookup = { isbn: cleanISBN, title: title, author: authorName, publisher: (publishers[0] || ''), published_date: publishDate || '', cover_url: coverUrl || '', description: desc || '' };
 
             resultEl.innerHTML = `
                 <div style="background:#FEF3E2;border-radius:12px;padding:20px;display:flex;gap:16px;align-items:start;">
@@ -8515,14 +8555,18 @@ function lookupISBN(isbn) {
 
 function addScannedBook(title, author, pages, isbn, publisher, publishDate, description) {
     const year = publishDate ? parseInt(publishDate.match(/\d{4}/)?.[0]) || null : null;
+    const _m = (_lastScanLookup && _lastScanLookup.isbn === (isbn || '').replace(/-/g, '')) ? _lastScanLookup : {};
+    const cov = _m.cover_url || '';
     app.books.push({
         id: app.getNextId(), title, author, genre: '', pages: pages || 0, isbn,
-        publisher, publicationYear: year, language: 'English', format: '', series: '',
+        cover: cov, publisher, publicationYear: year, language: 'English', format: '', series: '',
         description: description || '', status: 'want', rating: 0,
         notes: 'Added via barcode scan', dateAdded: new Date().toISOString()
     });
     app.addXP(15);
     app.saveData();
+    // Mirror the scan into the shared cloud `books` table (no-op if cloud isn't set up)
+    try { Cloud.saveScannedBook({ isbn: isbn13(isbn), title: title, author: author, publisher: publisher || _m.publisher || '', published_date: publishDate || '', cover_url: cov, description: description || _m.description || '' }); } catch (e) {}
     updateXPDisplay();
     addToScanHistory(title, author, isbn);
     showNotification(`"${title}" added! +15 XP 📷`, 2000);
@@ -8548,6 +8592,30 @@ function addScannedBook(title, author, pages, isbn, publisher, publishDate, desc
         }, 2000);
     }
     renderScanHistory();
+}
+
+// Pull books scanned on another device (e.g. the phone scanner) from the cloud `books` table
+async function importCloudScans() {
+    if (!Cloud.enabled()) { showNotification('Cloud sync not set up', 1800); return; }
+    showNotification('☁️ Checking other devices…', 1400);
+    const rows = await Cloud.loadScannedBooks();
+    if (!rows.length) { showNotification('No cloud scans yet', 1800); return; }
+    let added = 0;
+    rows.forEach(r => {
+        const incoming = { title: r.title || '', author: r.author || '', isbn: r.isbn || '' };
+        if (app.books.some(lb => isImportDuplicate(lb, incoming))) return;
+        const year = r.published_date ? (parseInt((r.published_date.match(/\d{4}/) || [])[0]) || null) : null;
+        app.books.push({
+            id: app.getNextId(), title: r.title || 'Unknown', author: r.author || 'Unknown',
+            genre: '', pages: 0, isbn: r.isbn || '', cover: r.cover_url || '',
+            publisher: r.publisher || '', publicationYear: year, language: 'English', format: '', series: '',
+            description: r.description || '', status: 'want', rating: 0,
+            notes: 'Imported from cloud scan', dateAdded: new Date().toISOString()
+        });
+        added++;
+    });
+    if (added) { app.addXP(added * 5); app.saveData(); if (typeof renderLibraryBooks === 'function') renderLibraryBooks(); if (typeof updateXPDisplay === 'function') updateXPDisplay(); }
+    showNotification(added ? `📥 Imported ${added} book${added > 1 ? 's' : ''}` : 'Already up to date', 2000);
 }
 
 // Scan History
@@ -8978,6 +9046,8 @@ let _pendingFill = null;              // { bcId, side, cellId } cubby waiting to
 let _activeBcId = (function () { try { return localStorage.getItem('bookburrow_active_bc') || null; } catch (e) { return null; } })();
 let _activeSide = 0;                  // which side of a (possibly spinning) bookcase is showing
 let _bcJustSpun = false;             // one-shot flag to play the spin animation on next render
+let _fillTarget = null;              // { bcId, side, cellId } cubby being filled (chooser / library picker)
+let _libPickSel = {};                // selected book ids in the library picker
 let _lastSavedShelfPhotoId = null;    // id of the shelf photo saved by the last commit
 let _vshelfView = (function () { try { return localStorage.getItem('bookburrow_vshelf_view') || 'genre'; } catch (e) { return 'genre'; } })(); // remembered Virtual Shelf view
 let _bcBuild = null;                   // manual bookcase-builder grid state {rows, cols, off:{}}
@@ -9254,8 +9324,56 @@ async function _runLayoutScan() {
 // Tap an empty cubby → scan a section into it (links the saved shelf to that cell).
 function _fillBookcaseCell(cellId) {
     const bc = _activeBc(); if (!bc) return;
-    _pendingFill = { bcId: bc.id, side: _activeSide, cellId: cellId };
-    startShelfScan('cellfill');
+    _fillTarget = { bcId: bc.id, side: _activeSide, cellId: cellId };
+    _openCellFillChooser();
+}
+// Tap ＋ → choose how to fill the shelf: pick from library (no photo) or scan a photo.
+function _openCellFillChooser() {
+    _openScanModal('<div style="padding:22px;text-align:center;">' +
+        '<p style="color:#3D5A80;font-weight:700;margin:0 0 14px;">Add books to this shelf</p>' +
+        '<button class="btn btn-primary" onclick="_cellFillFromLibrary()">📚 Pick from my library</button> ' +
+        '<button class="btn btn-secondary" onclick="_cellFillScan()">📷 Scan a photo</button>' +
+        '<p style="color:#8B7E74;font-size:12px;margin:14px 0 0;">Most of your books are already in your library — picking is fastest (no photo needed).</p>' +
+        '</div>', 'Add books to a shelf');
+}
+function _cellFillScan() { _pendingFill = _fillTarget; startShelfScan('cellfill'); }
+function _cellFillFromLibrary() {
+    _libPickSel = {};
+    _openScanModal('<div style="padding:4px 2px;">' +
+        '<input id="libPickSearch" oninput="_libPickFilter(this.value)" placeholder="Search your library…" style="width:100%;padding:8px 10px;border:2px solid #E8DFD5;border-radius:10px;font-family:Nunito,sans-serif;font-size:14px;margin-bottom:8px;box-sizing:border-box;">' +
+        '<div id="libPickList" style="max-height:46vh;overflow:auto;border:1px solid #E8DFD5;border-radius:10px;"></div>' +
+        '<div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap;">' +
+          '<span id="libPickCount" style="font-size:12px;color:#8B7E74;">0 selected</span>' +
+          '<span style="display:flex;gap:8px;"><button class="btn btn-secondary" onclick="_openCellFillChooser()">← Back</button>' +
+          '<button class="btn btn-primary" onclick="_commitCellLibrary()">Add to shelf</button></span>' +
+        '</div></div>', 'Pick from your library');
+    _libPickFilter('');
+}
+function _libPickFilter(q) {
+    const el = document.getElementById('libPickList'); if (!el) return;
+    const qq = (q || '').toLowerCase();
+    const books = (app.books || []).filter(b => !qq || (b.title || '').toLowerCase().indexOf(qq) >= 0 || (b.author || '').toLowerCase().indexOf(qq) >= 0);
+    el.innerHTML = books.slice(0, 400).map(b =>
+        '<label style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-bottom:1px solid #F0E8DD;font-size:13px;color:#3D5A80;cursor:pointer;">' +
+        '<input type="checkbox"' + (_libPickSel[b.id] ? ' checked' : '') + ' onchange="_libPickToggle(' + b.id + ')"> ' +
+        '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(b.title || 'Untitled') + (b.author ? ' — ' + escapeHtml(b.author) : '') + '</span></label>'
+    ).join('') || '<div style="padding:16px;text-align:center;color:#8B7E74;">No matches</div>';
+    _libPickUpdateCount();
+}
+function _libPickToggle(id) { _libPickSel[id] = !_libPickSel[id]; _libPickUpdateCount(); }
+function _libPickUpdateCount() { const n = Object.keys(_libPickSel).filter(k => _libPickSel[k]).length; const c = document.getElementById('libPickCount'); if (c) c.textContent = n + ' selected'; }
+function _commitCellLibrary() {
+    const t = _fillTarget; if (!t) return;
+    const ids = Object.keys(_libPickSel).filter(k => _libPickSel[k]).map(Number);
+    if (!ids.length) { showNotification('Pick at least one book', 1500); return; }
+    const bc = (app.bookcases || []).find(b => b.id === t.bcId);
+    const side = bc && bc.sides && bc.sides[t.side];
+    const cell = side && (side.cells || []).find(c => c.id === t.cellId);
+    if (cell) { cell.bookIds = ids; cell.shelfPhotoId = null; }
+    app.saveData();
+    closeModal('shelfScanModal');
+    _vshelfView = 'bookcase'; switchLibraryTab('vshelf');
+    showNotification(ids.length + ' book' + (ids.length === 1 ? '' : 's') + ' added to the shelf ✓', 1800);
 }
 
 // Group whole-bookcase pieces into real rows using each book's box y-position.
@@ -14915,7 +15033,7 @@ function _bookcaseBlueprintHtml() {
     const side = bc.sides[_activeSide] || bc.sides[0];
     const aspW = side.aspectW || 5, aspH = side.aspectH || 8;
     const cells = side.cells || [];
-    const filled = cells.filter(c => c.shelfPhotoId != null).length;
+    const filled = cells.filter(c => (c.bookIds && c.bookIds.length) || c.shelfPhotoId != null).length;
     let chips = list.map(b => '<button onclick="setActiveBookcase(\'' + b.id + '\')" style="font-size:12px;padding:4px 10px;border-radius:14px;border:1.5px solid ' + (b.id === bc.id ? '#7D9B76' : '#E8DFD5') + ';background:' + (b.id === bc.id ? 'rgba(125,155,118,0.15)' : '#FFF8F0') + ';color:#3D5A80;cursor:pointer;font-weight:700;">📚 ' + escapeHtml(b.name || 'Bookcase') + '</button>').join(' ');
     chips += ' <button onclick="_addBookcase()" style="font-size:12px;padding:4px 10px;border-radius:14px;border:1.5px dashed #D4A76A;background:#FFF8F0;color:#D4A76A;cursor:pointer;font-weight:700;">➕ Add bookcase</button>';
     let spin = '';
@@ -14931,9 +15049,11 @@ function _bookcaseBlueprintHtml() {
     }
     let cellsHtml = '';
     cells.forEach(c => {
-        const photo = (c.shelfPhotoId != null) ? (app.shelfPhotos || []).find(p => p.id === c.shelfPhotoId) : null;
-        const inner = photo ? _cubbySpinesHtml(_shelfBooksInOrder(photo))
-            : '<button onclick="_fillBookcaseCell(' + c.id + ')" title="Scan books into this shelf" style="width:100%;height:100%;border:1px dashed rgba(255,240,220,0.45);background:rgba(0,0,0,0.14);color:#FCE9D0;font-size:13px;border-radius:3px;cursor:pointer;padding:0;">＋</button>';
+        const fromLib = (c.bookIds && c.bookIds.length) ? c.bookIds.map(id => (app.books || []).find(b => b.id === id)).filter(Boolean) : null;
+        const photo = (!fromLib && c.shelfPhotoId != null) ? (app.shelfPhotos || []).find(p => p.id === c.shelfPhotoId) : null;
+        const cbooks = fromLib || (photo ? _shelfBooksInOrder(photo) : null);
+        const inner = (cbooks && cbooks.length) ? _cubbySpinesHtml(cbooks)
+            : '<button onclick="_fillBookcaseCell(' + c.id + ')" title="Add books to this shelf" style="width:100%;height:100%;border:1px dashed rgba(255,240,220,0.45);background:rgba(0,0,0,0.14);color:#FCE9D0;font-size:13px;border-radius:3px;cursor:pointer;padding:0;">＋</button>';
         cellsHtml += '<div style="position:absolute;left:' + (c.x * 100) + '%;top:' + (c.y * 100) + '%;width:' + (c.w * 100) + '%;height:' + (c.h * 100) + '%;box-sizing:border-box;padding:1px;">' +
             '<button onclick="_deleteBookcaseCell(' + c.id + ')" title="Delete this shelf" style="position:absolute;top:2px;right:2px;z-index:3;width:16px;height:16px;line-height:13px;text-align:center;border:none;border-radius:3px;background:rgba(120,40,30,0.78);color:#fff;font-size:11px;cursor:pointer;padding:0;">✕</button>' +
             '<div style="width:100%;height:100%;background:rgba(38,24,12,0.34);border:1px solid rgba(18,10,5,0.55);border-radius:2px;box-shadow:inset 0 0 8px rgba(0,0,0,0.5);overflow:hidden;">' + inner + '</div></div>';
