@@ -5155,7 +5155,7 @@ function navigateTo(section) {
     if (section === 'profile') { renderProfile(); renderApps(); }
     if (section === 'dashboard') renderDashboard();
     if (section === 'recommendations') renderRecommendations();
-    if (section === 'library') { switchLibraryTab(currentLibraryTab); try { autoImportCloudScans(); } catch (e) {} }
+    if (section === 'library') { switchLibraryTab(currentLibraryTab); try { autoImportCloudScans(); } catch (e) {} try { renderRecentlyScanned(true); } catch (e) {} }
     if (section === 'quests') { renderChallenges(); renderAchievements(); renderGoals(); renderDragonJourney(); }
     if (section === 'friends') initializeFriends();
 }
@@ -6405,31 +6405,87 @@ function quickChangeStatus(bookId, newStatus) {
 }
 
 // Recently Scanned box (top of Library) — recent scan-added books with a quick Edit button
-function renderRecentlyScanned() {
+let _recentCloudCache = null, _recentCloudAt = 0, _recentCloudFetching = false;
+// Recently Scanned box — sourced from the cloud `books` table (what you actually scanned),
+// so books you already own still show up (marked "in library") instead of being hidden.
+function renderRecentlyScanned(force) {
     const box = document.getElementById('recentlyScannedBox');
     if (!box) return;
-    const scanned = (app.books || [])
-        .filter(b => /scan/i.test(b.notes || ''))
-        .sort((a, b) => new Date(b.dateAdded || 0) - new Date(a.dateAdded || 0))
-        .slice(0, 8);
-    if (!scanned.length) { box.innerHTML = ''; return; }
-    const needsInfo = b => (!b.author || b.author === 'Unknown' || !b.pages || !b.genre || !b.cover);
+    const now = Date.now();
+    if (Cloud.enabled() && !_recentCloudFetching && (force || !_recentCloudCache || now - _recentCloudAt > 20000)) {
+        _recentCloudFetching = true;
+        Cloud.loadScannedBooks()
+            .then(rows => { _recentCloudCache = rows || []; _recentCloudAt = Date.now(); })
+            .catch(() => {})
+            .then(() => { _recentCloudFetching = false; _paintRecentlyScanned(); });
+    }
+    _paintRecentlyScanned();
+}
+function _recentMatchLib(r) {
+    const norm = (r.isbn || '').replace(/[^0-9Xx]/g, '');
+    return app.books.find(b => (norm && (b.isbn || '').replace(/[^0-9Xx]/g, '') === norm) || isImportDuplicate(b, { title: r.title || '', author: r.author || '', isbn: r.isbn || '' }));
+}
+function _paintRecentlyScanned() {
+    const box = document.getElementById('recentlyScannedBox');
+    if (!box) return;
+    const cloud = (_recentCloudCache || []).slice(0, 12);
+    let items;
+    if (cloud.length) {
+        items = cloud.map(r => ({ r: r, lib: _recentMatchLib(r) }));
+    } else {
+        items = (app.books || []).filter(b => /scan/i.test(b.notes || ''))
+            .sort((a, b) => new Date(b.dateAdded || 0) - new Date(a.dateAdded || 0)).slice(0, 8)
+            .map(b => ({ lib: b, r: { isbn: b.isbn, title: b.title, author: b.author, cover_url: b.cover } }));
+    }
+    if (!items.length) { box.innerHTML = ''; return; }
+    const esc = v => escapeHtml(v == null ? '' : String(v));
     const open = localStorage.getItem('bb_recentScanOpen') === '1' ? 'open' : '';
+    const rowHtml = it => {
+        const r = it.r, lib = it.lib, inLib = !!lib;
+        const title = (lib && lib.title) || r.title || 'Untitled scan';
+        const author = (lib && lib.author) || r.author || '';
+        const cover = (lib && lib.cover) || r.cover_url || '';
+        const badge = inLib ? '<span style="color:#7D9B76;font-weight:700;">✓ in library</span>' : '<span style="color:#C2705B;font-weight:700;">not added yet</span>';
+        const action = inLib
+            ? `<button class="btn btn-secondary" style="font-size:12px;padding:6px 12px;white-space:nowrap;flex-shrink:0;" onclick="openBookModal(${lib.id})">✏️ Edit</button>`
+            : `<button class="btn btn-primary" style="font-size:12px;padding:6px 12px;white-space:nowrap;flex-shrink:0;" onclick="addCloudScanToLibrary('${esc(r.isbn)}')">＋ Add</button>`;
+        return `
+                    <div style="display:flex;align-items:center;gap:10px;background:#FFF8F0;border:1px solid #E8DFD5;border-radius:10px;padding:8px 10px;">
+                        ${cover ? `<img src="${esc(cover)}" onerror="this.onerror=null;this.style.display='none'" style="width:34px;height:50px;object-fit:cover;border-radius:5px;flex-shrink:0;">` : `<div style="width:34px;height:50px;border-radius:5px;background:#E8DFD5;display:flex;align-items:center;justify-content:center;flex-shrink:0;">📖</div>`}
+                        <div style="flex:1;min-width:0;">
+                            <div style="font-weight:700;color:#3D5A80;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(title)}</div>
+                            <div style="color:#8B7E74;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(author) || ('ISBN ' + esc(r.isbn))} · ${badge}</div>
+                        </div>
+                        ${action}
+                    </div>`;
+    };
     box.innerHTML = `
         <details ${open} ontoggle="try{localStorage.setItem('bb_recentScanOpen',this.open?'1':'0')}catch(e){}" style="background:#FEF3E2;border-radius:12px;padding:12px 14px;border:2px dashed rgba(194,112,91,0.2);">
-            <summary style="cursor:pointer;list-style:none;font-weight:700;color:#3D5A80;font-size:14px;display:flex;align-items:center;gap:8px;">📷 Recently Scanned <span style="background:#7D9B76;color:#fff;border-radius:20px;font-size:11px;padding:1px 9px;">${scanned.length}</span><span style="color:#8B7E74;font-weight:600;font-size:11px;margin-left:auto;">tap to show / hide</span></summary>
+            <summary style="cursor:pointer;list-style:none;font-weight:700;color:#3D5A80;font-size:14px;display:flex;align-items:center;gap:8px;">📷 Recently Scanned <span style="background:#7D9B76;color:#fff;border-radius:20px;font-size:11px;padding:1px 9px;">${items.length}</span><span style="color:#8B7E74;font-weight:600;font-size:11px;margin-left:auto;">tap to show / hide</span></summary>
             <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;">
-                ${scanned.map(b => `
-                    <div style="display:flex;align-items:center;gap:10px;background:#FFF8F0;border:1px solid #E8DFD5;border-radius:10px;padding:8px 10px;">
-                        ${b.cover ? `<img src="${b.cover}" onerror="this.onerror=null;this.style.display='none'" style="width:34px;height:50px;object-fit:cover;border-radius:5px;flex-shrink:0;">` : `<div style="width:34px;height:50px;border-radius:5px;background:#E8DFD5;display:flex;align-items:center;justify-content:center;flex-shrink:0;">📖</div>`}
-                        <div style="flex:1;min-width:0;cursor:pointer;" onclick="openBookModal(${b.id})">
-                            <div style="font-weight:700;color:#3D5A80;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(b.title || 'Untitled')}</div>
-                            <div style="color:#8B7E74;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(b.author || 'Unknown')}${needsInfo(b) ? ' · <span style="color:#C2705B;font-weight:700;">needs info</span>' : ''}</div>
-                        </div>
-                        <button class="btn btn-secondary" style="font-size:12px;padding:6px 12px;white-space:nowrap;flex-shrink:0;" onclick="openBookModal(${b.id})">✏️ Edit</button>
-                    </div>`).join('')}
+                ${items.map(rowHtml).join('')}
             </div>
         </details>`;
+}
+async function addCloudScanToLibrary(isbn) {
+    const r = (_recentCloudCache || []).find(x => x.isbn === isbn);
+    if (!r) { showNotification('Scan not found — pull to refresh', 1600); return; }
+    const year = r.published_date ? (parseInt((r.published_date.match(/\d{4}/) || [])[0]) || null) : null;
+    const book = {
+        id: app.getNextId(), title: r.title || 'Untitled scan', author: r.author || 'Unknown',
+        genre: r.genre || '', pages: r.page_count || 0, isbn: r.isbn || '', cover: r.cover_url || '',
+        publisher: r.publisher || '', publicationYear: year, language: r.language || 'English', format: '', series: '',
+        description: r.description || '', status: 'want', rating: 0,
+        notes: 'Imported from cloud scan', dateAdded: r.date_added || new Date().toISOString()
+    };
+    app.books.push(book);
+    app.addXP(5);
+    app.saveData();
+    if (typeof updateXPDisplay === 'function') updateXPDisplay();
+    renderRecentlyScanned();
+    if (currentSection === 'library') { try { applyLibraryFilters(); } catch (e) {} }
+    openBookModal(book.id);
+    showNotification(`📥 "${book.title}" added`, 1800);
 }
 
 function renderLibraryBooks(filter) {
