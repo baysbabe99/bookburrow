@@ -8646,42 +8646,56 @@ async function lookupISBN(isbn) {
         resultEl.innerHTML = `<div style="text-align:center;padding:20px;color:#C2705B;">📕 Book not found for ISBN: ${cleanISBN}. Try a different ISBN or add manually.</div>`;
         return;
     }
-    const desc = m.description || '';
+    const av = s => (s || '').toString().replace(/"/g, '&quot;');
+    const fStyle = 'width:100%;padding:8px 10px;border:2px solid #E8DFD5;border-radius:9px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:14px;box-sizing:border-box;';
+    const lbl = 'font-size:11px;font-weight:700;color:#8B7E74;display:block;margin-bottom:3px;';
     resultEl.innerHTML = `
-        <div style="background:#FEF3E2;border-radius:12px;padding:20px;display:flex;gap:16px;align-items:start;">
-            ${m.cover_url ? `<img src="${m.cover_url}" alt="Cover" onerror="this.onerror=null;this.style.display='none'" style="width:100px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);">` : '<div style="width:100px;height:140px;background:#E8DFD5;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:32px;">📖</div>'}
-            <div style="flex:1;">
-                <div style="font-weight:700;color:#3D5A80;font-size:18px;margin-bottom:4px;">${m.title}</div>
-                <div style="color:#8B7E74;margin-bottom:4px;">by ${m.author}</div>
-                ${m.page_count ? `<div style="color:#8B7E74;font-size:13px;">📄 ${m.page_count} pages</div>` : ''}
-                ${m.genre ? `<div style="color:#8B7E74;font-size:13px;">🏷️ ${m.genre}</div>` : ''}
-                ${m.publisher ? `<div style="color:#8B7E74;font-size:13px;">🏢 ${m.publisher}</div>` : ''}
-                ${m.published_date ? `<div style="color:#8B7E74;font-size:13px;">📅 ${m.published_date}</div>` : ''}
-                <div style="color:#8B7E74;font-size:13px;">📋 ISBN: ${cleanISBN}</div>
-                ${desc ? `<div style="color:#8B7E74;font-size:12px;margin-top:8px;font-style:italic;">${desc.substring(0, 240)}${desc.length > 240 ? '…' : ''}</div>` : ''}
-                <button class="btn btn-primary" style="margin-top:12px;" onclick="addScannedBook('${cleanISBN}')">📚 Add to Library</button>
+        <div style="background:#FEF3E2;border-radius:12px;padding:16px;">
+            <div style="display:flex;gap:14px;align-items:start;margin-bottom:12px;">
+                ${m.cover_url ? `<img src="${m.cover_url}" alt="Cover" onerror="this.onerror=null;this.style.display='none'" style="width:80px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);flex-shrink:0;">` : '<div style="width:80px;height:115px;background:#E8DFD5;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;">📖</div>'}
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:12px;color:#7D9B76;font-weight:700;margin-bottom:6px;">✏️ Review & edit, then add</div>
+                    <label style="${lbl}">TITLE</label><input id="scanEditTitle" value="${av(m.title)}" style="${fStyle}">
+                    <label style="${lbl}margin-top:8px;">AUTHOR</label><input id="scanEditAuthor" value="${av(m.author)}" style="${fStyle}">
+                </div>
             </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <div><label style="${lbl}">PAGES</label><input id="scanEditPages" type="number" value="${m.page_count || ''}" style="${fStyle}"></div>
+                <div><label style="${lbl}">GENRE</label><input id="scanEditGenre" value="${av(m.genre)}" style="${fStyle}"></div>
+                <div><label style="${lbl}">PUBLISHER</label><input id="scanEditPub" value="${av(m.publisher)}" style="${fStyle}"></div>
+                <div><label style="${lbl}">PUBLISHED</label><input id="scanEditDate" value="${av(m.published_date)}" style="${fStyle}"></div>
+            </div>
+            <label style="${lbl}margin-top:8px;">DESCRIPTION</label><textarea id="scanEditDesc" rows="3" style="${fStyle}resize:vertical;">${m.description || ''}</textarea>
+            <div style="font-size:12px;color:#8B7E74;margin-top:8px;">📋 ISBN: ${cleanISBN}</div>
+            <button class="btn btn-primary" style="margin-top:12px;width:100%;" onclick="addScannedBook('${cleanISBN}')">📚 Add to Library</button>
         </div>`;
 }
 
 function addScannedBook(isbn) {
     const cleanISBN = (isbn || '').toString().replace(/-/g, '');
     const m = (_lastScanLookup && _lastScanLookup.isbn === cleanISBN) ? _lastScanLookup : { isbn: cleanISBN };
-    const title = m.title || 'Unknown Title';
-    const author = m.author || 'Unknown';
-    const pages = m.page_count || 0;
-    const year = m.published_date ? (parseInt((m.published_date.match(/\d{4}/) || [])[0]) || null) : null;
+    // Prefer any edits the user made on the scan card
+    const gv = id => { const el = document.getElementById(id); return el ? el.value.trim() : null; };
+    const _t = gv('scanEditTitle'), _a = gv('scanEditAuthor'), _p = gv('scanEditPages'), _g = gv('scanEditGenre'), _pub = gv('scanEditPub'), _pd = gv('scanEditDate'), _d = gv('scanEditDesc');
+    const title = (_t != null && _t !== '') ? _t : (m.title || 'Unknown Title');
+    const author = (_a != null && _a !== '') ? _a : (m.author || 'Unknown');
+    const pages = (_p != null && _p !== '') ? (parseInt(_p, 10) || 0) : (m.page_count || 0);
+    const genre = (_g != null) ? _g : (m.genre || '');
+    const publisher = (_pub != null) ? _pub : (m.publisher || '');
+    const pubDate = (_pd != null) ? _pd : (m.published_date || '');
+    const description = (_d != null) ? _d : (m.description || '');
+    const year = pubDate ? (parseInt((pubDate.match(/\d{4}/) || [])[0]) || null) : null;
     app.books.push({
-        id: app.getNextId(), title: title, author: author, genre: m.genre || '', pages: pages || 0, isbn: cleanISBN,
-        cover: m.cover_url || '', publisher: m.publisher || '', publicationYear: year,
+        id: app.getNextId(), title: title, author: author, genre: genre, pages: pages || 0, isbn: cleanISBN,
+        cover: m.cover_url || '', publisher: publisher, publicationYear: year,
         language: m.language || 'English', format: '', series: '',
-        description: m.description || '', status: 'want', rating: 0,
+        description: description, status: 'want', rating: 0,
         notes: 'Added via barcode scan', dateAdded: new Date().toISOString()
     });
     app.addXP(15);
     app.saveData();
-    // Mirror the scan into the shared cloud `books` table with full details (no-op if cloud isn't set up)
-    try { Cloud.saveScannedBook({ isbn: isbn13(cleanISBN), title: title, author: author, publisher: m.publisher || '', published_date: m.published_date || '', cover_url: m.cover_url || '', description: m.description || '', page_count: pages || null, genre: m.genre || '', language: m.language || '' }); } catch (e) {}
+    // Mirror the scan (with your edits) into the shared cloud `books` table (no-op if cloud isn't set up)
+    try { Cloud.saveScannedBook({ isbn: isbn13(cleanISBN), title: title, author: author, publisher: publisher, published_date: pubDate, cover_url: m.cover_url || '', description: description, page_count: pages || null, genre: genre, language: m.language || '' }); } catch (e) {}
     updateXPDisplay();
     addToScanHistory(title, author, cleanISBN);
     showNotification(`"${title}" added! +15 XP 📷`, 2000);
