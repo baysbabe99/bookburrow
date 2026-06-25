@@ -273,6 +273,9 @@
   }
   document.getElementById('manual').addEventListener('keydown', e => { if (e.key === 'Enter') addManual(); });
 
+  // Auto-lookup an ISBN passed via ?isbn= (used by the in-app "Look up" buttons).
+  try { var _qpIsbn = new URLSearchParams(location.search).get('isbn'); if (_qpIsbn) { var _mEl = document.getElementById('manual'); if (_mEl) _mEl.value = _qpIsbn; handleISBN(_qpIsbn); } } catch (e) {}
+
   // ── Camera scanning: native BarcodeDetector, with ZXing fallback ─────────────
   let stream = null, nativeTimer = null, zx = null, scanning = false;
   const camBtn = document.getElementById('camBtn');

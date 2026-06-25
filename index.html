@@ -4442,6 +4442,66 @@
             clearTimeout(_cloudSaveTimer);
             _cloudSaveTimer = setTimeout(() => { try { Cloud.saveShelf(Cloud._uid, JSON.parse(localStorage.getItem(profileDataKey()) || '{}')); } catch (e) {} }, 1200);
         }
+
+        // A stable identity for a book so the same title isn't duplicated across devices,
+        // while genuinely different books are kept apart.
+        function _shelfMergeKey(b) {
+            if (!b) return '';
+            const isbn = (b.isbn || '').replace(/[^0-9Xx]/g, '');
+            if (isbn) return 'i:' + isbn;
+            const t = (b.title || '').toLowerCase().replace(/\s+/g, ' ').trim();
+            const a = (b.author || '').toLowerCase().replace(/\s+/g, ' ').trim();
+            return t ? 't:' + t + '|' + a : 'id:' + b.id;
+        }
+        function _mergeArrayById(localArr, remoteArr, idKey) {
+            const out = Array.isArray(localArr) ? localArr.slice() : [];
+            const seen = new Set(out.map(x => x && x[idKey]));
+            let added = 0;
+            (Array.isArray(remoteArr) ? remoteArr : []).forEach(r => {
+                if (r && !seen.has(r[idKey])) { out.push(r); seen.add(r[idKey]); added++; }
+            });
+            return { out, added };
+        }
+        // Union-merge two shelf blobs so a save from one device can NEVER wipe books/XP that
+        // only exist on the other. Local wins for scalar settings; collections are unioned.
+        // Returns { data, changed } — `changed` is true when the remote contributed something new.
+        function _mergeShelf(local, remote) {
+            local = local || {}; remote = remote || {};
+            let changed = false;
+            const merged = Object.assign({}, remote, local); // local wins for shared scalar fields
+            // Books: union by stable key; keep every book that exists on either side.
+            const byKey = new Map();
+            (Array.isArray(local.books) ? local.books : []).forEach(b => byKey.set(_shelfMergeKey(b), b));
+            (Array.isArray(remote.books) ? remote.books : []).forEach(b => {
+                const k = _shelfMergeKey(b);
+                if (!byKey.has(k)) { byKey.set(k, b); changed = true; }
+            });
+            merged.books = Array.from(byKey.values());
+            // XP / streak: keep the higher value so earned progress survives.
+            merged.xp = Math.max(local.xp || 0, remote.xp || 0);
+            if ((remote.xp || 0) > (local.xp || 0)) changed = true;
+            merged.streak = Math.max(local.streak || 0, remote.streak || 0);
+            merged.yearlyGoal = local.yearlyGoal || remote.yearlyGoal || 24;
+            // Achievements: union (unlocked on either device stays unlocked).
+            merged.achievements = Object.assign({}, remote.achievements || {}, local.achievements || {});
+            if (Object.keys(remote.achievements || {}).some(k => !(local.achievements || {})[k])) changed = true;
+            // Other collections: union by id, keeping local copies for shared ids.
+            const ch = _mergeArrayById(local.challenges, remote.challenges, 'id'); merged.challenges = ch.out; if (ch.added) changed = true;
+            const ln = _mergeArrayById(local.loans, remote.loans, 'id'); merged.loans = ln.out; if (ln.added) changed = true;
+            const bw = _mergeArrayById(local.borrows, remote.borrows, 'id'); merged.borrows = bw.out; if (bw.added) changed = true;
+            merged.friends = _mergeArrayById(local.friends, remote.friends, 'id').out;
+            merged.gifts = _mergeArrayById(local.gifts, remote.gifts, 'id').out;
+            const sp = _mergeArrayById(local.shelfPhotos, remote.shelfPhotos, 'id'); merged.shelfPhotos = sp.out; if (sp.added) changed = true;
+            merged.bookcases = _mergeArrayById(local.bookcases, remote.bookcases, 'id').out;
+            // Profile: keep local, but union the daily reading log (max pages per day).
+            const lp = local.profile || {}, rp = remote.profile || {};
+            merged.profile = Object.assign({}, rp, lp);
+            const mlog = Object.assign({}, rp.dailyReadingLog || {});
+            const llog = lp.dailyReadingLog || {};
+            Object.keys(llog).forEach(d => { mlog[d] = Math.max(llog[d] || 0, (rp.dailyReadingLog || {})[d] || 0); });
+            merged.profile.dailyReadingLog = mlog;
+            return { data: merged, changed };
+        }
         function _cloudLoginForm(isSignup) {
             return '<div class="login-emoji">🐉</div>'
                 + '<div class="login-title">' + (isSignup ? 'Create your account' : 'Welcome back') + '</div>'
@@ -4470,8 +4530,14 @@
             if (!reg.profiles.find(p => p.id === pid)) reg.profiles.push({ id: pid, name: (user.email || 'Reader').split('@')[0], avatar: '☁️', cloud: true });
             reg.activeId = pid;
             _saveProfileRegistry(reg);
+            // Merge instead of clobber: union local + remote so books/XP from either side survive
+            // a login (fresh device, re-login after offline edits, or profile switch).
+            Cloud._uid = uid;
             const remote = await Cloud.loadShelf(uid);
-            if (remote) localStorage.setItem(profileDataKey(pid), JSON.stringify(remote));
+            const localRaw = JSON.parse(localStorage.getItem(profileDataKey(pid)) || 'null');
+            const merged = _mergeShelf(localRaw, remote).data;
+            localStorage.setItem(profileDataKey(pid), JSON.stringify(merged));
+            try { await Cloud.saveShelf(uid, merged); } catch (e) {}
             try { sessionStorage.setItem('bb_reader_session', pid); sessionStorage.setItem('bb_cloud_uid', uid); } catch (e) {}
             location.reload();
         }
@@ -4483,7 +4549,18 @@
                             Cloud._uid = sess.user.id;
                             const pid = 'cloud_' + sess.user.id;
                             if (getActiveProfileId() !== pid) { await _enterCloudAccount(sess.user); return; }
-                            cloudPush(); // make sure the cloud has the latest copy
+                            // Re-pull and union-merge so books added on another device aren't
+                            // clobbered by this device's next push. Reload once if remote had new data.
+                            const remote = await Cloud.loadShelf(sess.user.id);
+                            if (remote) {
+                                const localRaw = JSON.parse(localStorage.getItem(profileDataKey()) || 'null');
+                                const res = _mergeShelf(localRaw, remote);
+                                localStorage.setItem(profileDataKey(), JSON.stringify(res.data));
+                                try { await Cloud.saveShelf(sess.user.id, res.data); } catch (e) {}
+                                if (res.changed) { location.reload(); return; }
+                            } else {
+                                cloudPush(); // first push for a brand-new cloud shelf
+                            }
                         } else { showLogin(); }
                     });
                 } else {
@@ -4789,8 +4866,17 @@
             localStorage.removeItem('shelfie_data');
         }
         const saved = localStorage.getItem(profileDataKey());
+        let data = null;
         if (saved) {
-            const data = JSON.parse(saved);
+            try { data = JSON.parse(saved); }
+            catch (e) {
+                // A corrupt/truncated blob (e.g. a storage-quota failure mid-write) must not brick
+                // the app on every reload. Back up the bad copy and start fresh instead of throwing.
+                try { localStorage.setItem(profileDataKey() + '__corrupt_backup', saved); } catch (e2) {}
+                console.error('Bookburrow: saved data unreadable; starting fresh.', e);
+            }
+        }
+        if (data) {
             this.books = data.books || [];
             this.xp = data.xp || 0;
             this.loans = data.loans || [];
@@ -4803,6 +4889,7 @@
             this.shelfVisionUrl = data.shelfVisionUrl || '';
             this.bookcases = Array.isArray(data.bookcases) ? data.bookcases : ((data.bookcase && data.bookcase.cells) ? [{ id: 'bc' + Date.now(), name: 'My Bookcase', sides: [{ cells: data.bookcase.cells, aspectW: data.bookcase.aspectW || 5, aspectH: data.bookcase.aspectH || 8 }] }] : []);
             this.lastLogin = data.lastLogin || null;
+            this.lastReadDate = data.lastReadDate || null;
             this.streak = data.streak || 0;
             this.profile = data.profile || {};
             this.friends = data.friends || [];
@@ -4816,6 +4903,12 @@
         }
         this.checkStreak();
         this.migrateShelfPhotoRefs();
+        // Backfill XP-awarded flags for pre-existing books so finish/rating XP can't be
+        // re-farmed, and so un-finishing an old read book reverses its XP symmetrically.
+        (this.books || []).forEach(b => {
+            if (b.status === 'read' && b.finishXpAwarded === undefined) b.finishXpAwarded = true;
+            if (b.rating > 0 && b.ratingXpAwarded === undefined) b.ratingXpAwarded = true;
+        });
     }
 
     // One-time migration: books linked to a shelf photo by array index
@@ -4872,45 +4965,75 @@
     }
 
     checkStreak() {
-        const today = new Date().toDateString();
-        const lastLogin = this.lastLogin ? new Date(this.lastLogin).toDateString() : null;
-        if (lastLogin !== today) {
-            const yesterday = new Date(Date.now() - 86400000).toDateString();
-            if (lastLogin === yesterday) {
-                this.streak++;
-                this.addXP(15);
-            } else if (lastLogin !== today) {
-                this.streak = 1;
-            }
-            this.lastLogin = new Date().toISOString();
-            this.saveData();
+        // Streak now reflects consecutive READING days (finishing a book or logging pages),
+        // not app opens. On load we only break the streak if the last reading day is stale;
+        // markReadingActivity() does the incrementing when the user actually reads.
+        const today = todayKey();
+        const yesterday = localDayKey(new Date(Date.now() - 86400000));
+        if (this.lastReadDate && this.lastReadDate !== today && this.lastReadDate !== yesterday) {
+            this.streak = 0;
         }
+        this.lastLogin = new Date().toISOString();
+        this.saveData();
+    }
+
+    // Call whenever the user does something that counts as "reading today" (finish / log pages).
+    // Advances the reading-day streak and awards the daily bonus at most once per local day.
+    markReadingActivity() {
+        const today = todayKey();
+        if (this.lastReadDate === today) return;            // already counted today
+        const yesterday = localDayKey(new Date(Date.now() - 86400000));
+        this.streak = (this.lastReadDate === yesterday) ? (this.streak || 0) + 1 : 1;
+        this.lastReadDate = today;
+        this.addXP(15);                                     // addXP already persists
     }
 
     saveData() {
-        localStorage.setItem(profileDataKey(), JSON.stringify({
-            books: this.books, xp: this.xp, loans: this.loans, borrows: this.borrows,
-            challenges: this.challenges, achievements: this.achievements, yearlyGoal: this.yearlyGoal,
-            connectedApps: this.connectedApps, shelfPhotos: this.shelfPhotos, shelfVisionUrl: this.shelfVisionUrl, bookcases: this.bookcases,
-            lastLogin: this.lastLogin, streak: this.streak, profile: this.profile,
-            friends: this.friends, friendCode: this.friendCode, gifts: this.gifts,
-            releaseAlertsEnabled: this.releaseAlertsEnabled,
-            releaseAlertLeadDays: this.releaseAlertLeadDays,
-            notifiedReleaseAlerts: this.notifiedReleaseAlerts
-        }));
+        try {
+            localStorage.setItem(profileDataKey(), JSON.stringify({
+                books: this.books, xp: this.xp, loans: this.loans, borrows: this.borrows,
+                challenges: this.challenges, achievements: this.achievements, yearlyGoal: this.yearlyGoal,
+                connectedApps: this.connectedApps, shelfPhotos: this.shelfPhotos, shelfVisionUrl: this.shelfVisionUrl, bookcases: this.bookcases,
+                lastLogin: this.lastLogin, lastReadDate: this.lastReadDate, streak: this.streak, profile: this.profile,
+                friends: this.friends, friendCode: this.friendCode, gifts: this.gifts,
+                releaseAlertsEnabled: this.releaseAlertsEnabled,
+                releaseAlertLeadDays: this.releaseAlertLeadDays,
+                notifiedReleaseAlerts: this.notifiedReleaseAlerts
+            }));
+        } catch (e) {
+            // Most likely the localStorage quota was exceeded (large shelf-photo data URLs).
+            // Don't let a failed write throw out of saveData and abort the caller's action.
+            console.error('Bookburrow: save failed (storage full?).', e);
+            try { showNotification('⚠️ Could not save — storage may be full. Try removing some shelf photos.', 'error'); } catch (e2) {}
+        }
         try { syncActiveProfileMeta(); } catch (e) {}
         try { cloudPush(); } catch (e) {}
     }
 
     addXP(amount) {
         const oldLevel = this.getLevel();
-        this.xp += amount;
+        this.xp = Math.max(0, this.xp + amount);   // clamp so reversals can't drive XP negative
         this.saveData();
         updateXPDisplay();
         if (this.getLevel() > oldLevel) {
             showNotification(`Level Up! ${this.getLevelTitle()}!`, 2500);
             triggerConfetti();
         }
+    }
+
+    // Finish XP is granted at most ONCE per book and reversed if the book leaves "read" or is
+    // deleted, so toggling status can't farm XP and the running total stays truthful.
+    awardFinishXP(book) {
+        if (!book || book.finishXpAwarded) return false;
+        book.finishXpAwarded = true;
+        this.addXP(50);
+        return true;
+    }
+    revokeFinishXP(book) {
+        if (!book || !book.finishXpAwarded) return false;
+        book.finishXpAwarded = false;
+        this.addXP(-50);
+        return true;
     }
 
     getLevel() { return Math.floor(this.xp / 100) + 1; }
@@ -5059,9 +5182,19 @@ const coverGradients = [
 
 function showNotification(msg, duration = 2000) {
     const toast = document.getElementById('toast');
+    if (!toast) return;
+    // Back-compat: some callers pass a type string ('success'|'error'|'info') as the 2nd arg
+    // (matching the .toast.success / .toast.error CSS). Support both type strings and ms durations,
+    // and never let a non-numeric duration collapse the timeout to 0ms (which hid the toast).
+    let type = '';
+    if (typeof duration === 'string') { type = duration; duration = 2200; }
+    if (typeof duration !== 'number' || !isFinite(duration) || duration <= 0) duration = 2200;
     toast.textContent = msg;
+    toast.classList.remove('success', 'error', 'info');
+    if (type === 'success' || type === 'error' || type === 'info') toast.classList.add(type);
     toast.classList.add('show');
-    setTimeout(() => toast.classList.remove('show'), duration);
+    clearTimeout(showNotification._t);
+    showNotification._t = setTimeout(() => { toast.classList.remove('show'); }, duration);
 }
 
 function triggerConfetti() {
@@ -5485,13 +5618,13 @@ function renderDashboard() {
                 const [c1, c2] = coverGradients[book.id % 5];
                 const isbn = (book.isbn || '').replace(/-/g, '');
                 const coverSrc = book.coverId ? `https://covers.openlibrary.org/b/id/${book.coverId}-M.jpg` : (isbn ? `https://covers.openlibrary.org/b/isbn/${isbn}-M.jpg` : null);
-                const coverImg = coverSrc ? `<img src="${coverSrc}" loading="lazy" style="width:100%;height:100%;object-fit:cover;border-radius:8px;" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;color:white;font-weight:700;font-size:20px;">${book.title.charAt(0)}</div>` : `<div style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:white;font-weight:700;font-size:20px;">${book.title.charAt(0)}</div>`;
+                const coverImg = coverSrc ? `<img src="${coverSrc}" loading="lazy" style="width:100%;height:100%;object-fit:cover;border-radius:8px;" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;color:white;font-weight:700;font-size:20px;">${escapeHtml(book.title.charAt(0))}</div>` : `<div style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:white;font-weight:700;font-size:20px;">${escapeHtml(book.title.charAt(0))}</div>`;
                 return `
                 <div style="display:flex;gap:16px;align-items:center;padding:12px;background:#FEF3E2;border-radius:12px;margin-bottom:8px;cursor:pointer;" onclick="openBookModal(${book.id})">
                     <div style="width:55px;height:80px;border-radius:8px;background:linear-gradient(135deg,${c1},${c2});flex-shrink:0;overflow:hidden;">${coverImg}</div>
                     <div style="flex:1;">
-                        <div style="font-weight:700;color:#3D5A80;">${book.title}</div>
-                        <div style="font-size:13px;color:#8B7E74;margin-bottom:6px;">${book.author}</div>
+                        <div style="font-weight:700;color:#3D5A80;">${escapeHtml(book.title)}</div>
+                        <div style="font-size:13px;color:#8B7E74;margin-bottom:6px;">${escapeHtml(book.author)}</div>
                         ${cardProgressHTML(book)}
                         ${dashReadingEditor(book)}
                     </div>
@@ -5543,7 +5676,7 @@ function toggleGoalEdit(period) {
 function updateDailyProgress() {
     if (!app.profile) app.profile = {};
     const todayInput = document.getElementById('todayPagesRead');
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayKey();
     if (!app.profile.dailyReadingLog) app.profile.dailyReadingLog = {};
     app.profile.dailyReadingLog[today] = parseInt(todayInput.value) || 0;
     app.saveData();
@@ -5553,7 +5686,7 @@ function updateDailyProgress() {
 
 function getReadingStats() {
     const now = new Date();
-    const today = now.toISOString().split('T')[0];
+    const today = todayKey();
     const log = (app.profile && app.profile.dailyReadingLog) || {};
 
     // Manual pages today
@@ -5585,8 +5718,7 @@ function getReadingStats() {
     // Books finished in each period
     const booksRead = app.books.filter(b => b.status === 'read');
     const booksToday = booksRead.filter(b => {
-        const d = b.dateFinished;
-        return d && d.split('T')[0] === today;
+        return b.dateFinished && localDayKey(b.dateFinished) === today;
     }).length;
 
     const booksThisWeek = booksRead.filter(b => {
@@ -5685,6 +5817,10 @@ function addActivity(type, message) {
     });
     // Keep only last 50 activities
     if (app.profile.activityLog.length > 50) app.profile.activityLog.length = 50;
+    // Reading-type activity advances the reading-day streak (at most once per local day).
+    if (type === 'finished' || type === 'pages' || type === 'started') {
+        try { app.markReadingActivity(); } catch (e) {}
+    }
     app.saveData();
 }
 
@@ -5976,6 +6112,30 @@ function dateInputToISO(v) {
     return d.toISOString();
 }
 
+// --- Timezone-stable date helpers ---
+// Plain `new Date('2021-01-01')` parses as UTC midnight, which is the *previous* day
+// (and sometimes previous year) in western timezones. These helpers keep day/year math
+// anchored to the user's LOCAL calendar so stats, streaks and counts don't slip a day.
+function localDayKey(value) {
+    if (value == null) return null;
+    var d;
+    if (value instanceof Date) d = value;
+    else {
+        var s = String(value).trim();
+        // Date-only string → anchor at local noon so it can't slip a timezone.
+        d = /^\d{4}-\d{1,2}-\d{1,2}$/.test(s) ? new Date(s.replace(/-/g, '/') + ' 12:00:00') : new Date(s);
+    }
+    if (isNaN(d.getTime())) return null;
+    var y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+}
+function todayKey() { return localDayKey(new Date()); }
+// "Finished now," stamped at local noon so it reads back as today's LOCAL day/year everywhere.
+function nowFinishISO() {
+    var n = new Date();
+    return new Date(n.getFullYear(), n.getMonth(), n.getDate(), 12, 0, 0).toISOString();
+}
+
 // Compact inline progress + date editor shown on each dashboard "Currently Reading" card.
 // Uses dash-prefixed unique IDs (per book) to avoid colliding with the book modal's editBook* IDs.
 function dashReadingEditor(book) {
@@ -6057,12 +6217,12 @@ function markBookFinishedFromDash(id) {
     var s = document.getElementById('dashStart_' + id);
     var f = document.getElementById('dashFinish_' + id);
     if (s && s.value) book.dateStarted = dateInputToISO(s.value);
-    book.dateFinished = (f && f.value) ? dateInputToISO(f.value) : new Date().toISOString();
+    book.dateFinished = (f && f.value) ? dateInputToISO(f.value) : nowFinishISO();
     book.status = 'read';
     book.progressPercentage = 100;
     var pg = parseInt(book.pages) || 0;
     if (pg > 0) book.currentPage = pg;
-    app.addXP(50);
+    app.awardFinishXP(book);
     addActivity('finished', 'Read "' + book.title + '"');
     app.saveData();
     if (typeof populateLibraryDropdowns === 'function') populateLibraryDropdowns();
@@ -6389,9 +6549,9 @@ function quickChangeStatus(bookId, newStatus) {
     const oldStatus = book.status;
     book.status = newStatus;
     if (newStatus === 'read' && oldStatus !== 'read') {
-        book.dateFinished = new Date().toISOString();
-        app.addXP(50);
-        showNotification(`Read! +50 XP 🎉`, 1500);
+        book.dateFinished = nowFinishISO();
+        const gained = app.awardFinishXP(book);
+        showNotification(gained ? `Read! +50 XP 🎉` : `Read! 🎉`, 1500);
         addActivity('finished', `Read "${book.title}"`);
     } else if (newStatus === 'reading' && oldStatus !== 'reading') {
         addActivity('started', `Started "${book.title}"`);
@@ -6399,6 +6559,7 @@ function quickChangeStatus(bookId, newStatus) {
     } else {
         showNotification(`Status → ${statusLabels[newStatus]}`, 1200);
     }
+    if (oldStatus === 'read' && newStatus !== 'read') app.revokeFinishXP(book);
     app.saveData();
     applyLibraryFilters();
     renderDashboard();
@@ -6800,18 +6961,20 @@ function saveBookChanges(bookId) {
     //  duplicate-ID collision that previously made getElementById return the wrong input.)
     const newStatus = document.getElementById('editBookStatus')?.value || book.status;
     if (newStatus === 'read' && book.status !== 'read') {
-        app.addXP(50);
-        showNotification('Book finished! +50 XP 🎉', 2000);
+        const _gf = app.awardFinishXP(book);
+        showNotification(_gf ? 'Book finished! +50 XP 🎉' : 'Book finished! 🎉', 2000);
         addActivity('finished', `Read "${book.title}"`);
     }
     if (newStatus === 'reading' && book.status !== 'reading') {
         addActivity('started', `Started "${book.title}"`);
     }
-    if (currentBookRating !== book.rating && currentBookRating > 0) {
+    if (currentBookRating > 0 && !book.ratingXpAwarded) {
+        book.ratingXpAwarded = true;
         app.addXP(5);
         addActivity('rating', `Rated "${book.title}" ${'⭐'.repeat(currentBookRating)}`);
     }
 
+    if (wasStatus === 'read' && newStatus !== 'read') app.revokeFinishXP(book);
     book.status = newStatus;
     book.rating = currentBookRating;
     book.notes = document.getElementById('editBookNotes')?.value ?? book.notes;
@@ -6854,11 +7017,11 @@ function saveBookChanges(bookId) {
     if (startEl) book.dateStarted = startEl.value ? dateInputToISO(startEl.value) : null;
     if (finishEl) {
         if (finishEl.value) book.dateFinished = dateInputToISO(finishEl.value);
-        else if (newStatus === 'read' && wasStatus !== 'read') book.dateFinished = new Date().toISOString();
+        else if (newStatus === 'read' && wasStatus !== 'read') book.dateFinished = nowFinishISO();
         else if (newStatus !== 'read') book.dateFinished = null;
         // (read book with field left blank keeps its existing finish date)
     } else if (newStatus === 'read' && wasStatus !== 'read' && !book.dateFinished) {
-        book.dateFinished = new Date().toISOString();
+        book.dateFinished = nowFinishISO();
     }
 
     app.saveData();
@@ -6872,6 +7035,8 @@ function saveBookChanges(bookId) {
 
 function deleteBook(bookId) {
     if (confirm('Remove this book from your library?')) {
+        const _b = app.books.find(b => b.id === bookId);
+        if (_b) app.revokeFinishXP(_b);
         app.books = app.books.filter(b => b.id !== bookId);
         app.saveData();
         closeModal('bookModal');
@@ -7519,16 +7684,54 @@ function shareChallenge(idx) {
     } else { prompt('Copy this to share:', text); }
 }
 
+// ---- Challenge progress: single source of truth ----
+// Library + attribute-specific challenges are tracked as checklists (goalType 'prompts').
+// Only pure quantity goals (books / pages / genres) auto-count, and those are scoped to the
+// challenge's date window so a "this year" goal counts books finished during it. (Legacy reads
+// with no finish date still count, so existing progress doesn't suddenly drop.)
+function challengeBookMatches(ch, b) {
+    if (!b || b.status !== 'read') return false;
+    if (ch && ch.startDate && b.dateFinished && localDayKey(b.dateFinished) < ch.startDate) return false;
+    return true;
+}
+function challengeProgress(ch) {
+    if (!ch) return 0;
+    if (ch.goalType === 'prompts') return (ch.promptDone || []).filter(Boolean).length;
+    if (ch.goalType === 'books' || ch.goalType === 'pages' || ch.goalType === 'genres') {
+        const matched = app.books.filter(function (b) { return challengeBookMatches(ch, b); });
+        if (ch.goalType === 'pages') return matched.reduce(function (s, b) { return s + (parseInt(b.pages) || 0); }, 0);
+        if (ch.goalType === 'genres') return new Set(matched.map(function (b) { return b.genre; }).filter(Boolean)).size;
+        return matched.length;
+    }
+    return ch.current || 0;
+}
+
 function startSuggestedChallenge(name, emoji, goalType, target, reward, badge) {
     const endDate = new Date();
     endDate.setFullYear(endDate.getFullYear(), 11, 31);
-    app.challenges.push({
-        id: Date.now(), name, emoji, goalType, target, current: 0,
-        reward: reward || 200, badge: badge || '🏆',
-        startDate: new Date().toISOString().split('T')[0],
-        endDate: endDate.toISOString().split('T')[0],
-        completed: false, type: 'suggested'
-    });
+    const start = new Date().toISOString().split('T')[0];
+    const end = endDate.toISOString().split('T')[0];
+    // Attribute-specific "books" suggestions (e.g. "Fantasy Deep Dive", "Author Explorer",
+    // "Quick Reads Sprint") can't be auto-counted from the whole shelf without falsely counting
+    // unrelated books, so they become a checklist the reader fills in — the same model the library
+    // challenges use. Pure page/genre goals stay auto-counted because those metrics are unambiguous.
+    if (goalType === 'books') {
+        const prompts = generateChallengeSlots({ goalType: 'books', target: target });
+        app.challenges.push({
+            id: Date.now(), name, emoji, goalType: 'prompts', target: prompts.length, current: 0,
+            reward: reward || 200, badge: badge || '🏆',
+            prompts: prompts,
+            promptDone: prompts.map(function () { return false; }),
+            promptBook: prompts.map(function () { return null; }),
+            startDate: start, endDate: end, completed: false, type: 'suggested'
+        });
+    } else {
+        app.challenges.push({
+            id: Date.now(), name, emoji, goalType, target, current: 0,
+            reward: reward || 200, badge: badge || '🏆',
+            startDate: start, endDate: end, completed: false, type: 'suggested'
+        });
+    }
     app.saveData();
     renderChallenges();
     showNotification(`${name} started! 🏆 ${reward || 200} XP`, 1500);
@@ -7586,7 +7789,7 @@ function getAchievementDefs() {
         { id: 'rocket', name: "Speed Reader", icon: "🚀", desc: "Finish 3 books in one week", condition: () => { const week = Date.now() - 7*86400000; return app.books.filter(b => b.status === 'read' && b.dateFinished && new Date(b.dateFinished) > week).length >= 3; } },
         { id: 'mirror', name: "Self-Discovery", icon: "🪞", desc: "Finish 3 memoir/biography books", condition: () => app.books.filter(b => b.status === 'read' && b.genre && (b.genre.toLowerCase().includes('memoir') || b.genre.toLowerCase().includes('biography'))).length >= 3 },
         { id: 'brain', name: "Knowledge Seeker", icon: "🧠", desc: "Finish books in 5 different genres", condition: () => new Set(app.books.filter(b => b.status === 'read' && b.genre).map(b => b.genre)).size >= 5 },
-        { id: 'heart', name: "Comfort Reader", icon: "💖", desc: "Re-read a favorite (rate same book 5 stars twice)", condition: () => app.books.filter(b => b.rating === 5).length >= 2 },
+        { id: 'heart', name: "Comfort Reader", icon: "💖", desc: "Rate 2 books 5 stars", condition: () => app.books.filter(b => b.rating === 5).length >= 2 },
         { id: 'zen', name: "Mindful Reader", icon: "🧘", desc: "14-day reading streak", condition: () => app.streak >= 14 },
         { id: 'butterfly', name: "Transformed", icon: "🦋", desc: "Finish 10 self-help/growth books", condition: () => app.books.filter(b => b.status === 'read' && b.genre && (b.genre.toLowerCase().includes('self-help') || b.genre.toLowerCase().includes('growth') || b.genre.toLowerCase().includes('personal'))).length >= 10 },
         { id: 'globe', name: "World Traveler", icon: "🌎", desc: "Finish books in 5 languages", condition: () => new Set(app.books.filter(b => b.status === 'read' && b.language).map(b => b.language)).size >= 5 },
@@ -8315,12 +8518,16 @@ function _parseImportDate(s) {
     let t = String(s).trim();
     if (!t) return null;
     if (t.indexOf('-') > 4) { const parts = t.split('-').map(x => x.trim()).filter(Boolean); t = parts[parts.length - 1]; }
-    const d = new Date(t);
+    t = t.replace(/\//g, '-');
+    // Date-only values (YYYY-M-D, incl. Goodreads' YYYY/MM/DD) must be anchored at local
+    // noon — `new Date('2021-01-01')` is UTC midnight and slips to the prior day/year in the Americas.
+    const m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    const d = m ? new Date(+m[1], +m[2] - 1, +m[3], 12, 0, 0) : new Date(t);
     return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
 function parseGoodreadsCSV(content) {
-    const lines = content.split('\n').filter(l => l.trim());
+    const lines = splitCSVRows(content);
     if (lines.length < 2) return [];
 
     const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase().trim());
@@ -8371,7 +8578,7 @@ function parseGoodreadsCSV(content) {
 }
 
 function parseStoryGraphCSV(content) {
-    const lines = content.split('\n').filter(l => l.trim());
+    const lines = splitCSVRows(content);
     if (lines.length < 2) return [];
 
     const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase().trim());
@@ -8413,7 +8620,7 @@ function parseStoryGraphCSV(content) {
 function parseBookBuddyCSV(content) {
     // BookBuddy CSV exports vary by version, so detect columns flexibly:
     // prefer an exact header match, then fall back to a substring match.
-    const lines = content.split('\n').filter(l => l.trim());
+    const lines = splitCSVRows(content);
     if (lines.length < 2) return [];
     const H = parseCSVLine(lines[0]).map(h => h.toLowerCase().trim());
     const findIdx = (exacts, subs) => {
@@ -8507,6 +8714,30 @@ function parseCSVLine(line) {
     }
     values.push(current);
     return values;
+}
+
+// Split CSV text into records, keeping newlines that occur INSIDE quoted fields intact.
+// Goodreads/StoryGraph review & notes columns routinely contain line breaks; a naive
+// content.split('\n') would shred those rows into phantom books. Handles "" escapes and \r\n.
+function splitCSVRows(content) {
+    const rows = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < content.length; i++) {
+        const ch = content[i];
+        if (ch === '"') {
+            if (inQuotes && content[i + 1] === '"') { cur += '""'; i++; }  // escaped quote, stays in field
+            else { inQuotes = !inQuotes; cur += '"'; }
+        } else if ((ch === '\n' || ch === '\r') && !inQuotes) {
+            if (ch === '\r' && content[i + 1] === '\n') i++;                // treat \r\n as one break
+            if (cur.trim() !== '') rows.push(cur);
+            cur = '';
+        } else {
+            cur += ch;
+        }
+    }
+    if (cur.trim() !== '') rows.push(cur);
+    return rows;
 }
 
 // Parse a plain text list of books (one per line)
@@ -9384,7 +9615,11 @@ function _normBox01(box) {
     if (!Array.isArray(box) || box.length < 4) return null;
     let v = box.slice(0, 4).map(Number);
     if (!v.every(Number.isFinite)) return null;
-    if (v.some(n => n > 1) && v.every(n => n <= 100)) v = v.map(n => n / 100); // percent → fraction
+    // Convert percent (0–100) to fraction only when a value is clearly out of the 0–1 range,
+    // so a coord that rounds to ~1.05 isn't mistaken for a percentage and collapsed to ~1%.
+    if (v.some(n => n > 1.5) && v.every(n => n <= 100)) v = v.map(n => n / 100);
+    // Clamp into [0,1] so a stray out-of-range coordinate can't push a cubby off the bookcase.
+    v = v.map(n => Math.max(0, Math.min(1, n)));
     return v;
 }
 function parseVisionBooks(data) {
@@ -9557,7 +9792,7 @@ async function _runLayoutScan() {
     }
     const cells = _structureCells(boxes);
     let aspectW = 4, aspectH = 3;
-    try { const dim = await _imageSize(img); aspectW = dim.w; aspectH = dim.h; } catch (e) {}
+    try { const dim = await _imageSize(img); if (dim && dim.w > 0 && dim.h > 0) { aspectW = dim.w; aspectH = dim.h; } } catch (e) {}
     _bcMigrate();
     const bc = { id: _newBookcaseId(), name: 'Bookcase ' + (_bcList().length + 1), sides: [{ cells: cells, aspectW: aspectW, aspectH: aspectH }] };
     app.bookcases.push(bc); _activeBcId = bc.id; _activeSide = 0;
@@ -9890,10 +10125,12 @@ function _commitShelfScan() {
     let added = 0, shelves = 0;
     if (multiShelf) {
         const base = app.shelfPhotos ? app.shelfPhotos.length : 0;
+        // Label shelves by sequential position, not by source-image index — otherwise a photo
+        // that yields no books would make the numbering skip (e.g. "Shelf 1", "Shelf 3").
         srcs.sort((a, b) => a - b).forEach(s => {
             const grp = pieces.filter(p => p.src === s);
             if (!grp.length) return;
-            added += _saveShelfFromPieces(_shelfScan.images[s] || '', 'Shelf ' + (base + s + 1), grp, null);
+            added += _saveShelfFromPieces(_shelfScan.images[s] || '', 'Shelf ' + (base + shelves + 1), grp, null);
             shelves++;
         });
     } else {
@@ -10157,10 +10394,10 @@ function handleImportFile(file) {
 }
 
 function parseCSV(content) {
-    const lines = content.split('\n').filter(l => l.trim());
+    const lines = splitCSVRows(content);
     if (lines.length < 2) return [];
 
-    const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
+    const headers = parseCSVLine(lines[0]).map(h => h.replace(/"/g, '').trim().toLowerCase());
     const books = [];
 
     for (let i = 1; i < lines.length; i++) {
@@ -11890,7 +12127,7 @@ function _pushRecBook(title, author, genre, pages, status) {
         series: '', description: '', status: status || 'want', rating: 0,
         notes: 'Added from recommendations', dateAdded: new Date().toISOString()
     };
-    if (status === 'read') book.dateFinished = new Date().toISOString();
+    if (status === 'read') book.dateFinished = nowFinishISO();
     app.books.push(book);
     return true;
 }
@@ -12089,11 +12326,10 @@ function bulkMarkFinished() {
         const book = app.books.find(b => b.id === id);
         if (book && book.status !== 'read') {
             book.status = 'read';
-            book.dateFinished = new Date().toISOString();
-            newlyFinished++;
+            book.dateFinished = nowFinishISO();
+            if (app.awardFinishXP(book)) newlyFinished++;
         }
     });
-    if (newlyFinished > 0) app.addXP(newlyFinished * 50);
     app.saveData();
     toggleBulkMode();
     applyLibraryFilters();
@@ -12243,7 +12479,7 @@ function addFriendshipXP(friendId, amount, reason) {
     const newLevel = getFriendshipLevel(friend.friendshipXP);
     if (newLevel.level > oldLevel.level) {
         showNotification(`${newLevel.emoji} ${newLevel.name}!`, 'success');
-        playConfetti();
+        if (typeof triggerConfetti === 'function') { try { triggerConfetti(); } catch (e) {} }
     }
 
     app.saveData();
@@ -12482,7 +12718,8 @@ async function syncCloudCoops() {
                 partnerName: fr.name, friendId: fr.id, myRole: iAmCreator ? 'creator' : 'partner',
                 myProgress: myProg || 0, theirProgress: theirProg || 0,
                 startDate: row.start_date, endDate: row.end_date, completed: row.status === 'done',
-                cloudId: row.id, status: row.status
+                cloudId: row.id, status: row.status,
+                incoming: (!iAmCreator && row.status === 'pending')
             };
             if (!app.challenges) app.challenges = [];
             app.challenges.push(local);
@@ -12493,6 +12730,7 @@ async function syncCloudCoops() {
             if (local.theirProgress !== (theirProg || 0)) { local.theirProgress = theirProg || 0; changed = true; }
             local.target = row.target; local.goalType = row.goal_type;
             local.current = (local.myProgress || 0) + (local.theirProgress || 0);
+            if (row.status === 'active' && local.status && local.status !== 'active') { local.status = 'active'; local.incoming = false; changed = true; }
             if (row.status === 'done' && !local.completed) { local.completed = true; local.status = 'done'; }
         }
     });
@@ -12819,11 +13057,14 @@ function submitCoop() {
     app.saveData();
     closeCoopForm();
     if (friend.cloudUid && typeof Cloud !== 'undefined' && Cloud.startCoop) {
-        Cloud.startCoop(friend.cloudUid, { title: title, goal_type: goalType, target: target, status: 'active', end_date: end })
-            .then(function (row) { if (row && row.id) { challenge.cloudId = row.id; challenge.status = 'active'; app.saveData(); } })
+        // Create as 'pending' so the partner can Accept/Decline rather than being silently auto-joined.
+        Cloud.startCoop(friend.cloudUid, { title: title, goal_type: goalType, target: target, status: 'pending', end_date: end })
+            .then(function (row) { if (row && row.id) { challenge.cloudId = row.id; app.saveData(); } })
             .catch(function () {});
+        showNotification('Co-op invite sent to ' + friend.name + '! ⚔️', 1800);
+    } else {
+        showNotification('Co-op started with ' + friend.name + '! ⚔️', 1800);
     }
-    showNotification('Co-op started with ' + friend.name + '! ⚔️', 1800);
     openFriendDetail(friend.id);
 }
 
@@ -12833,6 +13074,22 @@ function renderFriendCoops(friend) {
     const list = (app.challenges || []).filter(function (c) { return c.type === 'coop' && c.friendId === friend.id && c.status !== 'declined'; });
     if (!list.length) { el.innerHTML = ''; return; }
     el.innerHTML = '<h3 style="color:#3D5A80;font-weight:600;margin-bottom:12px;font-size:14px;">⚔️ Co-op Games</h3>' + list.map(function (c) {
+        // Pending invites: the partner gets Accept/Decline; the creator sees a "waiting" card.
+        if (c.status === 'pending') {
+            if (c.incoming) {
+                return '<div style="background:#FFF8F0;border:2px dashed #D4A76A;border-radius:12px;padding:14px;margin-bottom:10px;">'
+                    + '<div style="font-weight:700;color:#3D5A80;font-size:14px;margin-bottom:4px;">⚔️ ' + _esc(c.name) + '</div>'
+                    + '<div style="font-size:12px;color:#8B7E74;margin-bottom:10px;">' + _esc(friend.name) + ' invited you — ' + c.target + ' ' + _coopUnit(c.goalType) + ' together.</div>'
+                    + '<div style="display:flex;gap:8px;"><button class="btn btn-primary" style="font-size:12px;padding:5px 14px;" onclick="coopRespond(' + c.id + ',true)">Accept</button>'
+                    + '<button class="btn btn-secondary" style="font-size:12px;padding:5px 12px;" onclick="coopRespond(' + c.id + ',false)">Decline</button></div>'
+                    + '</div>';
+            }
+            return '<div style="background:#FFF8F0;border:2px dashed #E8DFD5;border-radius:12px;padding:14px;margin-bottom:10px;">'
+                + '<div style="font-weight:700;color:#3D5A80;font-size:14px;margin-bottom:4px;">⚔️ ' + _esc(c.name) + '</div>'
+                + '<div style="font-size:12px;color:#8B7E74;margin-bottom:10px;">Waiting for ' + _esc(friend.name) + ' to accept…</div>'
+                + '<button class="btn btn-secondary" style="font-size:12px;padding:5px 12px;" onclick="dropCoop(' + c.id + ')">Cancel invite</button>'
+                + '</div>';
+        }
         const mine = c.myProgress || 0, theirs = c.theirProgress || 0;
         const total = Math.min(c.target, mine + theirs);
         const pct = c.target ? Math.min(100, Math.round((mine + theirs) / c.target * 100)) : 0;
@@ -12861,6 +13118,26 @@ function renderFriendCoops(friend) {
                 + '<button class="btn btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="dropCoop(' + c.id + ')" title="Leave challenge">✕</button></div>')
             + '</div>';
     }).join('');
+}
+
+// Respond to an incoming co-op invite (partner side): Accept activates it on both devices,
+// Decline marks the cloud row declined and removes the local copy.
+function coopRespond(localId, accept) {
+    const c = (app.challenges || []).find(function (x) { return x.id === localId; });
+    if (!c) return;
+    if (accept) {
+        c.status = 'active'; c.incoming = false;
+        if (c.cloudId && typeof Cloud !== 'undefined' && Cloud.updateCoop) Cloud.updateCoop(c.cloudId, { status: 'active' }).catch(function () {});
+        showNotification('Joined ' + (c.name || 'the co-op') + '! ⚔️', 1600);
+    } else {
+        c.status = 'declined';
+        if (c.cloudId && typeof Cloud !== 'undefined' && Cloud.updateCoop) Cloud.updateCoop(c.cloudId, { status: 'declined' }).catch(function () {});
+        app.challenges = (app.challenges || []).filter(function (x) { return x.id !== localId; });
+        showNotification('Declined the co-op invite', 1400);
+    }
+    app.saveData();
+    const friend = app.friends.find(function (f) { return f.id === c.friendId; });
+    if (friend) renderFriendCoops(friend);
 }
 
 function logCoopProgress(localId, amount) {
@@ -13131,12 +13408,11 @@ function openNearbyBookstores() {
 // ============================================
 // FLOATING SCANNER & INLINE SCANNERS
 // ============================================
+// The legacy inline #scanSection was retired (it was display:none, so these buttons opened a
+// hidden panel and showed nothing). The maintained scanner is the standalone scan.html page —
+// which also powers the "Recently Scanned" box — so route the camera + ISBN-lookup buttons there.
 function openFloatingScanner() {
-    navigateTo('scan');
-    setTimeout(() => {
-        const startBtn = document.getElementById('startScanBtn');
-        if (startBtn) startBtn.click();
-    }, 300);
+    window.open('./scan.html', '_blank', 'noopener');
 }
 
 function inlineScanLookup(inputId) {
@@ -13147,18 +13423,12 @@ function inlineScanLookup(inputId) {
         showNotification('Invalid ISBN', 1200);
         return;
     }
-    showNotification('Looking up ISBN...', 1500);
-    lookupISBN(isbn);
-    // Switch to scan section to show the result
-    navigateTo('scan');
+    // scan.html auto-looks-up an ?isbn= param and saves it to your Recently Scanned list.
+    window.open('./scan.html?isbn=' + encodeURIComponent(isbn), '_blank', 'noopener');
 }
 
 function startInlineCamera(fromSection) {
-    navigateTo('scan');
-    setTimeout(() => {
-        const startBtn = document.getElementById('startScanBtn');
-        if (startBtn) startBtn.click();
-    }, 300);
+    window.open('./scan.html', '_blank', 'noopener');
 }
 
 // ============================================
@@ -13260,8 +13530,8 @@ function enhancedLibrarySearch() {
             <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(125,155,118,0.1);">
                 <span style="font-size:16px;">📖</span>
                 <div style="flex:1;">
-                    <span style="font-weight:600;color:#3D5A80;font-size:13px;">${b.title}</span>
-                    <span style="color:#8B7E74;font-size:12px;"> by ${b.author}</span>
+                    <span style="font-weight:600;color:#3D5A80;font-size:13px;">${escapeHtml(b.title)}</span>
+                    <span style="color:#8B7E74;font-size:12px;"> by ${escapeHtml(b.author)}</span>
                 </div>
                 <span style="background:rgba(212,167,106,0.15);color:#D4A76A;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;" onclick="showShelfLocation(${b.shelfPhotoId})" title="Click to see shelf photo">📍 ${escapeHtml(b.shelfLocation)}</span>
             </div>
@@ -13342,12 +13612,11 @@ function renderActiveChallengesWithTBR() {
     }
 
     grid.innerHTML = app.challenges.map((ch, idx) => {
+        // Co-ops have their own card in the friend detail view (with Accept/Decline + shared
+        // progress); skip them here so they don't double-render or auto-award in the solo grid.
+        if (ch.type === 'coop') return '';
         let current = 0;
-        if (ch.goalType === 'prompts') current = (ch.promptDone || []).filter(Boolean).length;
-        else if (ch.goalType === 'books') current = app.books.filter(b => b.status === 'read').length;
-        else if (ch.goalType === 'pages') current = app.books.filter(b => b.status === 'read').reduce((s, b) => s + (b.pages || 0), 0);
-        else if (ch.goalType === 'genres') current = new Set(app.books.filter(b => b.status === 'read').map(b => b.genre)).size;
-        else current = ch.current || 0;
+        current = challengeProgress(ch);
         if (ch.goalType === 'prompts') ch.current = current;
 
         const pct = Math.min((current / ch.target) * 100, 100);
@@ -14127,13 +14396,10 @@ let chSpinState = {
 function getActiveChallenges() {
     if (!app || !app.challenges) return [];
     return app.challenges.filter(function(ch) {
+        if (ch.type === 'coop') return false;   // co-ops are tracked in the friend view, not the spinner
         // Get completion status
         var current = 0;
-        if (ch.goalType === 'prompts') current = (ch.promptDone || []).filter(Boolean).length;
-        else if (ch.goalType === 'books') current = app.books.filter(function(b) { return b.status === 'read'; }).length;
-        else if (ch.goalType === 'pages') current = app.books.filter(function(b) { return b.status === 'read'; }).reduce(function(s, b) { return s + (b.pages || 0); }, 0);
-        else if (ch.goalType === 'genres') current = new Set(app.books.filter(function(b) { return b.status === 'read'; }).map(function(b) { return b.genre; })).size;
-        else current = ch.current || 0;
+        current = challengeProgress(ch);
         return current < ch.target;
     });
 }
@@ -14378,9 +14644,7 @@ function showChallengeSpinResult(idx) {
 
     // Progress info
     var current = 0;
-    if (ch.goalType === 'books') current = app.books.filter(function(b) { return b.status === 'read'; }).length;
-    else if (ch.goalType === 'pages') current = app.books.filter(function(b) { return b.status === 'read'; }).reduce(function(s, b) { return s + (b.pages || 0); }, 0);
-    else if (ch.goalType === 'genres') current = new Set(app.books.filter(function(b) { return b.status === 'read'; }).map(function(b) { return b.genre; })).size;
+    current = challengeProgress(ch);
     var pct = Math.min(100, Math.round(current / ch.target * 100));
 
     var booksHtml = '';
@@ -15671,7 +15935,20 @@ function renderShelfBuilder() {
 }
 
 function initializeApp() {
-    app = new BookburrowApp();
+    try {
+        app = new BookburrowApp();
+    } catch (e) {
+        // Last-resort guard so a load-time error never leaves `app` undefined (white screen).
+        // Back up the stored blob before clearing so the user's data stays recoverable.
+        console.error('Bookburrow: app init failed; starting clean (backup kept).', e);
+        try {
+            const k = profileDataKey();
+            const bad = localStorage.getItem(k);
+            if (bad) localStorage.setItem(k + '__init_backup', bad);
+            localStorage.removeItem(k);
+        } catch (e2) {}
+        app = new BookburrowApp();
+    }
     relocateSections();
     setupEventListeners();
     setupSearch();
