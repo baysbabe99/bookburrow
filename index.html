@@ -3469,6 +3469,7 @@
                             <button class="btn btn-primary" style="font-size:13px;" onclick="startShelfScan('auto')">📷 One shelf — auto-split</button>
                             <button class="btn btn-secondary" style="font-size:13px;" onclick="startShelfScan('tap')">👆 One shelf — tap in order</button>
                             <button class="btn btn-secondary" style="font-size:13px;" onclick="startShelfScan('multi')">🖼️ Individual photos in order</button>
+                            <button class="btn btn-secondary" style="font-size:13px;" onclick="startShelfScan('layout')">🏗️ Bookcase blueprint — shape now, books later</button>
                         </div>
                         <div id="shelfAiSetup" style="display:none;margin-top:14px;padding:12px;background:#FFF8F0;border:1px dashed #E8DFD5;border-radius:12px;">
                             <label style="font-size:12px;font-weight:700;color:#8B7E74;display:block;margin-bottom:6px;">Cloudflare Worker URL (see SHELF_VISION_SETUP.md)</label>
@@ -8952,6 +8953,9 @@ function savePhotoTags(idx) {
 // SHELF PUZZLE (AI scan + ordered, library-linked shelves)
 // ============================================
 let _shelfScan = { mode: null, images: [], pieces: [], photoId: null };
+let _pendingFillCell = null;          // bookcase cubby id waiting to be filled by the next scan
+let _lastSavedShelfPhotoId = null;    // id of the shelf photo saved by the last commit
+let _vshelfView = 'genre';            // current Virtual Shelf view (genre/author/title/status/added/shelves/bookcase)
 
 function getShelfVisionUrl() {
     return (app && app.shelfVisionUrl) || (typeof SHELF_VISION_URL !== 'undefined' ? SHELF_VISION_URL : '') || '';
@@ -9075,6 +9079,7 @@ async function callShelfVision(images, mode) {
 // ---- capture entry ----
 function startShelfScan(mode) {
     _shelfScan = { mode: mode, images: [], pieces: [], photoId: null };
+    if (mode !== 'cellfill') _pendingFillCell = null;
     // Build the file input on the fly and click it within this user gesture.
     // (More reliable than a static hidden input, which gets moved around the
     // DOM when the Photo Shelf section is relocated into its tab — that could
@@ -9099,13 +9104,14 @@ async function _onScanFiles(files) {
     _openScanModal('<div style="padding:30px;text-align:center;color:#8B7E74;">Loading photos…</div>');
     try {
         const raw = await Promise.all(arr.map(_readImageFile));
-        const maxDim = _shelfScan.mode === 'multi' ? 800 : (_shelfScan.mode === 'bookcase' ? 2560 : 2048);
+        const maxDim = _shelfScan.mode === 'multi' ? 800 : (_shelfScan.mode === 'bookcase' ? 2560 : (_shelfScan.mode === 'layout' ? 1600 : 2048));
         _shelfScan.images = await Promise.all(raw.map(d => _downscaleDataUrl(d, maxDim)));
     } catch (e) {
         _openScanModal('<div style="padding:30px;text-align:center;color:#C2705B;">Couldn\'t read those images.</div>');
         return;
     }
-    if (_shelfScan.mode === 'auto' || _shelfScan.mode === 'bookcase') return _runAutoSplit();
+    if (_shelfScan.mode === 'layout') return _runLayoutScan();
+    if (_shelfScan.mode === 'auto' || _shelfScan.mode === 'bookcase' || _shelfScan.mode === 'cellfill') return _runAutoSplit();
     if (_shelfScan.mode === 'tap') return _renderTapMode();
     if (_shelfScan.mode === 'multi') return _renderMultiMode();
 }
@@ -9153,6 +9159,73 @@ async function _runAutoSplit() {
     }
     if (bookcase) _assignRowsFromBoxes(_shelfScan.pieces);
     _renderReview();
+}
+
+// ---- BOOKCASE BLUEPRINT (AI detects the shelf layout, not the titles) ----
+function _imageSize(dataUrl) {
+    return new Promise((resolve, reject) => {
+        const im = new Image();
+        im.onload = () => resolve({ w: im.naturalWidth || 4, h: im.naturalHeight || 3 });
+        im.onerror = reject;
+        im.src = dataUrl;
+    });
+}
+// Compartment boxes [x,y,w,h] → cells with row/col, clustered into shelf rows by y-position.
+function _structureCells(boxes) {
+    const items = boxes.map(b => ({ x: b[0], y: b[1], w: b[2], h: b[3], yc: b[1] + b[3] / 2 }));
+    if (!items.length) return [];
+    const hs = items.map(it => it.h).filter(h => h > 0).sort((a, b) => a - b);
+    const medH = hs.length ? hs[Math.floor(hs.length / 2)] : 0.1;
+    const thr = Math.max(0.03, medH * 0.6);
+    items.sort((a, b) => a.yc - b.yc);
+    const rows = []; let cur = [], mean = null;
+    items.forEach(it => {
+        if (cur.length === 0) { cur.push(it); mean = it.yc; return; }
+        if ((it.yc - mean) <= thr) { cur.push(it); mean = cur.reduce((t, o) => t + o.yc, 0) / cur.length; }
+        else { rows.push(cur); cur = [it]; mean = it.yc; }
+    });
+    if (cur.length) rows.push(cur);
+    const out = []; let id = 0;
+    rows.forEach((r, ri) => { r.sort((a, b) => a.x - b.x); r.forEach((it, ci) => { out.push({ x: it.x, y: it.y, w: it.w, h: it.h, row: ri, col: ci, id: id++, shelfPhotoId: null }); }); });
+    return out;
+}
+async function _runLayoutScan() {
+    if (!getShelfVisionUrl()) {
+        _openScanModal(
+            '<div style="padding:24px;text-align:center;"><div style="font-size:34px;">🔌</div>' +
+            '<p style="color:#3D5A80;font-weight:700;margin:10px 0 6px;">AI scan isn\'t set up yet</p>' +
+            '<p style="color:#8B7E74;font-size:13px;margin:0 0 14px;">The bookcase blueprint needs the AI connection (see SHELF_VISION_SETUP.md).</p>' +
+            '<button class="btn btn-secondary" onclick="closeModal(\'shelfScanModal\');toggleShelfAiSetup()">⚙️ Open AI setup</button></div>', 'Bookcase blueprint');
+        return;
+    }
+    const img = _shelfScan.images[0];
+    if (!img) { _openScanModal('<div style="padding:24px;text-align:center;color:#C2705B;">No photo loaded.</div>', 'Bookcase blueprint'); return; }
+    _openScanModal('<div style="padding:30px;text-align:center;color:#8B7E74;"><div style="font-size:30px;">🏗️</div><p style="margin-top:10px;">Mapping your bookcase\'s shape with AI… this can take a few seconds.</p></div>', 'Bookcase blueprint');
+    let data;
+    try { data = await callShelfVision([img], 'layout'); }
+    catch (e) {
+        _openScanModal('<div style="padding:24px;text-align:center;color:#C2705B;">Couldn\'t reach the AI scanner (' + escapeHtml(String(e.message || e)) + ').<br>Check the Worker URL in ⚙️ AI scan setup.</div>', 'Bookcase blueprint');
+        return;
+    }
+    const boxes = ((data && data.compartments) || []).map(c => _normBox01(c.box)).filter(Boolean);
+    if (boxes.length < 2) {
+        _openScanModal('<div style="padding:24px;text-align:center;color:#C2705B;">Couldn\'t map the shelf layout. Try a straight-on photo of the whole bookcase with the shelves clearly visible.</div>', 'Bookcase blueprint');
+        return;
+    }
+    const cells = _structureCells(boxes);
+    let aspectW = 4, aspectH = 3;
+    try { const dim = await _imageSize(img); aspectW = dim.w; aspectH = dim.h; } catch (e) {}
+    app.bookcase = { image: img, cells: cells, aspectW: aspectW, aspectH: aspectH, dateAdded: new Date().toISOString() };
+    app.saveData();
+    closeModal('shelfScanModal');
+    _vshelfView = 'bookcase';
+    switchLibraryTab('vshelf');
+    showNotification('Bookcase mapped: ' + cells.length + ' shelves 🏗️', 2200);
+}
+// Tap an empty cubby → scan a section into it (links the saved shelf to that cell).
+function _fillBookcaseCell(cellId) {
+    _pendingFillCell = cellId;
+    startShelfScan('cellfill');
 }
 
 // Group whole-bookcase pieces into real rows using each book's box y-position.
@@ -9383,6 +9456,7 @@ function _saveShelfFromPieces(image, label, pieces, existingPhotoId) {
     photo.taggedBooks = photo.pieces.map(p => ({ title: p.title, author: p.author }));
     photo.isBookcase = photo.pieces.some(p => p.row != null);
     if (isNew) app.shelfPhotos.push(photo);
+    _lastSavedShelfPhotoId = photo.id;
     return added;
 }
 function _commitShelfScan() {
@@ -9406,11 +9480,18 @@ function _commitShelfScan() {
         shelves = 1;
     }
     if (added > 0) { app.addXP(added * 10); if (added > 3) triggerConfetti(); }
+    let filledCell = false;
+    if (_pendingFillCell != null && app.bookcase) {
+        const cell = (app.bookcase.cells || []).find(c => c.id === _pendingFillCell);
+        if (cell && _lastSavedShelfPhotoId != null) { cell.shelfPhotoId = _lastSavedShelfPhotoId; filledCell = true; }
+        _pendingFillCell = null;
+    }
     app.saveData();
     try { updateXPDisplay(); } catch (e) {}
     closeModal('shelfScanModal');
     renderPhotoGallery();
     renderShelfPuzzles();
+    if (filledCell) { _vshelfView = 'bookcase'; switchLibraryTab('vshelf'); }
     showNotification(pieces.length + ' books · ' + added + ' new' + (shelves > 1 ? (' · ' + shelves + ' shelves') : '') + (added > 0 ? ' +' + (added * 10) + ' XP' : ''), 2200);
 }
 
@@ -14748,23 +14829,72 @@ function _vBookcaseHtmlRows(rows) {
     html += '</div>';
     return html;
 }
+// Compact mini-spines that sit inside a bookcase cubby (cover art or colored fallback).
+function _cubbySpinesHtml(books) {
+    if (!books || !books.length) return '';
+    return '<div style="display:flex;align-items:stretch;height:100%;gap:1px;overflow:hidden;padding:2px;">' +
+        books.map(b => {
+            const cover = _vCoverUrl(b);
+            const color = _vSpineColor(b);
+            const tip = escapeHtml((b.title || 'Untitled') + (b.author ? ' — ' + b.author : ''));
+            const click = (typeof b.id === 'number') ? (' onclick="openBookModal(' + b.id + ')"') : '';
+            const bg = cover ? ('background-image:url(' + cover + ');background-size:cover;background-position:center;') : ('background:linear-gradient(90deg,rgba(255,255,255,0.18),' + color + ' 30%,' + color + ' 70%,rgba(0,0,0,0.32));');
+            return '<div title="' + tip + '"' + click + ' style="flex:0 0 auto;width:9px;height:100%;border-radius:1px 2px 0 0;cursor:pointer;' + bg + 'box-shadow:inset -2px 0 4px rgba(0,0,0,0.35);"></div>';
+        }).join('') + '</div>';
+}
+// The "My Bookcase" blueprint: a wooden case shaped like the user's real one (AI-detected cells).
+function _bookcaseBlueprintHtml() {
+    const bc = app.bookcase;
+    if (!bc || !Array.isArray(bc.cells) || !bc.cells.length) {
+        return '<div style="text-align:center;padding:34px;color:#8B7E74;">' +
+            '<div style="font-size:34px;">🏗️</div>' +
+            '<p style="margin:10px 0 4px;color:#3D5A80;font-weight:700;">Build a virtual bookcase shaped like yours</p>' +
+            '<p style="font-size:13px;margin:0 0 14px;">Take one photo of your whole bookcase. The AI maps the shelves, then you fill each one with a quick section scan.</p>' +
+            '<button class="btn btn-primary" onclick="startShelfScan(\'layout\')">🏗️ Scan my bookcase</button></div>';
+    }
+    const aspW = bc.aspectW || 4, aspH = bc.aspectH || 3;
+    const filled = bc.cells.filter(c => c.shelfPhotoId != null).length;
+    let cellsHtml = '';
+    bc.cells.forEach(c => {
+        const photo = (c.shelfPhotoId != null) ? (app.shelfPhotos || []).find(p => p.id === c.shelfPhotoId) : null;
+        const inner = photo
+            ? _cubbySpinesHtml(_shelfBooksInOrder(photo))
+            : '<button onclick="_fillBookcaseCell(' + c.id + ')" title="Scan books into this shelf" style="width:100%;height:100%;border:1px dashed rgba(255,240,220,0.45);background:rgba(0,0,0,0.14);color:#FCE9D0;font-size:13px;border-radius:3px;cursor:pointer;padding:0;">＋</button>';
+        cellsHtml += '<div style="position:absolute;left:' + (c.x * 100) + '%;top:' + (c.y * 100) + '%;width:' + (c.w * 100) + '%;height:' + (c.h * 100) + '%;box-sizing:border-box;padding:1px;">' +
+            '<div style="width:100%;height:100%;background:rgba(38,24,12,0.34);border:1px solid rgba(18,10,5,0.55);border-radius:2px;box-shadow:inset 0 0 8px rgba(0,0,0,0.5);overflow:hidden;">' + inner + '</div></div>';
+    });
+    return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">' +
+        '<span style="font-size:12px;color:#8B7E74;">' + bc.cells.length + ' shelves · ' + filled + ' filled · tap an empty shelf to scan books into it</span>' +
+        '<span style="display:flex;gap:6px;"><button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="startShelfScan(\'layout\')">🔄 Re-scan shape</button>' +
+        '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_removeBookcase()">🗑️ Remove</button></span></div>' +
+        '<div style="position:relative;width:100%;max-width:920px;margin:0 auto;aspect-ratio:' + aspW + '/' + aspH + ';background:linear-gradient(180deg,#5e3d22,#4a2e18);border:7px solid #3f2814;border-radius:10px;box-shadow:inset 0 0 40px rgba(0,0,0,0.45),0 12px 30px rgba(0,0,0,0.25);overflow:hidden;">' + cellsHtml + '</div>';
+}
+function _removeBookcase() {
+    if (!confirm('Remove this bookcase blueprint? Your scanned shelves and books stay in your library.')) return;
+    app.bookcase = null; app.saveData(); renderVirtualShelf();
+}
+function setVshelfView(v) { _vshelfView = v; renderVirtualShelf(); }
 function renderVirtualShelf() {
     const host = document.getElementById('libraryTab-vshelf');
     if (!host) return;
     const all = (app.books || []).slice();
-    if (!all.length) {
-        host.innerHTML = '<div style="text-align:center;padding:50px;color:#8B7E74;">No books yet — add some or scan a shelf, and your virtual bookshelf fills up. 🐉</div>';
+    const sort = _vshelfView;
+    const opt = function (v, lbl) { return '<option value="' + v + '"' + (sort === v ? ' selected' : '') + '>' + lbl + '</option>'; };
+    const hoverMeta = (sort === 'bookcase') ? 'your bookcase blueprint' : (all.length + ' books · hover a book to see its title');
+    let html = '<div class="vshelf-scope"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;">' +
+        '<div><span style="font-family:Quicksand,sans-serif;font-size:18px;font-weight:700;color:#3D5A80;">📚 Your Virtual Bookshelf</span> <span id="vHoverName" class="vhname" style="font-size:12px;color:#8B7E74;">' + hoverMeta + '</span></div>' +
+        '<select id="vshelfSort" onchange="setVshelfView(this.value)" style="padding:6px 10px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;">' +
+        opt('genre', 'By genre') + opt('author', 'By author') + opt('title', 'By title') + opt('status', 'By status') + opt('added', 'Recently added') + opt('shelves', 'By my real shelves') + opt('bookcase', '🏗️ My bookcase') +
+        '</select></div>';
+
+    if (sort === 'bookcase') {
+        host.innerHTML = html + _bookcaseBlueprintHtml() + '</div>';
         return;
     }
-    const sortEl = document.getElementById('vshelfSort');
-    const sort = sortEl ? sortEl.value : 'genre';
-
-    const opt = function (v, lbl) { return '<option value="' + v + '"' + (sort === v ? ' selected' : '') + '>' + lbl + '</option>'; };
-    let html = '<div class="vshelf-scope"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;">' +
-        '<div><span style="font-family:Quicksand,sans-serif;font-size:18px;font-weight:700;color:#3D5A80;">📚 Your Virtual Bookshelf</span> <span id="vHoverName" class="vhname" style="font-size:12px;color:#8B7E74;">' + all.length + ' books · hover a book to see its title</span></div>' +
-        '<select id="vshelfSort" onchange="renderVirtualShelf()" style="padding:6px 10px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;">' +
-        opt('genre', 'By genre') + opt('author', 'By author') + opt('title', 'By title') + opt('status', 'By status') + opt('added', 'Recently added') + opt('shelves', 'By my real shelves') +
-        '</select></div>';
+    if (!all.length) {
+        host.innerHTML = html + '<div style="text-align:center;padding:50px;color:#8B7E74;">No books yet — add some or scan a shelf, and your virtual bookshelf fills up. 🐉</div></div>';
+        return;
+    }
 
     if (sort === 'shelves') {
         // One wooden bookcase per scanned shelf, in photographed order — your real shelves, virtualized.
