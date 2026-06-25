@@ -2059,6 +2059,12 @@
         .vspine:hover { transform: translateY(-12px); box-shadow: inset 4px 0 6px rgba(255,255,255,0.2), inset -5px 0 9px rgba(0,0,0,0.4), 0 10px 16px rgba(0,0,0,0.45); z-index:3; }
         .vspine .va { font-weight:600; opacity:0.82; }
 
+        /* ── INTERACTIVE SHELF PHOTO (hover tags) ──────── */
+        .shelf-hotspot { position:absolute; border:2px solid transparent; border-radius:3px; cursor:pointer; transition: background .12s, border-color .12s; }
+        .shelf-hotspot:hover { border-color:#F4A261; background:rgba(244,162,97,0.28); }
+        .shelf-hotspot-label { position:absolute; bottom:100%; left:50%; transform:translateX(-50%); margin-bottom:4px; background:rgba(0,0,0,0.88); color:#fff; font-size:11px; font-weight:600; padding:3px 7px; border-radius:6px; white-space:nowrap; max-width:200px; overflow:hidden; text-overflow:ellipsis; opacity:0; pointer-events:none; transition:opacity .12s; z-index:5; }
+        .shelf-hotspot:hover .shelf-hotspot-label { opacity:1; }
+
         .genre-chip {
             padding: 6px 14px;
             border-radius: 20px;
@@ -9385,6 +9391,35 @@ function editShelfPuzzle(photoId) {
     _renderReview();
 }
 
+// Interactive shelf photo: overlay hover-hotspots (from each book's AI box) on the photo.
+function openShelfPhotoTags(photoId) {
+    const photo = (app.shelfPhotos || []).find(p => p.id === photoId);
+    if (!photo || !photo.data) { showNotification('No photo to show', 1200); return; }
+    const pieces = (photo.pieces || []).filter(p => p.box && p.box.length >= 4);
+    let spots = '';
+    pieces.forEach(p => {
+        const b = p.box;
+        const lib = (p.libraryId != null) ? app.books.find(x => x.id === p.libraryId) : null;
+        const tip = escapeHtml((p.title || 'Unknown') + (p.author ? ' — ' + p.author : '') + (lib ? '' : ' (not in library)'));
+        spots += '<div class="shelf-hotspot" style="left:' + (b[0] * 100) + '%;top:' + (b[1] * 100) + '%;width:' + (b[2] * 100) + '%;height:' + (b[3] * 100) + '%;" title="' + tip + '"' +
+            (lib ? (' onclick="closeShelfPhotoTags();openBookModal(' + lib.id + ')"') : '') + '>' +
+            '<span class="shelf-hotspot-label">' + escapeHtml(p.title || 'Unknown') + '</span></div>';
+    });
+    const ov = document.createElement('div');
+    ov.id = 'shelfPhotoTagsOverlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:3000;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;';
+    ov.addEventListener('click', function (e) { if (e.target === ov) closeShelfPhotoTags(); });
+    ov.innerHTML =
+        '<div style="color:#fff;margin-bottom:10px;font-size:14px;text-align:center;max-width:96vw;">🔍 ' + escapeHtml(photo.label) + ' — hover a book to see its title' +
+        (pieces.length ? '' : ' <span style="color:#F4A261;">(no book positions yet — re-scan this shelf with auto-split to enable hover tags)</span>') +
+        ' <button onclick="closeShelfPhotoTags()" style="margin-left:12px;background:#fff;border:none;border-radius:8px;padding:5px 12px;cursor:pointer;font-weight:700;color:#3D5A80;">✕ Close</button></div>' +
+        '<div style="position:relative;display:inline-block;max-width:96vw;max-height:84vh;">' +
+        '<img src="' + photo.data + '" style="display:block;max-width:96vw;max-height:84vh;border-radius:8px;">' +
+        spots + '</div>';
+    document.body.appendChild(ov);
+}
+function closeShelfPhotoTags() { const o = document.getElementById('shelfPhotoTagsOverlay'); if (o) o.remove(); }
+
 function renderShelfPuzzles() {
     const wrap = document.getElementById('shelfPuzzles');
     if (!wrap) return;
@@ -9412,7 +9447,8 @@ function renderShelfPuzzles() {
             '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">' +
               '<span style="font-size:14px;font-weight:700;color:#3D5A80;">🧩 ' + escapeHtml(photo.label) + '</span>' +
               '<span style="font-size:11px;color:#8B7E74;">' + photo.pieces.length + ' books, in order</span>' +
-              '<button class="btn btn-secondary" style="margin-left:auto;font-size:11px;padding:4px 8px;" onclick="editShelfPuzzle(' + photo.id + ')">✏️ Edit</button>' +
+              '<button class="btn btn-secondary" style="margin-left:auto;font-size:11px;padding:4px 8px;" onclick="openShelfPhotoTags(' + photo.id + ')">🔍 Explore photo</button>' +
+              '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="editShelfPuzzle(' + photo.id + ')">✏️ Edit</button>' +
             '</div>' +
             '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;">' + tiles + '</div>' +
         '</div>';
