@@ -3442,7 +3442,8 @@
                     </div>
                     <div id="scanResult" class="scan-result"></div>
                     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:14px 0;padding:12px;background:#FEF3E2;border-radius:12px;">
-                        <span style="font-size:13px;color:#8B7E74;flex:1;min-width:160px;">📱 Scanned on your phone? Pull those books in.</span>
+                        <span style="font-size:13px;color:#8B7E74;flex:1;min-width:160px;">📱 Use your phone as a scanner — scans sync here.</span>
+                        <a class="btn btn-primary" href="./scan.html" target="_blank" rel="noopener" style="font-size:13px;white-space:nowrap;text-decoration:none;">📱 Phone scanner ↗</a>
                         <button class="btn btn-secondary" style="font-size:13px;white-space:nowrap;" onclick="importCloudScans()">☁️ Import scans</button>
                     </div>
                     <!-- Scan History -->
@@ -4313,7 +4314,8 @@
         // to match it exactly, so scans save with zero extra changes.
         const BOOKS_COLUMN_MAP = {
             isbn: 'isbn', title: 'title', author: 'author', publisher: 'publisher',
-            published_date: 'published_date', cover_url: 'cover_url', description: 'description'
+            published_date: 'published_date', cover_url: 'cover_url', description: 'description',
+            page_count: 'page_count', genre: 'genre', language: 'language'
         };
         // Normalize any ISBN-10/13 (or EAN-13 barcode) to a 13-digit string for the
         // table's UNIQUE isbn column, so re-scanning updates instead of duplicating.
@@ -8506,69 +8508,105 @@ function manualISBNLookup() {
     lookupISBN(isbn);
 }
 
-let _lastScanLookup = null; // remembers the last looked-up book so addScannedBook can mirror its cover/desc to the cloud
-function lookupISBN(isbn) {
-    const cleanISBN = isbn.replace(/-/g, '');
-    const resultEl = document.getElementById('scanResult');
-    resultEl.innerHTML = '<div style="text-align:center;padding:20px;color:#8B7E74;">🔍 Looking up book...</div>';
+let _lastScanLookup = null; // remembers the last looked-up book so the Add button & cloud get full details
 
-    fetch(`https://openlibrary.org/isbn/${cleanISBN}.json`)
-        .then(r => { if (!r.ok) throw new Error('Not found'); return r.json(); })
-        .then(async data => {
-            let authorName = 'Unknown';
-            if (data.authors && data.authors.length > 0) {
-                try {
-                    const authorResp = await fetch(`https://openlibrary.org${data.authors[0].key}.json`);
-                    const authorData = await authorResp.json();
-                    authorName = authorData.name || 'Unknown';
-                } catch(e) {}
+// Fetch full book metadata for an ISBN. Google Books first (richest: pages, genre,
+// language, description, cover), then Open Library to fill any gaps.
+async function fetchBookMeta(isbn) {
+    const m = { isbn: isbn, title: '', author: '', publisher: '', published_date: '', cover_url: '', description: '', page_count: 0, genre: '', language: '' };
+    try {
+        const gr = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`);
+        const gj = await gr.json();
+        const vi = gj && gj.items && gj.items[0] && gj.items[0].volumeInfo;
+        if (vi) {
+            m.title = vi.title || '';
+            if (vi.subtitle) m.title = m.title ? (m.title + ': ' + vi.subtitle) : vi.subtitle;
+            m.author = (vi.authors && vi.authors.join(', ')) || '';
+            m.publisher = vi.publisher || '';
+            m.published_date = vi.publishedDate || '';
+            m.description = vi.description || '';
+            m.page_count = vi.pageCount || 0;
+            m.genre = (vi.categories && vi.categories[0]) || '';
+            m.language = vi.language || '';
+            if (vi.imageLinks) {
+                const c = vi.imageLinks.thumbnail || vi.imageLinks.smallThumbnail || '';
+                m.cover_url = c.replace(/^http:/, 'https:').replace(/&edge=curl/, '');
             }
-
-            const title = data.title || 'Unknown Title';
-            const pages = data.number_of_pages || 0;
-            const publishDate = data.publish_date || '';
-            const publishers = data.publishers || [];
-            const coverId = data.covers ? data.covers[0] : null;
-            const coverUrl = coverId ? `https://covers.openlibrary.org/b/id/${coverId}-M.jpg` : null;
-            const desc = typeof data.description === 'string' ? data.description : (data.description?.value || '');
-            _lastScanLookup = { isbn: cleanISBN, title: title, author: authorName, publisher: (publishers[0] || ''), published_date: publishDate || '', cover_url: coverUrl || '', description: desc || '' };
-
-            resultEl.innerHTML = `
-                <div style="background:#FEF3E2;border-radius:12px;padding:20px;display:flex;gap:16px;align-items:start;">
-                    ${coverUrl ? `<img src="${coverUrl}" alt="Cover" style="width:100px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);">` : '<div style="width:100px;height:140px;background:#E8DFD5;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:32px;">📖</div>'}
-                    <div style="flex:1;">
-                        <div style="font-weight:700;color:#3D5A80;font-size:18px;margin-bottom:4px;">${title}</div>
-                        <div style="color:#8B7E74;margin-bottom:4px;">by ${authorName}</div>
-                        ${pages ? `<div style="color:#8B7E74;font-size:13px;">📄 ${pages} pages</div>` : ''}
-                        ${publishers.length > 0 ? `<div style="color:#8B7E74;font-size:13px;">🏢 ${publishers[0]}</div>` : ''}
-                        ${publishDate ? `<div style="color:#8B7E74;font-size:13px;">📅 ${publishDate}</div>` : ''}
-                        <div style="color:#8B7E74;font-size:13px;">📋 ISBN: ${cleanISBN}</div>
-                        ${desc ? `<div style="color:#8B7E74;font-size:12px;margin-top:8px;font-style:italic;">${desc.substring(0, 200)}${desc.length > 200 ? '...' : ''}</div>` : ''}
-                        <button class="btn btn-primary" style="margin-top:12px;" onclick="addScannedBook('${title.replace(/'/g,"\\'")}','${authorName.replace(/'/g,"\\'")}',${pages},'${cleanISBN}','${(publishers[0]||'').replace(/'/g,"\\'")}','${publishDate}','${(desc||'').substring(0,200).replace(/'/g,"\\'")}')">📚 Add to Library</button>
-                    </div>
-                </div>`;
-        })
-        .catch(() => {
-            resultEl.innerHTML = `<div style="text-align:center;padding:20px;color:#C2705B;">📕 Book not found for ISBN: ${cleanISBN}. Try a different ISBN or add manually.</div>`;
-        });
+        }
+    } catch (e) {}
+    if (!m.title || !m.author || !m.cover_url || !m.page_count || !m.description) {
+        try {
+            const r = await fetch(`https://openlibrary.org/isbn/${isbn}.json`);
+            if (r.ok) {
+                const d = await r.json();
+                if (!m.title) m.title = d.title || '';
+                if (!m.page_count) m.page_count = d.number_of_pages || 0;
+                if (!m.publisher) m.publisher = (d.publishers && d.publishers[0]) || '';
+                if (!m.published_date) m.published_date = d.publish_date || '';
+                if (!m.description) m.description = typeof d.description === 'string' ? d.description : (d.description && d.description.value) || '';
+                if (!m.cover_url && d.covers && d.covers[0]) m.cover_url = `https://covers.openlibrary.org/b/id/${d.covers[0]}-L.jpg`;
+                if (!m.author && d.authors && d.authors[0]) {
+                    try { const ar = await fetch(`https://openlibrary.org${d.authors[0].key}.json`); m.author = (await ar.json()).name || ''; } catch (e) {}
+                }
+            }
+        } catch (e) {}
+    }
+    if (m.language === 'en') m.language = 'English';
+    if (!m.title) m.title = 'Unknown Title';
+    if (!m.author) m.author = 'Unknown';
+    return m;
 }
 
-function addScannedBook(title, author, pages, isbn, publisher, publishDate, description) {
-    const year = publishDate ? parseInt(publishDate.match(/\d{4}/)?.[0]) || null : null;
-    const _m = (_lastScanLookup && _lastScanLookup.isbn === (isbn || '').replace(/-/g, '')) ? _lastScanLookup : {};
-    const cov = _m.cover_url || '';
+async function lookupISBN(isbn) {
+    const cleanISBN = isbn.replace(/-/g, '');
+    const resultEl = document.getElementById('scanResult');
+    if (resultEl) resultEl.innerHTML = '<div style="text-align:center;padding:20px;color:#8B7E74;">🔍 Looking up book…</div>';
+    const m = await fetchBookMeta(cleanISBN);
+    _lastScanLookup = Object.assign({}, m, { isbn: cleanISBN });
+    if (!resultEl) return;
+    const found = (m.title && m.title !== 'Unknown Title') || (m.author && m.author !== 'Unknown') || m.cover_url || m.description;
+    if (!found) {
+        resultEl.innerHTML = `<div style="text-align:center;padding:20px;color:#C2705B;">📕 Book not found for ISBN: ${cleanISBN}. Try a different ISBN or add manually.</div>`;
+        return;
+    }
+    const desc = m.description || '';
+    resultEl.innerHTML = `
+        <div style="background:#FEF3E2;border-radius:12px;padding:20px;display:flex;gap:16px;align-items:start;">
+            ${m.cover_url ? `<img src="${m.cover_url}" alt="Cover" style="width:100px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);">` : '<div style="width:100px;height:140px;background:#E8DFD5;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:32px;">📖</div>'}
+            <div style="flex:1;">
+                <div style="font-weight:700;color:#3D5A80;font-size:18px;margin-bottom:4px;">${m.title}</div>
+                <div style="color:#8B7E74;margin-bottom:4px;">by ${m.author}</div>
+                ${m.page_count ? `<div style="color:#8B7E74;font-size:13px;">📄 ${m.page_count} pages</div>` : ''}
+                ${m.genre ? `<div style="color:#8B7E74;font-size:13px;">🏷️ ${m.genre}</div>` : ''}
+                ${m.publisher ? `<div style="color:#8B7E74;font-size:13px;">🏢 ${m.publisher}</div>` : ''}
+                ${m.published_date ? `<div style="color:#8B7E74;font-size:13px;">📅 ${m.published_date}</div>` : ''}
+                <div style="color:#8B7E74;font-size:13px;">📋 ISBN: ${cleanISBN}</div>
+                ${desc ? `<div style="color:#8B7E74;font-size:12px;margin-top:8px;font-style:italic;">${desc.substring(0, 240)}${desc.length > 240 ? '…' : ''}</div>` : ''}
+                <button class="btn btn-primary" style="margin-top:12px;" onclick="addScannedBook('${cleanISBN}')">📚 Add to Library</button>
+            </div>
+        </div>`;
+}
+
+function addScannedBook(isbn) {
+    const cleanISBN = (isbn || '').toString().replace(/-/g, '');
+    const m = (_lastScanLookup && _lastScanLookup.isbn === cleanISBN) ? _lastScanLookup : { isbn: cleanISBN };
+    const title = m.title || 'Unknown Title';
+    const author = m.author || 'Unknown';
+    const pages = m.page_count || 0;
+    const year = m.published_date ? (parseInt((m.published_date.match(/\d{4}/) || [])[0]) || null) : null;
     app.books.push({
-        id: app.getNextId(), title, author, genre: '', pages: pages || 0, isbn,
-        cover: cov, publisher, publicationYear: year, language: 'English', format: '', series: '',
-        description: description || '', status: 'want', rating: 0,
+        id: app.getNextId(), title: title, author: author, genre: m.genre || '', pages: pages || 0, isbn: cleanISBN,
+        cover: m.cover_url || '', publisher: m.publisher || '', publicationYear: year,
+        language: m.language || 'English', format: '', series: '',
+        description: m.description || '', status: 'want', rating: 0,
         notes: 'Added via barcode scan', dateAdded: new Date().toISOString()
     });
     app.addXP(15);
     app.saveData();
-    // Mirror the scan into the shared cloud `books` table (no-op if cloud isn't set up)
-    try { Cloud.saveScannedBook({ isbn: isbn13(isbn), title: title, author: author, publisher: publisher || _m.publisher || '', published_date: publishDate || '', cover_url: cov, description: description || _m.description || '' }); } catch (e) {}
+    // Mirror the scan into the shared cloud `books` table with full details (no-op if cloud isn't set up)
+    try { Cloud.saveScannedBook({ isbn: isbn13(cleanISBN), title: title, author: author, publisher: m.publisher || '', published_date: m.published_date || '', cover_url: m.cover_url || '', description: m.description || '', page_count: pages || null, genre: m.genre || '', language: m.language || '' }); } catch (e) {}
     updateXPDisplay();
-    addToScanHistory(title, author, isbn);
+    addToScanHistory(title, author, cleanISBN);
     showNotification(`"${title}" added! +15 XP 📷`, 2000);
 
     const isContinuous = document.getElementById('continuousScan')?.checked;
@@ -8583,7 +8621,6 @@ function addScannedBook(title, author, pages, isbn, publisher, publishDate, desc
             </div>
         </div>`;
 
-    // In multi-scan mode, auto-restart scanner after adding
     if (isContinuous) {
         setTimeout(() => {
             document.getElementById('scanResult').innerHTML = '';
@@ -8607,8 +8644,8 @@ async function importCloudScans() {
         const year = r.published_date ? (parseInt((r.published_date.match(/\d{4}/) || [])[0]) || null) : null;
         app.books.push({
             id: app.getNextId(), title: r.title || 'Unknown', author: r.author || 'Unknown',
-            genre: '', pages: 0, isbn: r.isbn || '', cover: r.cover_url || '',
-            publisher: r.publisher || '', publicationYear: year, language: 'English', format: '', series: '',
+            genre: r.genre || '', pages: r.page_count || 0, isbn: r.isbn || '', cover: r.cover_url || '',
+            publisher: r.publisher || '', publicationYear: year, language: r.language || 'English', format: '', series: '',
             description: r.description || '', status: 'want', rating: 0,
             notes: 'Imported from cloud scan', dateAdded: new Date().toISOString()
         });
