@@ -9420,6 +9420,39 @@ function openShelfPhotoTags(photoId) {
 }
 function closeShelfPhotoTags() { const o = document.getElementById('shelfPhotoTagsOverlay'); if (o) o.remove(); }
 
+// Per-shelf virtual view: render ONE scanned shelf as cover-art spines on the wooden
+// virtual-shelf design, in photographed order (same design as the Virtual Shelf tab).
+function openShelfVirtual(photoId) {
+    const photo = (app.shelfPhotos || []).find(p => p.id === photoId);
+    if (!photo) { showNotification('Shelf not found', 1200); return; }
+    const books = _shelfBooksInOrder(photo);
+    if (!books.length) { showNotification('No books on this shelf yet', 1500); return; }
+    closeShelfVirtual();
+    const ov = document.createElement('div');
+    ov.id = 'shelfVirtualOverlay';
+    ov.className = 'vshelf-scope';
+    ov.dataset.photoId = String(photoId);
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(40,28,18,0.93);z-index:3000;display:flex;flex-direction:column;padding:16px;overflow:auto;';
+    ov.addEventListener('click', function (e) { if (e.target === ov) closeShelfVirtual(); });
+    ov.innerHTML =
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;color:#fff;flex-wrap:wrap;">' +
+          '<div><span style="font-family:Quicksand,sans-serif;font-size:18px;font-weight:700;">📚 ' + escapeHtml(photo.label) + '</span> ' +
+          '<span class="vhname" style="font-size:12px;color:#E8DFD5;">' + books.length + ' books · in shelf order · hover to see a title</span></div>' +
+          '<button onclick="closeShelfVirtual()" style="background:#fff;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-weight:700;color:#3D5A80;">✕ Close</button>' +
+        '</div>' +
+        '<div id="shelfVirtualBody">' + _vBookcaseHtml(books) + '</div>';
+    document.body.appendChild(ov);
+    // Fill any missing cover art, then refresh this overlay's spines.
+    try {
+        resolveMissingCovers().then(function () {
+            const o = document.getElementById('shelfVirtualOverlay');
+            const body = document.getElementById('shelfVirtualBody');
+            if (o && body && o.dataset.photoId === String(photoId)) body.innerHTML = _vBookcaseHtml(_shelfBooksInOrder(photo));
+        });
+    } catch (e) {}
+}
+function closeShelfVirtual() { const o = document.getElementById('shelfVirtualOverlay'); if (o) o.remove(); }
+
 function renderShelfPuzzles() {
     const wrap = document.getElementById('shelfPuzzles');
     if (!wrap) return;
@@ -9447,7 +9480,8 @@ function renderShelfPuzzles() {
             '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">' +
               '<span style="font-size:14px;font-weight:700;color:#3D5A80;">🧩 ' + escapeHtml(photo.label) + '</span>' +
               '<span style="font-size:11px;color:#8B7E74;">' + photo.pieces.length + ' books, in order</span>' +
-              '<button class="btn btn-secondary" style="margin-left:auto;font-size:11px;padding:4px 8px;" onclick="openShelfPhotoTags(' + photo.id + ')">🔍 Explore photo</button>' +
+              '<button class="btn btn-secondary" style="margin-left:auto;font-size:11px;padding:4px 8px;" onclick="openShelfVirtual(' + photo.id + ')">📚 Virtual shelf</button>' +
+              '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="openShelfPhotoTags(' + photo.id + ')">🔍 Explore photo</button>' +
               '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="editShelfPuzzle(' + photo.id + ')">✏️ Edit</button>' +
             '</div>' +
             '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;">' + tiles + '</div>' +
@@ -14604,8 +14638,53 @@ function pullBookFromShelf(el, id) {
     setTimeout(function () { openBookModal(id); }, 600);
     setTimeout(function () { el.style.transform = ''; el.style.boxShadow = ''; el.style.zIndex = ''; }, 1600);
 }
-// Instant hover name (shown in the shelf header — not clipped by the shelf's overflow).
-function _vHover(el) { var e = document.getElementById('vHoverName'); if (e && el) e.textContent = el.getAttribute('data-t') || ''; }
+// Instant hover name (shown in the nearest shelf header — works in the tab and in overlays).
+function _vHover(el) {
+    if (!el) return;
+    var t = el.getAttribute('data-t') || '';
+    var scope = el.closest ? el.closest('.vshelf-scope') : null;
+    var tgt = scope ? scope.querySelector('.vhname') : document.getElementById('vHoverName');
+    if (tgt) tgt.textContent = t;
+}
+// One spine's HTML — shared by the whole-library view, per-shelf view, and grouped view
+// so every rendering is the EXACT same design.
+function _vSpineHtml(b) {
+    const color = _vSpineColor(b);
+    const pages = b.pages || 0;
+    const j = _vHash((b.title || '') + String(b.id || ''));
+    const h = 128 + (pages ? Math.min(58, Math.round(pages * 0.1)) : (j % 46));
+    const cover = _vCoverUrl(b);
+    const w = cover ? (26 + (j % 9)) : (20 + (pages ? Math.min(16, Math.round(pages * 0.025)) : (j % 12)));
+    const title = (b.title || 'Untitled');
+    const tip = escapeHtml(title + (b.author ? ' — ' + b.author : '') + (b.genre ? ' · ' + b.genre : ''));
+    const shortT = escapeHtml(title.length > 32 ? title.slice(0, 31) + '…' : title);
+    const imgHtml = cover ? '<img src="' + cover + '" loading="lazy" onerror="this.style.display=\'none\'" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;">' : '';
+    const textHtml = '<span style="position:relative;z-index:1;' + (cover ? 'background:rgba(0,0,0,0.45);border-radius:3px;padding:2px 1px;' : '') + 'max-height:' + (h - 18) + 'px;overflow:hidden;">' + shortT + '</span>' +
+        (!cover && w >= 32 && b.author ? '<span class="va" style="font-size:8px;max-height:' + (h - 22) + 'px;overflow:hidden;">' + escapeHtml(b.author.length > 22 ? b.author.slice(0, 21) + '…' : b.author) + '</span>' : '');
+    const clickId = (typeof b.id === 'number') ? b.id : null;
+    const onclick = clickId != null ? ' onclick="pullBookFromShelf(this,' + clickId + ')"' : '';
+    return '<div class="vspine" style="position:relative;background:linear-gradient(90deg,rgba(255,255,255,0.22),' + color + ' 22%,' + color + ' 78%,rgba(0,0,0,0.32));height:' + h + 'px;width:' + w + 'px;font-size:' + (w < 28 ? 8 : 9) + 'px;" title="' + tip + '" data-t="' + tip + '" onmouseover="_vHover(this)"' + onclick + '>' + imgHtml + textHtml + '</div>';
+}
+// Wrap a list of books into the wooden bookcase (rows of spines + shelf boards).
+function _vBookcaseHtml(books) {
+    const perShelf = 28;
+    let html = '<div class="vbookcase">';
+    for (let i = 0; i < books.length; i += perShelf) {
+        html += '<div class="vshelf-row">';
+        books.slice(i, i + perShelf).forEach(b => { html += _vSpineHtml(b); });
+        html += '</div><div class="vshelf-board"></div>';
+    }
+    html += '</div>';
+    return html;
+}
+// Books on one scanned shelf, in photographed order, resolved to library records.
+function _shelfBooksInOrder(photo) {
+    const pieces = (photo && photo.pieces ? photo.pieces : []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+    return pieces.map(p => {
+        const lib = (p.libraryId != null) ? app.books.find(b => b.id === p.libraryId) : null;
+        return lib || { id: p.libraryId, title: p.title || 'Untitled', author: p.author || '', genre: '', pages: 0 };
+    }).filter(Boolean);
+}
 function renderVirtualShelf() {
     const host = document.getElementById('libraryTab-vshelf');
     if (!host) return;
@@ -14616,39 +14695,42 @@ function renderVirtualShelf() {
     }
     const sortEl = document.getElementById('vshelfSort');
     const sort = sortEl ? sortEl.value : 'genre';
-    const books = all.slice();
-    if (sort === 'genre') books.sort((a, b) => ((a.genre || 'zzz').toLowerCase()).localeCompare((b.genre || 'zzz').toLowerCase()) || (a.author || '').localeCompare(b.author || ''));
-    else if (sort === 'author') books.sort((a, b) => (a.author || 'zzz').localeCompare(b.author || 'zzz'));
-    else if (sort === 'title') books.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
-    else if (sort === 'status') { const o = { reading: 0, want: 1, read: 2, dnf: 3, buy: 4, loaned: 5 }; books.sort((a, b) => (o[a.status] != null ? o[a.status] : 9) - (o[b.status] != null ? o[b.status] : 9)); }
 
     const opt = function (v, lbl) { return '<option value="' + v + '"' + (sort === v ? ' selected' : '') + '>' + lbl + '</option>'; };
-    let html = '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;">' +
-        '<div><span style="font-family:Quicksand,sans-serif;font-size:18px;font-weight:700;color:#3D5A80;">📚 Your Virtual Bookshelf</span> <span id="vHoverName" style="font-size:12px;color:#8B7E74;">' + books.length + ' books · hover a book to see its title</span></div>' +
+    let html = '<div class="vshelf-scope"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;">' +
+        '<div><span style="font-family:Quicksand,sans-serif;font-size:18px;font-weight:700;color:#3D5A80;">📚 Your Virtual Bookshelf</span> <span id="vHoverName" class="vhname" style="font-size:12px;color:#8B7E74;">' + all.length + ' books · hover a book to see its title</span></div>' +
         '<select id="vshelfSort" onchange="renderVirtualShelf()" style="padding:6px 10px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;">' +
-        opt('genre', 'By genre') + opt('author', 'By author') + opt('title', 'By title') + opt('status', 'By status') + opt('added', 'Recently added') +
+        opt('genre', 'By genre') + opt('author', 'By author') + opt('title', 'By title') + opt('status', 'By status') + opt('added', 'Recently added') + opt('shelves', 'By my real shelves') +
         '</select></div>';
 
-    const perShelf = 28;
-    html += '<div class="vbookcase">';
-    for (let i = 0; i < books.length; i += perShelf) {
-        html += '<div class="vshelf-row">';
-        books.slice(i, i + perShelf).forEach(b => {
-            const color = _vSpineColor(b);
-            const pages = b.pages || 0;
-            const j = _vHash((b.title || '') + String(b.id || ''));
-            const h = 128 + (pages ? Math.min(58, Math.round(pages * 0.1)) : (j % 46));
-            const cover = _vCoverUrl(b);
-            const w = cover ? (26 + (j % 9)) : (20 + (pages ? Math.min(16, Math.round(pages * 0.025)) : (j % 12)));
-            const title = (b.title || 'Untitled');
-            const tip = escapeHtml(title + (b.author ? ' — ' + b.author : '') + (b.genre ? ' · ' + b.genre : ''));
-            const shortT = escapeHtml(title.length > 32 ? title.slice(0, 31) + '…' : title);
-            const imgHtml = cover ? '<img src="' + cover + '" loading="lazy" onerror="this.style.display=\'none\'" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;">' : '';
-            const textHtml = '<span style="position:relative;z-index:1;' + (cover ? 'background:rgba(0,0,0,0.45);border-radius:3px;padding:2px 1px;' : '') + 'max-height:' + (h - 18) + 'px;overflow:hidden;">' + shortT + '</span>' +
-                (!cover && w >= 32 && b.author ? '<span class="va" style="font-size:8px;max-height:' + (h - 22) + 'px;overflow:hidden;">' + escapeHtml(b.author.length > 22 ? b.author.slice(0, 21) + '…' : b.author) + '</span>' : '');
-            html += '<div class="vspine" style="position:relative;background:linear-gradient(90deg,rgba(255,255,255,0.22),' + color + ' 22%,' + color + ' 78%,rgba(0,0,0,0.32));height:' + h + 'px;width:' + w + 'px;font-size:' + (w < 28 ? 8 : 9) + 'px;" title="' + tip + '" data-t="' + tip + '" onmouseover="_vHover(this)" onclick="pullBookFromShelf(this,' + b.id + ')">' + imgHtml + textHtml + '</div>';
-        });
-        html += '</div><div class="vshelf-board"></div>';
+    if (sort === 'shelves') {
+        // One wooden bookcase per scanned shelf, in photographed order — your real shelves, virtualized.
+        const photos = (app.shelfPhotos || []).filter(p => p.isPuzzle && p.pieces && p.pieces.length);
+        if (!photos.length) {
+            html += '<div style="text-align:center;padding:34px;color:#8B7E74;">No scanned shelves yet. Photograph a bookshelf in 🧩 Shelf Puzzle and it shows up here as its own virtual shelf, in order.</div>';
+        } else {
+            const used = new Set();
+            photos.forEach(photo => {
+                const sb = _shelfBooksInOrder(photo);
+                sb.forEach(b => { if (b && typeof b.id === 'number') used.add(b.id); });
+                html += '<div style="margin:4px 0 6px;font-family:Quicksand,sans-serif;font-size:15px;font-weight:700;color:#3D5A80;">📚 ' + escapeHtml(photo.label) + ' <span style="font-size:11px;color:#8B7E74;font-weight:400;">' + sb.length + ' books, in order</span></div>';
+                html += _vBookcaseHtml(sb) + '<div style="height:16px;"></div>';
+            });
+            const others = all.filter(b => !used.has(b.id));
+            if (others.length) {
+                others.sort((a, b) => ((a.genre || 'zzz').toLowerCase()).localeCompare((b.genre || 'zzz').toLowerCase()) || (a.author || '').localeCompare(b.author || ''));
+                html += '<div style="margin:4px 0 6px;font-family:Quicksand,sans-serif;font-size:15px;font-weight:700;color:#3D5A80;">🗂️ Other books <span style="font-size:11px;color:#8B7E74;font-weight:400;">' + others.length + ' not on a scanned shelf</span></div>';
+                html += _vBookcaseHtml(others);
+            }
+        }
+    } else {
+        const books = all.slice();
+        if (sort === 'genre') books.sort((a, b) => ((a.genre || 'zzz').toLowerCase()).localeCompare((b.genre || 'zzz').toLowerCase()) || (a.author || '').localeCompare(b.author || ''));
+        else if (sort === 'author') books.sort((a, b) => (a.author || 'zzz').localeCompare(b.author || 'zzz'));
+        else if (sort === 'title') books.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+        else if (sort === 'status') { const o = { reading: 0, want: 1, read: 2, dnf: 3, buy: 4, loaned: 5 }; books.sort((a, b) => (o[a.status] != null ? o[a.status] : 9) - (o[b.status] != null ? o[b.status] : 9)); }
+        // 'added' = natural app.books order
+        html += _vBookcaseHtml(books);
     }
     html += '</div>';
     host.innerHTML = html;
