@@ -10560,13 +10560,58 @@ function openShelfPhotoTags(photoId) {
     ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:3000;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;';
     ov.addEventListener('click', function (e) { if (e.target === ov) closeShelfPhotoTags(); });
     ov.innerHTML =
-        '<div style="color:#fff;margin-bottom:10px;font-size:14px;text-align:center;max-width:96vw;">🔍 ' + escapeHtml(photo.label) + ' — hover a book to see its title' +
+        '<div style="color:#fff;margin-bottom:10px;font-size:14px;text-align:center;max-width:96vw;">🔍 ' + escapeHtml(photo.label) + ' — drag to pan · scroll or pinch to zoom · double-tap to reset' +
         (pieces.length ? '' : ' <span style="color:#F4A261;">(no book positions yet — re-scan this shelf with auto-split to enable hover tags)</span>') +
         ' <button onclick="closeShelfPhotoTags()" style="margin-left:12px;background:#fff;border:none;border-radius:8px;padding:5px 12px;cursor:pointer;font-weight:700;color:#3D5A80;">✕ Close</button></div>' +
-        '<div style="position:relative;display:inline-block;max-width:96vw;max-height:84vh;">' +
-        '<img src="' + photo.data + '" style="display:block;max-width:96vw;max-height:84vh;border-radius:8px;">' +
-        spots + '</div>';
+        '<div id="shelfTagVp" style="position:relative;display:inline-block;overflow:hidden;max-width:96vw;max-height:84vh;touch-action:none;border-radius:8px;cursor:grab;">' +
+        '<div id="shelfTagInner" style="position:relative;display:inline-block;transform-origin:0 0;">' +
+        '<img src="' + photo.data + '" style="display:block;max-width:96vw;max-height:84vh;border-radius:8px;-webkit-user-drag:none;user-select:none;">' +
+        spots + '</div></div>';
     document.body.appendChild(ov);
+    try { _setupPhotoPanZoom(document.getElementById('shelfTagVp'), document.getElementById('shelfTagInner')); } catch (e) {}
+}
+// Pinch/scroll to zoom and drag to pan a photo inside its viewport. Hover-tag clicks still work at 1x
+// (we only capture the pointer once zoomed in). Used by the shelf-photo hover-tag viewer.
+function _setupPhotoPanZoom(vp, inner) {
+    if (!vp || !inner) return;
+    let scale = 1, tx = 0, ty = 0, dragging = false, lastX = 0, lastY = 0, pinchDist = 0, pinchScale = 1;
+    const pointers = new Map();
+    function apply() { inner.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')'; vp.style.cursor = scale > 1 ? 'grab' : 'default'; }
+    function clamp() {
+        const maxX = vp.clientWidth * (scale - 1), maxY = vp.clientHeight * (scale - 1);
+        tx = Math.min(0, Math.max(-maxX, tx)); ty = Math.min(0, Math.max(-maxY, ty));
+    }
+    vp.addEventListener('wheel', function (e) {
+        e.preventDefault();
+        const r = vp.getBoundingClientRect(), cx = e.clientX - r.left, cy = e.clientY - r.top, old = scale;
+        scale = Math.min(5, Math.max(1, scale * (e.deltaY < 0 ? 1.15 : 0.87)));
+        tx = cx - (cx - tx) * (scale / old); ty = cy - (cy - ty) * (scale / old);
+        if (scale <= 1.001) { scale = 1; tx = 0; ty = 0; }
+        clamp(); apply();
+    }, { passive: false });
+    vp.addEventListener('pointerdown', function (e) {
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pointers.size === 2) { dragging = false; const p = Array.from(pointers.values()); pinchDist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y); pinchScale = scale; try { vp.setPointerCapture(e.pointerId); } catch (_) {} }
+        else if (pointers.size === 1 && scale > 1) { dragging = true; lastX = e.clientX; lastY = e.clientY; try { vp.setPointerCapture(e.pointerId); } catch (_) {} }
+    });
+    vp.addEventListener('pointermove', function (e) {
+        if (!pointers.has(e.pointerId)) return;
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pointers.size === 2) {
+            const p = Array.from(pointers.values()), d = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+            if (pinchDist > 0) { scale = Math.min(5, Math.max(1, pinchScale * (d / pinchDist))); if (scale <= 1.001) { scale = 1; tx = 0; ty = 0; } clamp(); apply(); }
+        } else if (dragging && scale > 1) {
+            tx += e.clientX - lastX; ty += e.clientY - lastY; lastX = e.clientX; lastY = e.clientY; clamp(); apply();
+        }
+    });
+    function up(e) { pointers.delete(e.pointerId); if (pointers.size < 2) pinchDist = 0; if (pointers.size === 0) dragging = false; else { const q = Array.from(pointers.values())[0]; lastX = q.x; lastY = q.y; dragging = scale > 1; } }
+    vp.addEventListener('pointerup', up);
+    vp.addEventListener('pointercancel', up);
+    vp.addEventListener('dblclick', function (e) {
+        const r = vp.getBoundingClientRect(), cx = e.clientX - r.left, cy = e.clientY - r.top;
+        if (scale > 1) { scale = 1; tx = 0; ty = 0; } else { scale = 2.5; tx = cx - cx * scale; ty = cy - cy * scale; clamp(); }
+        apply();
+    });
 }
 function closeShelfPhotoTags() { const o = document.getElementById('shelfPhotoTagsOverlay'); if (o) o.remove(); }
 
