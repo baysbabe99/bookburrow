@@ -10558,6 +10558,7 @@ function openShelfPhotoTags(photoId) {
     const ov = document.createElement('div');
     ov.id = 'shelfPhotoTagsOverlay';
     ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:3000;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;';
+    ov.dataset.photoId = photoId;
     ov.addEventListener('click', function (e) { if (e.target === ov) closeShelfPhotoTags(); });
     ov.innerHTML =
         '<div style="color:#fff;margin-bottom:10px;font-size:14px;text-align:center;max-width:96vw;">🔍 ' + escapeHtml(photo.label) + ' — drag to pan · scroll or pinch to zoom · double-tap to reset' +
@@ -10566,15 +10567,16 @@ function openShelfPhotoTags(photoId) {
         '<div id="shelfTagVp" style="position:relative;display:inline-block;overflow:hidden;max-width:96vw;max-height:84vh;touch-action:none;border-radius:8px;cursor:grab;">' +
         '<div id="shelfTagInner" style="position:relative;display:inline-block;transform-origin:0 0;">' +
         '<img src="' + photo.data + '" style="display:block;max-width:96vw;max-height:84vh;border-radius:8px;-webkit-user-drag:none;user-select:none;">' +
-        spots + '</div></div>';
+        spots + '</div></div>' + _shelfNavArrowsHtml();
     document.body.appendChild(ov);
-    try { _setupPhotoPanZoom(document.getElementById('shelfTagVp'), document.getElementById('shelfTagInner')); } catch (e) {}
+    try { _setupPhotoPanZoom(document.getElementById('shelfTagVp'), document.getElementById('shelfTagInner'), function (dir) { navShelfPhoto(dir); }); } catch (e) {}
+    _setupShelfPhotoKeys();
 }
 // Pinch/scroll to zoom and drag to pan a photo inside its viewport. Hover-tag clicks still work at 1x
 // (we only capture the pointer once zoomed in). Used by the shelf-photo hover-tag viewer.
-function _setupPhotoPanZoom(vp, inner) {
+function _setupPhotoPanZoom(vp, inner, onSwipe) {
     if (!vp || !inner) return;
-    let scale = 1, tx = 0, ty = 0, dragging = false, lastX = 0, lastY = 0, pinchDist = 0, pinchScale = 1;
+    let scale = 1, tx = 0, ty = 0, dragging = false, lastX = 0, lastY = 0, pinchDist = 0, pinchScale = 1, swStartX = 0, swStartY = 0, swId = null;
     const pointers = new Map();
     function apply() { inner.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')'; vp.style.cursor = scale > 1 ? 'grab' : 'default'; }
     function clamp() {
@@ -10592,7 +10594,10 @@ function _setupPhotoPanZoom(vp, inner) {
     vp.addEventListener('pointerdown', function (e) {
         pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
         if (pointers.size === 2) { dragging = false; const p = Array.from(pointers.values()); pinchDist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y); pinchScale = scale; try { vp.setPointerCapture(e.pointerId); } catch (_) {} }
-        else if (pointers.size === 1 && scale > 1) { dragging = true; lastX = e.clientX; lastY = e.clientY; try { vp.setPointerCapture(e.pointerId); } catch (_) {} }
+        else if (pointers.size === 1) {
+            if (scale > 1) { dragging = true; lastX = e.clientX; lastY = e.clientY; try { vp.setPointerCapture(e.pointerId); } catch (_) {} }
+            else { swStartX = e.clientX; swStartY = e.clientY; swId = e.pointerId; }
+        }
     });
     vp.addEventListener('pointermove', function (e) {
         if (!pointers.has(e.pointerId)) return;
@@ -10604,7 +10609,14 @@ function _setupPhotoPanZoom(vp, inner) {
             tx += e.clientX - lastX; ty += e.clientY - lastY; lastX = e.clientX; lastY = e.clientY; clamp(); apply();
         }
     });
-    function up(e) { pointers.delete(e.pointerId); if (pointers.size < 2) pinchDist = 0; if (pointers.size === 0) dragging = false; else { const q = Array.from(pointers.values())[0]; lastX = q.x; lastY = q.y; dragging = scale > 1; } }
+    function up(e) {
+        if (onSwipe && scale <= 1 && e.pointerId === swId) {
+            const dx = e.clientX - swStartX, dy = e.clientY - swStartY;
+            if (Math.max(Math.abs(dx), Math.abs(dy)) > 45) { onSwipe(Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 'left' : 'right') : (dy < 0 ? 'up' : 'down')); }
+            swId = null;
+        }
+        pointers.delete(e.pointerId); if (pointers.size < 2) pinchDist = 0; if (pointers.size === 0) dragging = false; else { const q = Array.from(pointers.values())[0]; lastX = q.x; lastY = q.y; dragging = scale > 1; }
+    }
     vp.addEventListener('pointerup', up);
     vp.addEventListener('pointercancel', up);
     vp.addEventListener('dblclick', function (e) {
@@ -10614,6 +10626,54 @@ function _setupPhotoPanZoom(vp, inner) {
     });
 }
 function closeShelfPhotoTags() { const o = document.getElementById('shelfPhotoTagsOverlay'); if (o) o.remove(); }
+// Arrow controls + spatial navigation: jump from a shelf photo to the cubby above/below/left/right of it.
+function _shelfNavArrowsHtml() {
+    const base = 'position:absolute;width:44px;height:44px;border-radius:50%;border:none;background:rgba(255,255,255,0.85);color:#3D5A80;font-size:24px;font-weight:800;line-height:1;cursor:pointer;z-index:3100;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.45);';
+    return '<button title="Shelf to the left" onclick="navShelfPhoto(\'left\')" style="' + base + 'left:10px;top:50%;transform:translateY(-50%);">‹</button>' +
+           '<button title="Shelf to the right" onclick="navShelfPhoto(\'right\')" style="' + base + 'right:10px;top:50%;transform:translateY(-50%);">›</button>' +
+           '<button title="Shelf above" onclick="navShelfPhoto(\'up\')" style="' + base + 'top:10px;left:50%;transform:translateX(-50%);">⌃</button>' +
+           '<button title="Shelf below" onclick="navShelfPhoto(\'down\')" style="' + base + 'bottom:10px;left:50%;transform:translateX(-50%);">⌄</button>';
+}
+function _shelfPhotoNeighbor(curPhotoId, dir) {
+    const side = (typeof _activeSideObj === 'function') ? _activeSideObj() : null;
+    if (!side || !Array.isArray(side.cells)) return null;
+    const cur = side.cells.find(function (c) { return String(c.framePhotoId) === String(curPhotoId); });
+    if (!cur) return null;
+    const cx = (cur.x || 0) + (cur.w || 0) / 2, cy = (cur.y || 0) + (cur.h || 0) / 2, tol = 0.05;
+    let best = null, bestDist = Infinity;
+    side.cells.forEach(function (c) {
+        if (c === cur || c.framePhotoId == null) return;
+        const x = (c.x || 0) + (c.w || 0) / 2, y = (c.y || 0) + (c.h || 0) / 2;
+        let ok = false, dist = 0;
+        if (dir === 'left') { ok = (x < cx - 0.001) && Math.abs(y - cy) < tol; dist = cx - x; }
+        else if (dir === 'right') { ok = (x > cx + 0.001) && Math.abs(y - cy) < tol; dist = x - cx; }
+        else if (dir === 'up') { ok = (y < cy - 0.001) && Math.abs(x - cx) < tol; dist = cy - y; }
+        else if (dir === 'down') { ok = (y > cy + 0.001) && Math.abs(x - cx) < tol; dist = y - cy; }
+        if (ok && dist < bestDist) { bestDist = dist; best = c; }
+    });
+    return best ? best.framePhotoId : null;
+}
+function navShelfPhoto(dir) {
+    const ov = document.getElementById('shelfPhotoTagsOverlay');
+    if (!ov) return;
+    const nextId = _shelfPhotoNeighbor(ov.dataset.photoId, dir);
+    if (nextId == null) { showNotification('No shelf ' + ({ up: 'above', down: 'below', left: 'to the left', right: 'to the right' }[dir] || 'there'), 1200); return; }
+    closeShelfPhotoTags();
+    openShelfPhotoTags(nextId);
+}
+let _shelfPhotoKeysReady = false;
+function _setupShelfPhotoKeys() {
+    if (_shelfPhotoKeysReady) return;
+    _shelfPhotoKeysReady = true;
+    document.addEventListener('keydown', function (e) {
+        if (!document.getElementById('shelfPhotoTagsOverlay')) return;
+        if (e.key === 'ArrowLeft') { e.preventDefault(); navShelfPhoto('left'); }
+        else if (e.key === 'ArrowRight') { e.preventDefault(); navShelfPhoto('right'); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); navShelfPhoto('up'); }
+        else if (e.key === 'ArrowDown') { e.preventDefault(); navShelfPhoto('down'); }
+        else if (e.key === 'Escape') closeShelfPhotoTags();
+    });
+}
 
 // Scanned shelves you can flip through in the virtual view (those with books, in order).
 function _shelfVirtualNavList() {
