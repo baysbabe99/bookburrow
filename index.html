@@ -10165,30 +10165,89 @@ function _commitCellLibrary() {
     _vshelfView = 'bookcase'; switchLibraryTab('vshelf');
     showNotification(ids.length + ' book' + (ids.length === 1 ? '' : 's') + ' added to the shelf ✓', 1800);
 }
-// Frame a Photo Shelf picture in a cubby (instead of book spines).
-function _cellFillPhoto() {
-    const photos = (app.shelfPhotos || []).filter(p => p.data);
-    if (!photos.length) {
-        _openScanModal('<div style="padding:24px;text-align:center;color:#8B7E74;">No photos yet — add some in the 📷 Photo Shelf section first.<br><br><button class="btn btn-secondary" onclick="_openCellFillChooser()">← Back</button></div>', 'Add a photo');
-        return;
-    }
-    const grid = photos.map(p => '<div onclick="_commitCellPhoto(' + p.id + ')" title="' + escapeHtml(p.label || 'Photo') + '" style="cursor:pointer;border:2px solid #E8DFD5;border-radius:10px;overflow:hidden;background:#FEF3E2;">' +
-        '<img src="' + p.data + '" style="width:100%;height:90px;object-fit:cover;display:block;">' +
-        '<div style="font-size:11px;color:#3D5A80;padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(p.label || 'Photo') + '</div></div>').join('');
-    _openScanModal('<div style="padding:4px 2px;"><p style="color:#8B7E74;font-size:13px;margin:0 0 10px;">Pick a photo to frame on this shelf:</p>' +
-        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;max-height:54vh;overflow:auto;">' + grid + '</div>' +
-        '<div style="margin-top:12px;text-align:right;"><button class="btn btn-secondary" onclick="_openCellFillChooser()">← Back</button></div></div>', 'Add a photo');
+// Frame Photo Shelf pictures in cubbies (instead of book spines). Upload new photos right
+// here (multiple at once), select one or more, and Save: the first fills the tapped cubby,
+// extras fill the next empty cubbies on this side.
+let _framePickSel = {};
+function _cellFillPhoto() { _framePickSel = {}; _renderCellPhotoPicker(); }
+function _renderCellPhotoPicker() {
+    const list = (app.shelfPhotos || []);
+    const empty = list.length === 0;
+    const grid = list.map(p => {
+        const sel = !!_framePickSel[p.id];
+        return '<div onclick="_framePickToggle(' + p.id + ')" title="' + escapeHtml(p.label || 'Photo') + '" style="position:relative;cursor:pointer;border:2px solid ' + (sel ? '#3D5A80' : '#E8DFD5') + ';border-radius:10px;overflow:hidden;background:#FEF3E2;">' +
+            (sel ? '<div style="position:absolute;top:6px;left:6px;width:22px;height:22px;border-radius:50%;background:#3D5A80;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;z-index:2;">✓</div>' : '') +
+            '<img src="' + _photoSrc(p) + '" style="width:100%;height:90px;object-fit:cover;display:block;">' +
+            '<div style="font-size:11px;color:#3D5A80;padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(p.label || 'Photo') + '</div></div>';
+    }).join('');
+    const n = (app.shelfPhotos || []).filter(p => _framePickSel[p.id]).length;
+    _openScanModal('<div style="padding:4px 2px;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">' +
+          '<p style="color:#8B7E74;font-size:13px;margin:0;">' + (empty ? 'Upload photos to frame on your shelves.' : 'Tap to select one or more photos.') + '</p>' +
+          '<button class="btn btn-secondary" onclick="_uploadFramePhotos()">⬆️ Upload photos</button>' +
+        '</div>' +
+        (empty ? '<div style="padding:22px;text-align:center;color:#8B7E74;">No photos yet — tap “⬆️ Upload photos” to add some.</div>'
+               : '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;max-height:46vh;overflow:auto;">' + grid + '</div>') +
+        '<div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap;">' +
+          '<span style="font-size:12px;color:#8B7E74;">' + n + ' selected</span>' +
+          '<span style="display:flex;gap:8px;"><button class="btn btn-secondary" onclick="_openCellFillChooser()">← Back</button>' +
+          '<button class="btn btn-primary" onclick="_commitCellPhotosMulti()">Save' + (n ? ' (' + n + ')' : '') + '</button></span>' +
+        '</div></div>', 'Add a photo');
 }
-function _commitCellPhoto(photoId) {
+function _framePickToggle(id) { _framePickSel[id] = !_framePickSel[id]; _renderCellPhotoPicker(); }
+function _uploadFramePhotos() {
+    _dynFilePicker('image/*', true, function (inp) {
+        _ingestPhotoFiles(inp.files).then(function (newPhotos) {
+            newPhotos.forEach(function (p) { _framePickSel[p.id] = true; });
+            _renderCellPhotoPicker();
+            if (newPhotos.length) showNotification(newPhotos.length + ' photo' + (newPhotos.length === 1 ? '' : 's') + ' uploaded ✓', 1500);
+        });
+    });
+}
+// Ingest image files into app.shelfPhotos (downscale + IndexedDB blob), save, resolve new photos (in order).
+function _ingestPhotoFiles(files) {
+    const arr = Array.from(files || []).filter(function (f) { return f && f.type && f.type.indexOf('image/') === 0; });
+    return arr.reduce(function (chain, file) {
+        return chain.then(function (acc) {
+            return _readImageFile(file)
+                .then(function (raw) { return _downscaleDataUrl(raw, 2000); })
+                .then(function (data) {
+                    const photo = { id: Date.now() + Math.random(), data: data, label: '', dateAdded: new Date().toISOString(), taggedBooks: [] };
+                    return _storePhotoBlob(photo).then(function () {
+                        photo.label = _nextShelfPhotoLabel();
+                        app.shelfPhotos.push(photo); acc.push(photo); return acc;
+                    });
+                })
+                .catch(function () { return acc; });
+        });
+    }, Promise.resolve([])).then(function (newPhotos) {
+        if (newPhotos.length) { app.saveData(); try { renderPhotoGallery(); } catch (e) {} }
+        return newPhotos;
+    });
+}
+function _cellIsEmpty(cell) {
+    return !!cell && !cell.framePhotoId && !(cell.bookIds && cell.bookIds.length) && !cell.shelfPhotoId;
+}
+function _commitCellPhotosMulti() {
     const t = _fillTarget; if (!t) return;
-    const bc = (app.bookcases || []).find(b => b.id === t.bcId);
+    const order = (app.shelfPhotos || []).filter(function (p) { return _framePickSel[p.id]; }).map(function (p) { return p.id; });
+    if (!order.length) { showNotification('Pick at least one photo', 1500); return; }
+    const bc = (app.bookcases || []).find(function (b) { return b.id === t.bcId; });
     const side = bc && bc.sides && bc.sides[t.side];
-    const cell = side && (side.cells || []).find(c => c.id === t.cellId);
-    if (cell) { cell.framePhotoId = photoId; cell.bookIds = null; cell.shelfPhotoId = null; }
+    if (!side || !Array.isArray(side.cells)) { closeModal('shelfScanModal'); return; }
+    const startIdx = side.cells.findIndex(function (c) { return c.id === t.cellId; });
+    const targets = [];
+    if (startIdx >= 0) targets.push(side.cells[startIdx]);                       // the tapped cubby first
+    for (let i = startIdx + 1; i < side.cells.length && targets.length < order.length; i++) {
+        if (_cellIsEmpty(side.cells[i])) targets.push(side.cells[i]);            // then the next empty cubbies
+    }
+    let framed = 0;
+    targets.forEach(function (cell, i) { if (i < order.length) { cell.framePhotoId = order[i]; cell.bookIds = null; cell.shelfPhotoId = null; framed++; } });
     app.saveData();
     closeModal('shelfScanModal');
     _vshelfView = 'bookcase'; switchLibraryTab('vshelf');
-    showNotification('Photo framed on the shelf ✓', 1600);
+    const leftover = order.length - framed;
+    showNotification('Framed ' + framed + ' photo' + (framed === 1 ? '' : 's') + (leftover > 0 ? ' · ' + leftover + ' more saved to Photo Shelf' : '') + ' ✓', 2200);
 }
 
 // Group whole-bookcase pieces into real rows using each book's box y-position.
