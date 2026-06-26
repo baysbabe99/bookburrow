@@ -6920,7 +6920,7 @@ function openBookModal(bookId) {
             <label style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;border:2px solid ${(book.ownershipFormat||[]).includes('Do Not Own')?'#F43F5E':'#E8DFD5'};background:${(book.ownershipFormat||[]).includes('Do Not Own')?'rgba(244,63,94,0.1)':'#FFF8F0'};cursor:pointer;font-size:13px;color:${(book.ownershipFormat||[]).includes('Do Not Own')?'#F43F5E':'#3D5A80'};"><input type="checkbox" class="ownershipFmt" value="Do Not Own" ${(book.ownershipFormat||[]).includes('Do Not Own')?'checked':''} onchange="handleDoNotOwnChange(this)" style="accent-color:#F43F5E;"> 🚫 Do Not Own</label>
         </div></div>
         <div style="margin-top:10px;"><label style="font-size:12px;color:#8B7E74;font-weight:700;">RATING</label><div id="editBookRating" style="font-size:24px;cursor:pointer;">${[1,2,3,4,5].map(i => `<span onclick="setBookRating(${i})" style="cursor:pointer;">${i <= (book.rating||0) ? '⭐' : '☆'}</span>`).join('')}</div></div>
-        ${book.shelfLocation ? `<div style="margin-top:10px;background:rgba(212,167,106,0.1);border-radius:10px;padding:10px 14px;display:flex;align-items:center;gap:10px;cursor:pointer;" onclick="closeModal('bookModal');showShelfLocation(${book.shelfPhotoId})"><span style="font-size:20px;">📍</span><div><div style="font-size:12px;color:#8B7E74;font-weight:700;">SHELF LOCATION</div><div style="color:#3D5A80;font-weight:600;">${escapeHtml(book.shelfLocation)}</div><div style="font-size:11px;color:#D4A76A;">Click to view shelf photo</div></div></div>` : ''}
+        ${_shelfLocationCardHtml(book)}
         <div style="margin-top:10px;"><label style="font-size:12px;color:#8B7E74;font-weight:700;">NOTES</label><textarea id="editBookNotes" style="${iStyle}resize:vertical;min-height:70px;">${book.notes||''}</textarea></div>
         <div style="display:flex;gap:10px;margin-top:16px;">
             <button class="btn btn-primary" style="flex:1;" onclick="saveBookChanges(${book.id})">💾 Save</button>
@@ -16075,6 +16075,106 @@ function _cubbySpinesHtml(books) {
             const bg = cover ? ('background-image:url(' + cover + ');background-size:cover;background-position:center;') : ('background:linear-gradient(90deg,rgba(255,255,255,0.18),' + color + ' 30%,' + color + ' 70%,rgba(0,0,0,0.32));');
             return '<div title="' + tip + '"' + click + ' style="flex:0 0 auto;width:9px;height:100%;border-radius:1px 2px 0 0;cursor:pointer;' + bg + 'box-shadow:inset -2px 0 4px rgba(0,0,0,0.35);"></div>';
         }).join('') + '</div>';
+}
+// ---- "Where is this book?" — locate a book inside the virtual bookcase ----
+// Returns null if the book isn't placed in any bookcase, else its physical spot.
+// "Shelf N" = the cubby's rank in the SAME column-major order that "📥 Fill in order"
+// uses (down each column, then the next column to the right). "Book M" = the book's
+// position within that cubby, in the order its spines are shown.
+function getBookShelfLocation(book) {
+    if (!book || book.id == null) return null;
+    try { _bcMigrate(); } catch (e) {}
+    const cases = Array.isArray(app.bookcases) ? app.bookcases : [];
+    for (let bi = 0; bi < cases.length; bi++) {
+        const bc = cases[bi];
+        const sides = (bc && Array.isArray(bc.sides)) ? bc.sides : [];
+        for (let si = 0; si < sides.length; si++) {
+            const cells = (sides[si] && Array.isArray(sides[si].cells)) ? sides[si].cells : [];
+            if (!cells.length) continue;
+            // column-major: same sort as _fillBookcaseInOrder (x asc, then y asc)
+            const ordered = cells.slice().sort(function (a, b) {
+                const dx = Math.round((a.x || 0) * 1000) - Math.round((b.x || 0) * 1000);
+                return dx !== 0 ? dx : ((a.y || 0) - (b.y || 0));
+            });
+            for (let ci = 0; ci < ordered.length; ci++) {
+                const cell = ordered[ci];
+                let books = null, photo = null;
+                if (cell.bookIds && cell.bookIds.length) {
+                    books = cell.bookIds.map(function (id) { return (app.books || []).find(function (b) { return b.id === id; }); }).filter(Boolean);
+                } else if (cell.shelfPhotoId != null) {
+                    photo = (app.shelfPhotos || []).find(function (p) { return p.id === cell.shelfPhotoId; });
+                    if (photo) books = _shelfBooksInOrder(photo);
+                } else if (cell.framePhotoId != null) {
+                    photo = (app.shelfPhotos || []).find(function (p) { return p.id === cell.framePhotoId; });
+                    if (photo) books = _shelfBooksInOrder(photo); // populated once "Read all (AI)" has run
+                }
+                if (!books || !books.length) continue;
+                const pos = books.findIndex(function (b) { return b && b.id === book.id; });
+                if (pos < 0) continue;
+                return {
+                    bookcaseId: bc.id,
+                    bookcaseName: bc.name || 'Bookcase',
+                    multiCase: cases.length > 1,
+                    sideIndex: si,
+                    sideCount: sides.length,
+                    shelfNum: ci + 1,
+                    totalShelves: ordered.length,
+                    bookNum: pos + 1,
+                    totalInShelf: books.length,
+                    photoId: photo ? photo.id : null
+                };
+            }
+        }
+    }
+    return null;
+}
+// The "WHERE IT IS" card shown in the book modal. Prefers the virtual bookcase,
+// falls back to a legacy scanned-shelf label, then to a "not placed yet" hint.
+function _shelfLocationCardHtml(book) {
+    const wrap = function (bg, border, onclick, inner) {
+        return '<div style="margin-top:10px;background:' + bg + ';border-left:3px solid ' + border + ';border-radius:0 10px 10px 0;padding:10px 14px;display:flex;align-items:center;gap:10px;' + (onclick ? 'cursor:pointer;' : '') + '"' + (onclick ? ' onclick="' + onclick + '"' : '') + '>' + inner + '</div>';
+    };
+    const label = '<div style="font-size:12px;color:#8B7E74;font-weight:700;">WHERE IT IS</div>';
+    let loc = null;
+    try { loc = getBookShelfLocation(book); } catch (e) {}
+    if (loc) {
+        const place = 'Shelf ' + loc.shelfNum + ' · Book ' + loc.bookNum;
+        let sub = '';
+        if (loc.multiCase) sub += escapeHtml(loc.bookcaseName);
+        if (loc.sideCount > 1) sub += (sub ? ' · ' : '') + 'side ' + (loc.sideIndex + 1);
+        sub += (sub ? ' · ' : '') + (loc.photoId ? 'Tap to view shelf photo' : 'Tap to open your bookcase');
+        const onclick = loc.photoId
+            ? ("closeModal('bookModal');showShelfLocation(" + loc.photoId + ")")
+            : ("_goToBookcase('" + loc.bookcaseId + "'," + loc.sideIndex + ")");
+        const inner = '<span style="font-size:22px;">📍</span><div>' + label
+            + '<div style="color:#3D5A80;font-weight:700;">' + place + '</div>'
+            + '<div style="font-size:11px;color:#D4A76A;">' + sub + '</div></div>';
+        return wrap('rgba(212,167,106,0.12)', '#D4A76A', onclick, inner);
+    }
+    if (book.shelfLocation) {
+        const n = (typeof book.shelfOrder === 'number') ? (' · Book ' + (book.shelfOrder + 1)) : '';
+        const onclick = book.shelfPhotoId ? ("closeModal('bookModal');showShelfLocation(" + book.shelfPhotoId + ")") : '';
+        const inner = '<span style="font-size:22px;">📍</span><div>' + label
+            + '<div style="color:#3D5A80;font-weight:700;">' + escapeHtml(book.shelfLocation) + n + '</div>'
+            + (onclick ? '<div style="font-size:11px;color:#D4A76A;">Tap to view shelf photo</div>' : '') + '</div>';
+        return wrap('rgba(212,167,106,0.12)', '#D4A76A', onclick, inner);
+    }
+    const inner = '<span style="font-size:22px;opacity:0.55;">📍</span><div>' + label
+        + '<div style="color:#8B7E74;">Not on your virtual bookcase yet</div>'
+        + '<div style="font-size:11px;color:#D4A76A;">Tap to open your bookcase</div></div>';
+    return wrap('rgba(139,126,116,0.08)', '#D9CBB8', "_goToBookcase(null,0)", inner);
+}
+// Jump from the book modal straight to the bookcase view (optionally a specific case/side).
+function _goToBookcase(bcId, sideIndex) {
+    try { closeModal('bookModal'); } catch (e) {}
+    try {
+        if (bcId) { _activeBcId = bcId; localStorage.setItem('bookburrow_active_bc', bcId); }
+        _activeSide = sideIndex || 0;
+        _vshelfView = 'bookcase'; _bcEditing = false;
+        localStorage.setItem('bookburrow_vshelf_view', 'bookcase');
+    } catch (e) {}
+    try { switchLibraryTab('vshelf'); } catch (e) {}
+    try { renderVirtualShelf(); } catch (e) {}
 }
 // ---- Bookcases collection: accessors + active selection ----
 function _newBookcaseId() { return 'bc' + Date.now() + Math.floor(Math.random() * 1000); }
