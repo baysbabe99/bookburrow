@@ -4492,6 +4492,12 @@
                 const c = await this.load(); if (!c) return [];
                 try { const { data } = await c.from('books').select('*').order('date_added', { ascending: false }); return data || []; } catch (e) { return []; }
             },
+            // Wipe the scanned books from the cloud (used by Clear All Data). Best-effort: needs the
+            // books-table RLS to allow delete; if it doesn't, the local cloudScanClearedAt gate still stops re-import.
+            async clearScannedBooks() {
+                const c = await this.load(); if (!c) return false;
+                try { const { error } = await c.from('books').delete().not('isbn', 'is', null); return !error; } catch (e) { return false; }
+            },
             // ---- Two-way cloud friends (profiles + friendships tables) ----
             myCode() { return Cloud._uid ? 'BB-' + Cloud._uid.replace(/-/g, '').slice(0, 8).toUpperCase() : null; },
             async ensureProfile(displayName) { const c = await this.load(); if (!c || !Cloud._uid) return; try { await c.from('profiles').upsert({ id: Cloud._uid, display_name: displayName || 'Reader', friend_code: this.myCode() }); } catch (e) {} },
@@ -4977,6 +4983,7 @@
             this.releaseAlertsEnabled = data.releaseAlertsEnabled !== undefined ? data.releaseAlertsEnabled : true;
             this.releaseAlertLeadDays = Array.isArray(data.releaseAlertLeadDays) && data.releaseAlertLeadDays.length ? data.releaseAlertLeadDays : [0, 1, 7];
             this.notifiedReleaseAlerts = data.notifiedReleaseAlerts || {};
+            this.cloudScanClearedAt = data.cloudScanClearedAt || '';
         } else {
             this.initializeSampleData();
         }
@@ -5068,6 +5075,7 @@
         this.releaseAlertsEnabled = true;
         this.releaseAlertLeadDays = [0, 1, 7];
         this.notifiedReleaseAlerts = {};
+        this.cloudScanClearedAt = '';
         this.saveData();
     }
 
@@ -5105,7 +5113,8 @@
                 friends: this.friends, friendCode: this.friendCode, gifts: this.gifts,
                 releaseAlertsEnabled: this.releaseAlertsEnabled,
                 releaseAlertLeadDays: this.releaseAlertLeadDays,
-                notifiedReleaseAlerts: this.notifiedReleaseAlerts
+                notifiedReleaseAlerts: this.notifiedReleaseAlerts,
+                cloudScanClearedAt: this.cloudScanClearedAt || ''
             }));
         } catch (e) {
             // Most likely the localStorage quota was exceeded (large shelf-photo data URLs).
@@ -9143,9 +9152,12 @@ async function autoImportCloudScans() {
     _autoImportRunning = true;
     try {
         const rows = await Cloud.loadScannedBooks();
+        const clearedAt = (app && app.cloudScanClearedAt) ? new Date(app.cloudScanClearedAt).getTime() : 0;
         let added = 0;
         rows.forEach(r => {
             if (!r.title) return; // skip misreads / no-detail rows — add a title on the scanner to bring them in
+            // After "Clear all data", don't auto-re-import scans that existed at/before the clear.
+            if (clearedAt && (!r.date_added || new Date(r.date_added).getTime() <= clearedAt)) return;
             const incoming = { title: r.title || '', author: r.author || '', isbn: r.isbn || '' };
             const dup = app.books.some(lb => (r.isbn && (lb.isbn || '').replace(/[^0-9Xx]/g, '') === r.isbn) || isImportDuplicate(lb, incoming));
             if (dup) return;
@@ -9188,7 +9200,7 @@ async function importCloudScans() {
         });
         added++;
     });
-    if (added) { app.addXP(added * 5); app.saveData(); if (typeof renderLibraryBooks === 'function') renderLibraryBooks(); if (typeof updateXPDisplay === 'function') updateXPDisplay(); }
+    if (added) { app.cloudScanClearedAt = ''; app.addXP(added * 5); app.saveData(); if (typeof renderLibraryBooks === 'function') renderLibraryBooks(); if (typeof updateXPDisplay === 'function') updateXPDisplay(); }
     showNotification(added ? `📥 Imported ${added} book${added > 1 ? 's' : ''}` : 'Already up to date', 2000);
 }
 
@@ -9276,7 +9288,7 @@ function clearBooksOnly() {
 }
 
 // Clear everything — downloads a backup first, then resets to an empty shelf
-function clearAllData() {
+async function clearAllData() {
     if (!app) return;
     if (!confirm('Clear ALL data — books, XP, achievements, streak and settings?\n\nA full backup downloads first. This cannot be undone.')) return;
     // Safety net: download a full backup before wiping
@@ -9304,9 +9316,17 @@ function clearAllData() {
     app.releaseAlertsEnabled = true;
     app.releaseAlertLeadDays = [0, 1, 7];
     app.notifiedReleaseAlerts = {};
+    app.cloudScanClearedAt = new Date().toISOString();   // stop cloud sync from auto-re-importing the wiped scans
     app.saveData();
-    showNotification('All data cleared. Starting fresh! 🌱', 1800);
-    setTimeout(() => location.reload(), 1000);
+    // Also clear the cloud copies — otherwise sync pulls everything back on reload.
+    try {
+        if (typeof Cloud !== 'undefined' && Cloud.enabled()) {
+            try { await Cloud.clearScannedBooks(); } catch (e) {}                           // wipe the per-row `books` table
+            if (Cloud._uid) { try { await Cloud.saveShelf(Cloud._uid, {}); } catch (e) {} } // empty the synced shelf
+        }
+    } catch (e) {}
+    showNotification('All data cleared — local and cloud. Starting fresh! 🌱', 1800);
+    setTimeout(() => location.reload(), 1200);
 }
 
 // ============================================
