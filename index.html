@@ -16259,37 +16259,69 @@ function _fillBookcaseInOrder() {
 // Read every framed shelf photo in the active bookcase with the AI scanner, adding books to the
 // library and making each photo tappable (hover-tags). Paced + quota-aware (free Gemini tier is limited).
 let _bcScanning = false;
-async function _scanWholeBookcaseAI() {
-    if (_bcScanning) return;
+// Tapping "Read all (AI)" opens a chooser: fill ONLY the empty shelves (fast, cheap, can't
+// downgrade), or re-read every shelf but KEEP whichever read finds the most books.
+function _scanBookcaseChoose() {
+    if (_bcScanning) { showNotification('Already reading shelves…', 1500); return; }
     if (typeof getShelfVisionUrl !== 'function' || !getShelfVisionUrl()) { showNotification('Set up the AI scanner first — Photo Shelf → ⚙️ AI scan setup', 3000); return; }
     const side = _activeSideObj(); if (!side || !Array.isArray(side.cells)) return;
-    const photos = side.cells.filter(function (c) { return c.framePhotoId != null; })
+    const photos = _bcFramedPhotos(side);
+    if (!photos.length) { showNotification('Add some shelf photos to the cubbies first', 2400); return; }
+    const empty = photos.filter(function (p) { return !(p.pieces && p.pieces.length); }).length;
+    _openScanModal(
+        '<div style="padding:20px;text-align:center;">' +
+        '<p style="color:#3D5A80;font-weight:700;margin:0 0 4px;">Read shelves with AI</p>' +
+        '<p style="color:#8B7E74;font-size:13px;margin:0 0 14px;">' + photos.length + ' shelf photos · ' + empty + ' still empty.</p>' +
+        '<div style="display:flex;flex-direction:column;gap:8px;align-items:stretch;max-width:340px;margin:0 auto;">' +
+          '<button class="btn btn-primary" ' + (empty ? '' : 'disabled style="opacity:.5;cursor:default;" ') + 'onclick="closeModal(\'shelfScanModal\');_scanWholeBookcaseAI(\'gaps\')">📥 Fill empty shelves only' + (empty ? ' (' + empty + ')' : ' — none') + '</button>' +
+          '<button class="btn btn-secondary" onclick="closeModal(\'shelfScanModal\');_scanWholeBookcaseAI(\'all\')">🔄 Re-read all · keep best (' + photos.length + ')</button>' +
+        '</div>' +
+        '<p style="color:#8B7E74;font-size:11px;margin:14px 0 0;">“Keep best” only replaces a shelf when a fresh read finds <b>more</b> books than before — so it never downgrades a shelf that already read well.</p>' +
+        '</div>', 'Read all (AI)');
+}
+function _bcFramedPhotos(side) {
+    return (side.cells || []).filter(function (c) { return c.framePhotoId != null; })
         .map(function (c) { return (app.shelfPhotos || []).find(function (p) { return p.id === c.framePhotoId; }); })
         .filter(function (p) { return p && p.data; });
-    if (!photos.length) { showNotification('Add some shelf photos to the cubbies first', 2400); return; }
-    if (!confirm('Read all ' + photos.length + ' shelf photos with AI? This reads each shelf and adds the books to your library — it may take a minute or two.')) return;
+}
+// Read framed shelf photos with the AI scanner. mode 'gaps' = only cubbies with no books yet;
+// mode 'all' = every cubby but keep-max (only overwrite when a new read finds MORE books).
+// Paced + quota-aware; never downgrades an already-good shelf.
+async function _scanWholeBookcaseAI(mode) {
+    if (_bcScanning) return;
+    mode = (mode === 'all') ? 'all' : 'gaps';
+    if (typeof getShelfVisionUrl !== 'function' || !getShelfVisionUrl()) { showNotification('Set up the AI scanner first — Photo Shelf → ⚙️ AI scan setup', 3000); return; }
+    const side = _activeSideObj(); if (!side || !Array.isArray(side.cells)) return;
+    let photos = _bcFramedPhotos(side);
+    if (mode === 'gaps') photos = photos.filter(function (p) { return !(p.pieces && p.pieces.length); });
+    if (!photos.length) { showNotification(mode === 'gaps' ? 'No empty shelves — every shelf is already read ✓' : 'Add some shelf photos to the cubbies first', 2600); return; }
     _bcScanning = true;
-    let scanned = 0, totalAdded = 0, quotaHit = false;
+    let scanned = 0, updated = 0, totalAdded = 0, quotaHit = false;
     for (let i = 0; i < photos.length; i++) {
         showNotification('🔍 Reading shelf ' + (i + 1) + ' of ' + photos.length + '…', 1400);
         try {
             const data = await callShelfVision([photos[i].data], 'shelf');
             const pieces = parseVisionBooks(data);
-            totalAdded += _saveShelfFromPieces(photos[i].data, photos[i].label || ('Shelf ' + (i + 1)), pieces, photos[i].id);
+            const had = (photos[i].pieces && photos[i].pieces.length) || 0;
+            // keep-max: only overwrite when the new read finds more books than before
+            if (pieces.length > had) {
+                totalAdded += _saveShelfFromPieces(photos[i].data, photos[i].label || ('Shelf ' + (i + 1)), pieces, photos[i].id);
+                updated++;
+                app.saveData();
+            }
             scanned++;
-            app.saveData();
         } catch (e) {
             const msg = String((e && e.message) || e).toLowerCase();
             if (msg.indexOf('quota') >= 0 || msg.indexOf('429') >= 0 || msg.indexOf('exceed') >= 0 || msg.indexOf('rate') >= 0) { quotaHit = true; break; }
         }
-        await new Promise(function (r) { setTimeout(r, 1400); });
+        await new Promise(function (r) { setTimeout(r, 1200); });
     }
     if (totalAdded > 0) { try { app.addXP(totalAdded * 10); } catch (e) {} }
     app.saveData();
     _bcScanning = false;
     try { renderVirtualShelf(); } catch (e) {}
     try { updateXPDisplay(); } catch (e) {}
-    showNotification('📚 Read ' + scanned + '/' + photos.length + ' shelves · ' + totalAdded + ' new book' + (totalAdded === 1 ? '' : 's') + (quotaHit ? ' · hit the daily AI limit, finish the rest tomorrow' : ''), 4200);
+    showNotification('📚 Read ' + scanned + ' shelf' + (scanned === 1 ? '' : 'ves') + ' · ' + updated + ' updated · ' + totalAdded + ' new book' + (totalAdded === 1 ? '' : 's') + (quotaHit ? ' · hit the AI rate limit, try again in a minute' : ''), 4500);
 }
 function _cubbyDragStart(cellId, ev) {
     _dragCellId = cellId;
@@ -16363,7 +16395,7 @@ function _bookcaseBlueprintHtml() {
         '<span style="display:flex;gap:6px;flex-wrap:wrap;">' +
           '<button class="btn btn-primary" style="font-size:11px;padding:4px 8px;" onclick="_saveBookcaseConfirm()">💾 Save</button>' +
           '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_fillBookcaseInOrder()">📥 Fill in order</button>' +
-          (filled > 0 ? '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_scanWholeBookcaseAI()">🔍 Read all (AI)</button>' : '') +
+          (filled > 0 ? '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_scanBookcaseChoose()">🔍 Read all (AI)</button>' : '') +
           '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_toggleBcEdit()">' + (_bcEdit ? '✓ Done' : '🗑️ Remove') + '</button>' +
           '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_startBookcaseBuilder()">✏️ Edit shape</button>' +
           '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_addBookcaseSide()">' + (bc.sides.length === 1 ? '🔄 Make it spin' : '➕ Add side') + '</button>' +
