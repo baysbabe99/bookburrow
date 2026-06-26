@@ -6849,6 +6849,12 @@ function showBookSummary(event, bookId) {
         <div class="summary-author">${book.author || 'Unknown author'}</div>
         <div class="summary-desc">${desc}</div>
         ${chips.length ? `<div class="summary-meta">${chips.map(c => `<span class="summary-chip">${c}</span>`).join('')}</div>` : ''}
+        ${(function(){ var l=null; try{l=getBookShelfLocation(book);}catch(e){}
+            var s='margin-top:8px;font-size:12.5px;font-weight:700;color:#3D5A80;display:flex;align-items:center;gap:6px;';
+            if(l) return '<div class="summary-loc" style="'+s+'"><span>📍</span><span>Shelf '+l.shelfNum+' · Book '+l.bookNum+(l.multiCase?' · '+escapeHtml(l.bookcaseName):'')+(l.sideCount>1?' · side '+(l.sideIndex+1):'')+'</span></div>';
+            if(book.shelfLocation) return '<div class="summary-loc" style="'+s+'"><span>📍</span><span>'+escapeHtml(book.shelfLocation)+(typeof book.shelfOrder==='number'?' · Book '+(book.shelfOrder+1):'')+'</span></div>';
+            return '<div class="summary-loc" style="margin-top:8px;font-size:12.5px;color:#8B7E74;display:flex;align-items:center;gap:6px;"><span style="opacity:.55;">📍</span><span>Not on your virtual bookcase yet</span></div>';
+        })()}
         ${cardProgressHTML(book)}
         <div class="summary-actions">
             <button class="btn btn-primary" style="font-size:11px;padding:5px 12px;border-radius:14px;" onclick="document.querySelector('.book-summary-popup').remove();openBookModal(${book.id})">✏️ Edit</button>
