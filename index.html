@@ -16039,6 +16039,7 @@ function _cubbyDrop(targetId, ev) {
     });
     app.saveData(); renderVirtualShelf();
 }
+function _saveBookcaseConfirm() { try { app.saveData(); } catch (e) {} showNotification('Bookcase saved ✓', 1600); }
 // The "My Bookcase" view: pick a bookcase, spin its sides, render the active side as a wooden case.
 function _bookcaseBlueprintHtml() {
     _bcMigrate();
@@ -16089,6 +16090,7 @@ function _bookcaseBlueprintHtml() {
     const controls = '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0;">' +
         '<span style="font-size:12px;color:#8B7E74;">' + cells.length + ' shelves · ' + filled + ' filled · tap ＋ to fill · drag to rearrange</span>' +
         '<span style="display:flex;gap:6px;flex-wrap:wrap;">' +
+          '<button class="btn btn-primary" style="font-size:11px;padding:4px 8px;" onclick="_saveBookcaseConfirm()">💾 Save</button>' +
           '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_startBookcaseBuilder()">✏️ Edit shape</button>' +
           '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_addBookcaseSide()">' + (bc.sides.length === 1 ? '🔄 Make it spin' : '➕ Add side') + '</button>' +
           (bc.sides.length > 1 ? '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_deleteSide()">🗑️ Side</button>' : '') +
