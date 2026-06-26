@@ -10212,6 +10212,7 @@ function _uploadFramePhotos() {
 // Ingest image files into app.shelfPhotos (downscale + IndexedDB blob), save, resolve new photos (in order).
 function _ingestPhotoFiles(files) {
     const arr = Array.from(files || []).filter(function (f) { return f && f.type && f.type.indexOf('image/') === 0; });
+    arr.sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true, sensitivity: 'base' }); }); // upload in filename order (shelf 1, 2, … 10, not 1, 10, 2)
     return arr.reduce(function (chain, file) {
         return chain.then(function (acc) {
             return _readImageFile(file)
@@ -10235,7 +10236,7 @@ function _cellIsEmpty(cell) {
 }
 function _commitCellPhotosMulti() {
     const t = _fillTarget; if (!t) return;
-    const order = (app.shelfPhotos || []).filter(function (p) { return _framePickSel[p.id]; }).map(function (p) { return p.id; });
+    const order = (app.shelfPhotos || []).filter(function (p) { return _framePickSel[p.id]; }).sort(function (a, b) { return String(a.label || '').localeCompare(String(b.label || ''), undefined, { numeric: true, sensitivity: 'base' }); }).map(function (p) { return p.id; }); // fill cubbies in filename order
     if (!order.length) { showNotification('Pick at least one photo', 1500); return; }
     const bc = (app.bookcases || []).find(function (b) { return b.id === t.bcId; });
     const side = bc && bc.sides && bc.sides[t.side];
