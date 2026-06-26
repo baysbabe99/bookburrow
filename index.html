@@ -4621,7 +4621,10 @@
             merged.gifts = _mergeArrayById(local.gifts, remote.gifts, 'id').out;
             const sp = _mergeArrayById(local.shelfPhotos, remote.shelfPhotos, 'id'); merged.shelfPhotos = sp.out; if (sp.added) changed = true;
             merged.bookcases = _mergeBookcases(local.bookcases, remote.bookcases);
-            if (JSON.stringify(merged.bookcases) !== JSON.stringify(local.bookcases)) changed = true;
+            // NOTE: do NOT set `changed` from a bookcases diff — the merged object can serialize
+            // differently from local on every load (key order), which caused an infinite
+            // reload loop (v3.55.2). The merged bookcases are saved to localStorage and used on
+            // the next natural render; book/xp/photo unions below still trigger a one-time reload.
             // Profile: keep local, but union the daily reading log (max pages per day).
             const lp = local.profile || {}, rp = remote.profile || {};
             merged.profile = Object.assign({}, rp, lp);
