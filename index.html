@@ -2048,6 +2048,14 @@
         .shelf-guide-section { margin-bottom: 16px; }
         .shelf-guide-title { font-family: 'Quicksand', sans-serif; font-size: 16px; font-weight: 700; color: #3D5A80; margin-bottom: 8px; }
         .shelf-guide-tip { font-size: 13px; color: #8B7E74; line-height: 1.6; margin-bottom: 6px; padding-left: 16px; border-left: 3px solid #D4A76A; }
+        /* Collapsible "drop-down box" per shelf in the Arrangement Guide */
+        .shelf-guide-acc { border: 1px solid #E8DFD5; border-radius: 10px; background: #FFF8F0; margin-bottom: 10px; overflow: hidden; }
+        .shelf-guide-acc > summary { list-style: none; cursor: pointer; padding: 11px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; font-weight: 700; color: #3D5A80; font-size: 14px; }
+        .shelf-guide-acc > summary::-webkit-details-marker { display: none; }
+        .shelf-guide-acc > summary::after { content: '▸'; color: #8B7E74; font-size: 12px; transition: transform .15s ease; }
+        .shelf-guide-acc[open] > summary::after { transform: rotate(90deg); }
+        .shelf-guide-acc > summary:hover { background: rgba(61,90,128,0.05); }
+        .shelf-guide-acc .acc-body { padding: 2px 14px 12px; }
 
         /* ── VIRTUAL BOOKSHELF ─────────────────────────── */
         .vbookcase { background: linear-gradient(180deg,#5e3d22,#4a2e18); border-radius:14px; padding:14px 10px 6px; border:10px solid #3f2814; border-bottom-width:16px; box-shadow: inset 0 0 40px rgba(0,0,0,0.45), 0 12px 30px rgba(0,0,0,0.25); }
@@ -3524,8 +3532,10 @@
                             <div style="display:flex;gap:8px;flex-wrap:wrap;">
                                 <input type="url" id="shelfVisionUrlInput" placeholder="https://bookburrow-vision.you.workers.dev" style="flex:1;min-width:220px;padding:8px 10px;border:2px solid #E8DFD5;border-radius:10px;background:#fff;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;">
                                 <button class="btn btn-primary" style="font-size:13px;" onclick="saveShelfVisionUrl()">Save</button>
+                                <button class="btn btn-secondary" style="font-size:13px;" onclick="testShelfVisionUrl()">🔌 Test</button>
                             </div>
-                            <p style="color:#8B7E74;font-size:11px;margin:8px 0 0;">Only needed for AI reading. Tap-in-order and individual photos work without it.</p>
+                            <p style="color:#8B7E74;font-size:11px;margin:8px 0 0;">Only needed for AI reading. Tap-in-order and individual photos work without it. <b>AI scanning needs the live https site</b> — it won't work from a local file.</p>
+                            <div id="shelfAiTestResult" style="display:none;font-size:12px;margin-top:10px;line-height:1.5;padding:10px;background:#FFF;border:1px solid #E8DFD5;border-radius:10px;"></div>
                         </div>
                         <div id="shelfPuzzles" style="margin-top:16px;"></div>
                     </div>
@@ -3542,9 +3552,11 @@
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;margin-bottom:12px;">
                         <div class="photo-count" id="photoCount" style="color:#8B7E74;font-size:13px;font-weight:600;">0 photos uploaded</div>
                         <div style="display:flex;gap:8px;">
+                            <button class="btn btn-secondary" style="font-size:12px;padding:5px 12px;" onclick="togglePhotoSelectMode()" id="photoSelectToggle">☑️ Select</button>
                             <button class="btn btn-secondary" style="font-size:12px;padding:5px 12px;" onclick="togglePhotoView()" id="photoViewToggle">🖼️ Grid</button>
                         </div>
                     </div>
+                    <div id="photoSelectBar" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:8px 12px;background:rgba(61,90,128,0.06);border:1px solid #E8DFD5;border-radius:10px;"></div>
                     <div class="photo-gallery" id="photoGallery" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;"></div>
 
                     <!-- Shelf Map -->
@@ -3596,8 +3608,11 @@
 
                     <!-- Photo Lightbox -->
                     <div id="photoLightbox" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:1000;justify-content:center;align-items:center;cursor:pointer;" onclick="closePhotoLightbox()">
-                        <img id="lightboxImg" style="max-width:90%;max-height:90%;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.5);">
-                        <div style="position:absolute;top:20px;right:20px;color:white;font-size:32px;cursor:pointer;font-weight:700;">&times;</div>
+                        <div id="lightboxPrev" onclick="event.stopPropagation(); lightboxNav(-1)" title="Previous (←)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#fff;font-size:44px;line-height:1;font-weight:700;cursor:pointer;user-select:none;padding:10px 18px;opacity:0.8;">&#8249;</div>
+                        <img id="lightboxImg" onclick="event.stopPropagation()" style="max-width:90%;max-height:90%;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.5);">
+                        <div id="lightboxNext" onclick="event.stopPropagation(); lightboxNav(1)" title="Next (→)" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);color:#fff;font-size:44px;line-height:1;font-weight:700;cursor:pointer;user-select:none;padding:10px 18px;opacity:0.8;">&#8250;</div>
+                        <div onclick="event.stopPropagation(); closePhotoLightbox()" style="position:absolute;top:20px;right:20px;color:white;font-size:32px;cursor:pointer;font-weight:700;">&times;</div>
+                        <div id="lightboxCounter" style="position:absolute;top:22px;left:24px;color:#fff;font-size:13px;font-weight:600;opacity:0.85;text-shadow:0 1px 3px rgba(0,0,0,0.6);"></div>
                         <div id="lightboxCaption" style="position:absolute;bottom:30px;color:white;font-size:16px;font-weight:600;text-shadow:0 2px 4px rgba(0,0,0,0.5);"></div>
                     </div>
                 </div>
@@ -4334,6 +4349,69 @@
     <div id="toast" class="toast"></div>
 
     <script>
+        // ===================== Shelf-photo blob store (IndexedDB) =====================
+        // Shelf photos are large base64 data URLs. Holding them in the localStorage blob
+        // blows the ~5 MB quota ("storage full" when saving photos). Fix: keep photo
+        // *metadata* in localStorage and the heavy .data blob in IndexedDB (hundreds of
+        // MB+). In-memory photo.data stays populated after load, so every render path
+        // (gallery, lightbox, virtual shelf, crops) keeps working unchanged. (PRD §6.34)
+        const PhotoDB = (function () {
+            const DB = 'bookburrow_photos', STORE = 'blobs', VER = 1;
+            let _db = null;
+            const self = { ok: null };   // ok: null = unknown, true = usable, false = unavailable
+            function open() {
+                if (_db) return Promise.resolve(_db);
+                return new Promise(function (res, rej) {
+                    let rq;
+                    try { rq = indexedDB.open(DB, VER); }
+                    catch (e) { self.ok = false; return rej(e); }
+                    rq.onupgradeneeded = function () { const db = rq.result; if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE); };
+                    rq.onsuccess = function () { _db = rq.result; self.ok = true; res(_db); };
+                    rq.onerror = function () { self.ok = false; rej(rq.error); };
+                });
+            }
+            function _store(mode) { return open().then(function (db) { return db.transaction(STORE, mode).objectStore(STORE); }); }
+            self.open = open;
+            self.put = function (id, data) { return _store('readwrite').then(function (s) { return new Promise(function (res, rej) { const r = s.put(data, String(id)); r.onsuccess = function () { res(); }; r.onerror = function () { rej(r.error); }; }); }); };
+            self.get = function (id) { return _store('readonly').then(function (s) { return new Promise(function (res, rej) { const r = s.get(String(id)); r.onsuccess = function () { res(r.result || null); }; r.onerror = function () { rej(r.error); }; }); }); };
+            self.del = function (id) { return _store('readwrite').then(function (s) { return new Promise(function (res, rej) { const r = s.delete(String(id)); r.onsuccess = function () { res(); }; r.onerror = function () { rej(r.error); }; }); }); };
+            return self;
+        })();
+        // Open early so PhotoDB.ok is resolved before the first heavy save.
+        try { PhotoDB.open().catch(function () {}); } catch (e) {}
+
+        // Strip the heavy .data blob from photos before they enter the localStorage / cloud
+        // payload (the blob lives in IndexedDB). If IDB isn't confirmed usable, keep .data
+        // inline so a photo is never lost — it just costs quota as it did before.
+        function _serializePhotos(photos) {
+            if (!Array.isArray(photos)) return [];
+            if (PhotoDB.ok !== true) return photos;
+            return photos.map(function (p) {
+                if (!p || !p.data) return p;
+                const c = Object.assign({}, p); delete c.data; return c;
+            });
+        }
+        // Persist / drop a single photo's blob (best-effort; never throws).
+        function _storePhotoBlob(photo) { return (photo && photo.data) ? PhotoDB.put(photo.id, photo.data).catch(function () {}) : Promise.resolve(); }
+        function _removePhotoBlob(id) { try { PhotoDB.del(id); } catch (e) {} }
+        // Cloud merges can carry inline photo blobs from an older device. Before writing a
+        // merged blob to localStorage, move those into IndexedDB and strip them — so the
+        // write stays within quota (this is what previously blocked login for big libraries).
+        async function _slimMergedForLocal(data) {
+            try {
+                if (!data || !Array.isArray(data.shelfPhotos)) return data;
+                await PhotoDB.open();
+                for (const p of data.shelfPhotos) { if (p && p.data) { try { await PhotoDB.put(p.id, p.data); } catch (e) {} } }
+                const copy = Object.assign({}, data);
+                copy.shelfPhotos = _serializePhotos(data.shelfPhotos);
+                return copy;
+            } catch (e) { return data; }
+        }
+        // Placeholder for a photo whose blob isn't on THIS device (blobs stay local; only
+        // metadata syncs across devices) — avoids a broken-image icon.
+        const _PHOTO_PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="220" height="160"><rect width="100%" height="100%" fill="#EFE6DA"/><text x="50%" y="48%" font-family="sans-serif" font-size="13" fill="#8B7E74" text-anchor="middle">on another device</text><text x="50%" y="64%" font-family="sans-serif" font-size="11" fill="#B3A799" text-anchor="middle">re-upload here to view</text></svg>');
+        function _photoSrc(photo) { return (photo && photo.data) ? photo.data : _PHOTO_PLACEHOLDER; }
+
         // ===================== Cloud sync (Supabase) — OPTIONAL =====================
         // To enable cross-device login, paste your Supabase Project URL + anon public
         // key below. Leave BOTH blank to keep the app fully local (no server, offline).
@@ -4535,7 +4613,7 @@
             Cloud._uid = uid;
             const remote = await Cloud.loadShelf(uid);
             const localRaw = JSON.parse(localStorage.getItem(profileDataKey(pid)) || 'null');
-            const merged = _mergeShelf(localRaw, remote).data;
+            const merged = await _slimMergedForLocal(_mergeShelf(localRaw, remote).data);
             localStorage.setItem(profileDataKey(pid), JSON.stringify(merged));
             try { await Cloud.saveShelf(uid, merged); } catch (e) {}
             try { sessionStorage.setItem('bb_reader_session', pid); sessionStorage.setItem('bb_cloud_uid', uid); } catch (e) {}
@@ -4555,8 +4633,9 @@
                             if (remote) {
                                 const localRaw = JSON.parse(localStorage.getItem(profileDataKey()) || 'null');
                                 const res = _mergeShelf(localRaw, remote);
-                                localStorage.setItem(profileDataKey(), JSON.stringify(res.data));
-                                try { await Cloud.saveShelf(sess.user.id, res.data); } catch (e) {}
+                                const slimData = await _slimMergedForLocal(res.data);
+                                localStorage.setItem(profileDataKey(), JSON.stringify(slimData));
+                                try { await Cloud.saveShelf(sess.user.id, slimData); } catch (e) {}
                                 if (res.changed) { location.reload(); return; }
                             } else {
                                 cloudPush(); // first push for a brand-new cloud shelf
@@ -4909,6 +4988,34 @@
             if (b.status === 'read' && b.finishXpAwarded === undefined) b.finishXpAwarded = true;
             if (b.rating > 0 && b.ratingXpAwarded === undefined) b.ratingXpAwarded = true;
         });
+        // Move photo blobs to IndexedDB + pull this device's blobs back into memory (async).
+        this._hydratePhotos();
+    }
+
+    // Photos: blob in IndexedDB, metadata in localStorage. On load, migrate any legacy
+    // inline blobs into IDB (and slim localStorage), and pull blobs this device holds back
+    // into memory so photo.data is populated for every render path. Best-effort + async.
+    async _hydratePhotos() {
+        const photos = this.shelfPhotos || [];
+        if (!photos.length) return;
+        try { await PhotoDB.open(); } catch (e) { return; }   // IDB unusable → leave inline data as-is
+        let migrated = false, hydrated = false;
+        for (let i = 0; i < photos.length; i++) {
+            const p = photos[i];
+            if (!p) continue;
+            if (p.data) {
+                try { await PhotoDB.put(p.id, p.data); migrated = true; } catch (e) {}   // legacy / cloud-merged inline → IDB
+            } else {
+                try { const d = await PhotoDB.get(p.id); if (d) { p.data = d; hydrated = true; } } catch (e) {}
+            }
+        }
+        if (migrated) { try { this.saveData(); } catch (e) {} }   // drops now-redundant inline blobs from localStorage
+        if (migrated || hydrated) {
+            try { if (typeof renderPhotoGallery === 'function' && document.getElementById('photoGallery')) renderPhotoGallery(); } catch (e) {}
+            try { if (typeof renderShelfPuzzles === 'function') renderShelfPuzzles(); } catch (e) {}
+            try { if (typeof renderShelfMap === 'function') renderShelfMap(); } catch (e) {}
+            try { if (typeof renderVirtualShelf === 'function' && typeof _vshelfView !== 'undefined' && _vshelfView === 'shelves') renderVirtualShelf(); } catch (e) {}
+        }
     }
 
     // One-time migration: books linked to a shelf photo by array index
@@ -4993,7 +5100,7 @@
             localStorage.setItem(profileDataKey(), JSON.stringify({
                 books: this.books, xp: this.xp, loans: this.loans, borrows: this.borrows,
                 challenges: this.challenges, achievements: this.achievements, yearlyGoal: this.yearlyGoal,
-                connectedApps: this.connectedApps, shelfPhotos: this.shelfPhotos, shelfVisionUrl: this.shelfVisionUrl, bookcases: this.bookcases,
+                connectedApps: this.connectedApps, shelfPhotos: _serializePhotos(this.shelfPhotos), shelfVisionUrl: this.shelfVisionUrl, bookcases: this.bookcases,
                 lastLogin: this.lastLogin, lastReadDate: this.lastReadDate, streak: this.streak, profile: this.profile,
                 friends: this.friends, friendCode: this.friendCode, gifts: this.gifts,
                 releaseAlertsEnabled: this.releaseAlertsEnabled,
@@ -5299,8 +5406,12 @@ function updateXPDisplay() {
     const xpInLevel = app.xp % 100;
     const el = document.getElementById('xpFill');
     if (el) el.style.width = xpInLevel + '%';
+    // The big number is the current level (was a stale hardcoded "5" — never updated).
+    const numEl = document.getElementById('levelNumber');
+    if (numEl) numEl.textContent = level;
+    // Subtitle is just the rank title now, so the level isn't shown twice.
     const levelEl = document.getElementById('levelTitle');
-    if (levelEl) levelEl.textContent = `Level ${level} · ${app.getLevelTitle()}`;
+    if (levelEl) levelEl.textContent = app.getLevelTitle();
     const xpEl = document.getElementById('xpText');
     if (xpEl) xpEl.textContent = `${app.xp} XP`;
 }
@@ -8505,7 +8616,7 @@ function doAppGuideImport(appId) {
     window._appGuidePending = [];
 
     renderApps();
-    renderLibrary();
+    renderLibraryBooks('all');
     showNotification(`${added} imported! +${Math.min(added * 5, 200)} XP`, 1500);
     if (added > 5) triggerConfetti();
 }
@@ -9183,6 +9294,7 @@ function clearAllData() {
     app.achievements = {};
     app.yearlyGoal = 24;
     app.connectedApps = {};
+    try { (app.shelfPhotos || []).forEach(p => p && _removePhotoBlob(p.id)); } catch (e) {}   // wipe photo blobs from IndexedDB too
     app.shelfPhotos = [];
     app.streak = 0;
     app.lastLogin = new Date().toISOString();
@@ -9248,28 +9360,40 @@ function _dynFilePicker(accept, multiple, onInput) {
 function pickShelfPhotos() { _dynFilePicker('image/*', true, function (inp) { handlePhotoFiles(inp.files); }); }
 function pickRestoreFile() { _dynFilePicker('.json', false, function (inp) { restoreFromBackup(inp); }); }
 
+// Default label for a newly added shelf photo: sequential "Shelf N" (matches the scan
+// flow), not the camera filename like "IMG_4521". The user can rename it in the gallery.
+function _nextShelfPhotoLabel() { return 'Shelf ' + ((app.shelfPhotos ? app.shelfPhotos.length : 0) + 1); }
+
 function handlePhotoFiles(files) {
     Array.from(files).forEach(file => {
-        if (!file.type.startsWith('image/')) return;
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const photo = {
-                id: Date.now() + Math.random(),
-                data: e.target.result,
-                label: file.name.replace(/\.[^/.]+$/, ''),
-                dateAdded: new Date().toISOString(),
-                taggedBooks: []
-            };
-            app.shelfPhotos.push(photo);
-            app.saveData();
-            renderPhotoGallery();
-            showNotification('Photo uploaded! 🖼️', 1500);
-        };
-        reader.readAsDataURL(file);
+        if (!file || !file.type || !file.type.startsWith('image/')) return;
+        // Auto-shrink on the way in (huge phone photos → ~web size) and stash the blob in
+        // IndexedDB, so saving many photos no longer fills the localStorage quota.
+        _readImageFile(file)
+            .then(raw => _downscaleDataUrl(raw, 2000))
+            .then(data => {
+                const photo = {
+                    id: Date.now() + Math.random(),
+                    data: data,
+                    label: '',
+                    dateAdded: new Date().toISOString(),
+                    taggedBooks: []
+                };
+                return _storePhotoBlob(photo).then(() => {
+                    photo.label = _nextShelfPhotoLabel();   // numbered by current shelf count, so a batch increments
+                    app.shelfPhotos.push(photo);
+                    app.saveData();
+                    renderPhotoGallery();
+                    showNotification('Photo added 🖼️', 1400);
+                });
+            })
+            .catch(e => { try { showNotification('Could not add photo' + (e && e.message ? ': ' + e.message : ''), 2200); } catch (_) {} });
     });
 }
 
 let photoViewMode = 'grid';
+let _photoSelectMode = false;          // multi-select delete mode
+const _photoSelected = new Set();      // ids of selected photos
 
 function renderPhotoGallery() {
     const gallery = document.getElementById('photoGallery');
@@ -9281,14 +9405,30 @@ function renderPhotoGallery() {
 
     if (app.shelfPhotos.length === 0) {
         gallery.innerHTML = '<div style="text-align:center;padding:40px;color:#8B7E74;grid-column:1/-1;">No shelf photos yet. Upload some! 📸</div>';
+        if (_photoSelectMode) _setPhotoSelectMode(false);
+        renderPhotoSelectBar();
         return;
     }
+
+    const selecting = _photoSelectMode;
+    // Forget any selected ids that no longer exist.
+    Array.from(_photoSelected).forEach(id => { if (!app.shelfPhotos.some(p => p.id === id)) _photoSelected.delete(id); });
+
+    // In select mode: tapping a photo toggles its checkbox instead of opening the lightbox.
+    const badge = (photo) => selecting
+        ? `<div style="position:absolute;top:8px;left:8px;width:24px;height:24px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;z-index:2;background:${_photoSelected.has(photo.id) ? '#3D5A80' : 'rgba(255,255,255,0.65)'};color:#fff;">${_photoSelected.has(photo.id) ? '✓' : ''}</div>`
+        : '';
+    const ring = (photo) => (selecting && _photoSelected.has(photo.id)) ? 'outline:3px solid #3D5A80;outline-offset:-3px;' : '';
+    const imgClick = (photo, idx) => selecting ? `togglePhotoSelected(${photo.id})` : `openPhotoLightbox(${idx})`;
 
     if (photoViewMode === 'list') {
         gallery.style.gridTemplateColumns = '1fr';
         gallery.innerHTML = app.shelfPhotos.map((photo, idx) => `
-            <div style="background:#FEF3E2;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.06);display:flex;gap:16px;padding:12px;">
-                <img src="${photo.data}" alt="${escapeHtml(photo.label)}" style="width:120px;height:90px;object-fit:cover;border-radius:8px;cursor:pointer;flex-shrink:0;" onclick="openPhotoLightbox(${idx})">
+            <div style="background:#FEF3E2;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.06);display:flex;gap:16px;padding:12px;position:relative;${ring(photo)}">
+                <div style="position:relative;flex-shrink:0;">
+                    ${badge(photo)}
+                    <img src="${_photoSrc(photo)}" alt="${escapeHtml(photo.label)}" style="width:120px;height:90px;object-fit:cover;border-radius:8px;cursor:pointer;display:block;" onclick="${imgClick(photo, idx)}">
+                </div>
                 <div style="flex:1;min-width:0;">
                     <input type="text" value="${escapeHtml(photo.label)}" onchange="updatePhotoLabel(${idx}, this.value)" style="width:100%;padding:5px 8px;border:2px solid #E8DFD5;border-radius:8px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-weight:600;font-size:14px;">
                     <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap;">
@@ -9305,9 +9445,10 @@ function renderPhotoGallery() {
     } else {
         gallery.style.gridTemplateColumns = 'repeat(auto-fill,minmax(220px,1fr))';
         gallery.innerHTML = app.shelfPhotos.map((photo, idx) => `
-            <div style="background:#FEF3E2;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.06);">
-                <div style="position:relative;cursor:pointer;" onclick="openPhotoLightbox(${idx})">
-                    <img src="${photo.data}" alt="${escapeHtml(photo.label)}" style="width:100%;height:180px;object-fit:cover;display:block;">
+            <div style="background:#FEF3E2;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.06);position:relative;${ring(photo)}">
+                <div style="position:relative;cursor:pointer;" onclick="${imgClick(photo, idx)}">
+                    ${badge(photo)}
+                    <img src="${_photoSrc(photo)}" alt="${escapeHtml(photo.label)}" style="width:100%;height:180px;object-fit:cover;display:block;">
                     <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,0.6));padding:8px 12px;">
                         <div style="color:white;font-size:12px;font-weight:600;">${escapeHtml(photo.label)}</div>
                         ${photo.taggedBooks.length > 0 ? `<div style="color:rgba(255,255,255,0.8);font-size:11px;">📚 ${photo.taggedBooks.length} books</div>` : ''}
@@ -9323,8 +9464,61 @@ function renderPhotoGallery() {
             </div>
         `).join('');
     }
+    renderPhotoSelectBar();
     // Also render the shelf map below
     renderShelfMap();
+}
+
+// ---- multi-select delete ----
+function _setPhotoSelectMode(on) {
+    _photoSelectMode = !!on;
+    if (!on) _photoSelected.clear();
+    const btn = document.getElementById('photoSelectToggle');
+    if (btn) {
+        btn.textContent = on ? '✖️ Done' : '☑️ Select';
+        btn.classList.toggle('btn-primary', on);
+        btn.classList.toggle('btn-secondary', !on);
+    }
+}
+function togglePhotoSelectMode() { _setPhotoSelectMode(!_photoSelectMode); renderPhotoGallery(); }
+function togglePhotoSelected(id) {
+    if (_photoSelected.has(id)) _photoSelected.delete(id); else _photoSelected.add(id);
+    renderPhotoGallery();
+}
+function selectAllPhotos() {
+    const all = app.shelfPhotos || [];
+    if (_photoSelected.size === all.length) _photoSelected.clear();
+    else all.forEach(p => _photoSelected.add(p.id));
+    renderPhotoGallery();
+}
+function renderPhotoSelectBar() {
+    const bar = document.getElementById('photoSelectBar');
+    if (!bar) return;
+    if (!_photoSelectMode) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+    const n = _photoSelected.size, total = (app.shelfPhotos || []).length;
+    bar.style.display = 'flex';
+    bar.innerHTML =
+        `<span style="font-size:13px;font-weight:700;color:#3D5A80;">${n} selected</span>` +
+        `<button class="btn btn-secondary" style="font-size:12px;padding:5px 12px;" onclick="selectAllPhotos()">${(n === total && total) ? 'Clear all' : 'Select all'}</button>` +
+        `<button class="btn btn-secondary" style="font-size:12px;padding:5px 12px;margin-left:auto;" onclick="togglePhotoSelectMode()">Cancel</button>` +
+        `<button class="btn" style="font-size:12px;padding:5px 14px;background:#C2705B;color:#fff;border:none;${n === 0 ? 'opacity:0.5;pointer-events:none;' : ''}" onclick="deleteSelectedPhotos()">🗑️ Delete${n ? ' (' + n + ')' : ''}</button>`;
+}
+function deleteSelectedPhotos() {
+    const ids = Array.from(_photoSelected);
+    if (!ids.length) return;
+    if (!confirm(`Delete ${ids.length} photo${ids.length > 1 ? 's' : ''}? Books stay in your library.`)) return;
+    ids.forEach(id => {
+        const i = (app.shelfPhotos || []).findIndex(p => p.id === id);
+        if (i < 0) return;
+        const removed = app.shelfPhotos[i];
+        app.shelfPhotos.splice(i, 1);
+        _purgeShelfPhotoRefs(removed);   // unlinks books/cubbies + drops the IndexedDB blob
+    });
+    _setPhotoSelectMode(false);
+    app.saveData();
+    renderPhotoGallery();
+    try { renderShelfPuzzles(); } catch (e) {}
+    showNotification(`${ids.length} photo${ids.length > 1 ? 's' : ''} deleted`, 1500);
 }
 
 function renderPhotoShelfStats() {
@@ -9349,21 +9543,68 @@ function togglePhotoView() {
     renderPhotoGallery();
 }
 
+let _lightboxIdx = -1;
+let _lightboxSwipeReady = false;
+
 function openPhotoLightbox(idx) {
-    const photo = app.shelfPhotos[idx];
-    if (!photo) return;
+    if (!app.shelfPhotos || !app.shelfPhotos[idx]) return;
+    _lightboxIdx = idx;
+    _setupLightboxSwipe();
+    _renderLightbox();
     const lb = document.getElementById('photoLightbox');
+    if (lb) lb.style.display = 'flex';
+}
+
+function _renderLightbox() {
+    const photo = app.shelfPhotos[_lightboxIdx];
+    if (!photo) return;
     const img = document.getElementById('lightboxImg');
     const caption = document.getElementById('lightboxCaption');
-    if (!lb || !img) return;
-    img.src = photo.data;
+    const counter = document.getElementById('lightboxCounter');
+    const prev = document.getElementById('lightboxPrev');
+    const next = document.getElementById('lightboxNext');
+    const total = app.shelfPhotos.length;
+    if (img) img.src = _photoSrc(photo);
     if (caption) caption.textContent = photo.label + (photo.taggedBooks?.length ? ` · ${photo.taggedBooks.length} books tagged` : '');
-    lb.style.display = 'flex';
+    if (counter) counter.textContent = total > 1 ? `${_lightboxIdx + 1} / ${total}` : '';
+    // Hide the arrows when there's only one photo to flip through.
+    if (prev) prev.style.display = total > 1 ? 'block' : 'none';
+    if (next) next.style.display = total > 1 ? 'block' : 'none';
+}
+
+// Move to the next/previous photo (wraps around). Driven by arrows, ← → keys, and swipe.
+function lightboxNav(delta) {
+    const total = app.shelfPhotos.length;
+    if (total < 1) return;
+    _lightboxIdx = (_lightboxIdx + delta + total) % total;
+    _renderLightbox();
+}
+
+function _setupLightboxSwipe() {
+    if (_lightboxSwipeReady) return;
+    const lb = document.getElementById('photoLightbox');
+    if (!lb) return;
+    _lightboxSwipeReady = true;
+    let sx = 0, sy = 0;
+    lb.addEventListener('touchstart', function (e) { const t = e.changedTouches[0]; sx = t.clientX; sy = t.clientY; }, { passive: true });
+    lb.addEventListener('touchend', function (e) {
+        const t = e.changedTouches[0];
+        const dx = t.clientX - sx, dy = t.clientY - sy;
+        if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.3) lightboxNav(dx < 0 ? 1 : -1);  // swipe left → next
+    }, { passive: true });
+    document.addEventListener('keydown', function (e) {
+        const el = document.getElementById('photoLightbox');
+        if (!el || el.style.display !== 'flex') return;   // only when the lightbox is open
+        if (e.key === 'ArrowLeft') { e.preventDefault(); lightboxNav(-1); }
+        else if (e.key === 'ArrowRight') { e.preventDefault(); lightboxNav(1); }
+        else if (e.key === 'Escape') closePhotoLightbox();
+    });
 }
 
 function closePhotoLightbox() {
     const lb = document.getElementById('photoLightbox');
     if (lb) lb.style.display = 'none';
+    _lightboxIdx = -1;
 }
 
 function showShelfLocation(photoId) {
@@ -9383,6 +9624,7 @@ function updatePhotoLabel(idx, label) {
 // Shared cleanup when a shelf photo/puzzle is removed: unlink books + any bookcase cubby.
 function _purgeShelfPhotoRefs(removed) {
     if (!removed) return;
+    _removePhotoBlob(removed.id);   // drop the IndexedDB blob too (called from every photo-delete path)
     app.books.forEach(b => {
         if (b.shelfPhotoId === removed.id) { b.shelfPhotoId = null; b.shelfLocation = ''; b.shelfOrder = undefined; }
     });
@@ -9438,7 +9680,7 @@ function openPhotoTagModal(idx) {
         modalBody.innerHTML = `
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
                 <div>
-                    <img src="${photo.data}" alt="${escapeHtml(photo.label)}" style="width:100%;border-radius:12px;max-height:300px;object-fit:cover;">
+                    <img src="${_photoSrc(photo)}" alt="${escapeHtml(photo.label)}" style="width:100%;border-radius:12px;max-height:300px;object-fit:cover;">
                     <p style="color:#7D9B76;font-size:12px;margin-top:8px;text-align:center;">Look at the spines and type the titles you see!</p>
                 </div>
                 <div>
@@ -9538,7 +9780,7 @@ function refreshShelfScanStatus() {
     const el = document.getElementById('shelfScanStatus');
     if (el) {
         const on = !!getShelfVisionUrl();
-        el.textContent = on ? 'AI: connected ✅' : 'AI: not set up';
+        el.textContent = on ? 'AI: URL saved ✅' : 'AI: not set up';
         el.style.background = on ? 'rgba(125,155,118,0.15)' : 'rgba(212,167,106,0.18)';
         el.style.color = on ? '#7D9B76' : '#D4A76A';
     }
@@ -9558,7 +9800,44 @@ function saveShelfVisionUrl() {
     app.shelfVisionUrl = v;
     app.saveData();
     refreshShelfScanStatus();
-    showNotification(v ? 'AI scan connected ✅' : 'AI URL cleared', 1500);
+    showNotification(v ? 'AI URL saved ✅ — tap 🔌 Test to check it' : 'AI URL cleared', 1800);
+}
+
+// Probe the Worker URL and report exactly what's wrong (turns an opaque "Failed to fetch"
+// into an actionable answer). A reachable, correctly-keyed worker replies 400 "No images
+// provided." to this empty-image POST — that's our success signal.
+async function testShelfVisionUrl() {
+    const input = document.getElementById('shelfVisionUrlInput');
+    const out = document.getElementById('shelfAiTestResult');
+    const url = ((input && input.value) || getShelfVisionUrl() || '').trim();
+    const show = (html, color) => { if (out) { out.style.display = 'block'; out.style.color = color || '#3D5A80'; out.innerHTML = html; } };
+    if (!url) { show('Enter your Worker URL above, tap <b>Save</b>, then <b>Test</b>.', '#C2705B'); return; }
+    if (!/^https?:\/\//i.test(url)) { show('URL must start with https://', '#C2705B'); return; }
+    // Persist what's typed so the test matches what scanning will actually use.
+    if (input && input.value.trim() && input.value.trim() !== getShelfVisionUrl()) { app.shelfVisionUrl = input.value.trim(); app.saveData(); refreshShelfScanStatus(); }
+    show('Testing the connection… ⏳', '#8B7E74');
+    const fileWarn = (location.protocol === 'file:')
+        ? '<br><br>⚠️ <b>You’re opening Bookburrow as a local file</b> (<code>file://</code>). Browsers block the worker call from a local file — open your <b>live https site</b> (bookburrow.netlify.app or your GitHub Pages URL) and try again.'
+        : '';
+    try {
+        const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ images: [], mode: 'shelf' }) });
+        let data = null; try { data = await res.json(); } catch (_) {}
+        const msg = (data && data.error) ? String(data.error) : ('HTTP ' + res.status);
+        if (res.status === 400 && /no images/i.test(msg)) {
+            show('✅ <b>Connected!</b> The worker is reachable and its API key is set — AI scanning should work now.', '#7D9B76');
+        } else if (/GEMINI_API_KEY/i.test(msg)) {
+            show('⚠️ The worker is <b>reachable</b>, but it’s <b>missing its Google API key</b> (GEMINI_API_KEY). Add the secret and redeploy — see SHELF_VISION_SETUP.md.', '#D4A76A');
+        } else if (res.ok) {
+            show('✅ Worker reachable.', '#7D9B76');
+        } else {
+            show('⚠️ The worker replied with an error: <i>' + escapeHtml(msg) + '</i>' + (res.status ? ' (HTTP ' + res.status + ')' : '') + '.', '#D4A76A');
+        }
+    } catch (e) {
+        show('❌ <b>Couldn’t reach the worker</b> (' + escapeHtml(String((e && e.message) || e)) + ').'
+            + '<br><br>• Double-check the URL is exactly right (starts with <code>https://</code>, correct <code>…workers.dev</code> address, no spaces).'
+            + '<br>• Open the URL in a new browser tab — a working worker shows <i>“Use POST with { images, mode }.”</i> If the page won’t load at all, the worker isn’t deployed (see SHELF_VISION_SETUP.md).'
+            + fileWarn, '#C2705B');
+    }
 }
 
 // library autocomplete options
@@ -9729,10 +10008,16 @@ async function _runAutoSplit() {
         }
     }
     if (!_shelfScan.pieces.length) {
+        const fileHint = (location.protocol === 'file:')
+            ? '<br><b>You\'re on a local file — AI scanning needs the live https site.</b>'
+            : '';
         const msg = reachError
-            ? ('Couldn\'t reach the AI scanner (' + escapeHtml(reachError) + ').<br>Check the Worker URL in ⚙️ AI scan setup.')
+            ? ('Couldn\'t reach the AI scanner (' + escapeHtml(reachError) + ').' + fileHint + '<br>Open ⚙️ AI scan setup and tap 🔌 Test to check the Worker URL.')
             : 'AI didn\'t find any titles. Try sharper, straight-on photos — or tap in order.';
-        _openScanModal('<div style="padding:24px;text-align:center;color:#C2705B;">' + msg + '<br><br><button class="btn btn-primary" onclick="_renderTapMode()">👆 Tap in order</button></div>', bookcase ? 'Scan a bookcase' : 'Auto-split a shelf');
+        const setupBtn = reachError
+            ? '<button class="btn btn-secondary" style="margin-right:8px;" onclick="closeModal(\'shelfScanModal\'); toggleShelfAiSetup();">⚙️ AI setup</button>'
+            : '';
+        _openScanModal('<div style="padding:24px;text-align:center;color:#C2705B;">' + msg + '<br><br>' + setupBtn + '<button class="btn btn-primary" onclick="_renderTapMode()">👆 Tap in order</button></div>', bookcase ? 'Scan a bookcase' : 'Auto-split a shelf');
         return;
     }
     if (bookcase) _assignRowsFromBoxes(_shelfScan.pieces);
@@ -10092,7 +10377,7 @@ function _saveShelfFromPieces(image, label, pieces, existingPhotoId) {
     const isNew = !photo;
     if (!photo) photo = { id: Date.now() + Math.random(), data: image || '', label: label, dateAdded: new Date().toISOString(), taggedBooks: [], pieces: [], isPuzzle: true };
     photo.label = label;
-    if (image) photo.data = image;
+    if (image) { photo.data = image; _storePhotoBlob(photo); }
     photo.isPuzzle = true;
     let added = 0;
     photo.pieces = pieces.map((p, i) => {
@@ -10153,6 +10438,7 @@ function _commitShelfScan() {
     closeModal('shelfScanModal');
     renderPhotoGallery();
     renderShelfPuzzles();
+    try { renderVirtualShelf(); } catch (e) {}   // keep the virtual bookshelf in sync after a (re)scan
     if (filledCell) { _vshelfView = 'bookcase'; switchLibraryTab('vshelf'); }
     showNotification(pieces.length + ' books · ' + added + ' new' + (shelves > 1 ? (' · ' + shelves + ' shelves') : '') + (added > 0 ? ' +' + (added * 10) + ' XP' : ''), 2200);
 }
@@ -10199,14 +10485,59 @@ function openShelfPhotoTags(photoId) {
 }
 function closeShelfPhotoTags() { const o = document.getElementById('shelfPhotoTagsOverlay'); if (o) o.remove(); }
 
+// Scanned shelves you can flip through in the virtual view (those with books, in order).
+function _shelfVirtualNavList() {
+    return (app.shelfPhotos || []).filter(p => p && p.isPuzzle && p.pieces && p.pieces.length && _shelfBooksInOrder(p).length);
+}
+// Swipe / arrow to the next or previous scanned shelf (wraps around).
+function navShelfVirtual(delta) {
+    const list = _shelfVirtualNavList();
+    if (list.length < 2) return;
+    const ov = document.getElementById('shelfVirtualOverlay');
+    const curId = ov ? ov.dataset.photoId : null;
+    let i = list.findIndex(p => String(p.id) === String(curId));
+    if (i < 0) i = 0;
+    openShelfVirtual(list[(i + delta + list.length) % list.length].id);
+}
+let _shelfVirtualKeysReady = false;
+function _setupShelfVirtualKeys() {
+    if (_shelfVirtualKeysReady) return;
+    _shelfVirtualKeysReady = true;
+    document.addEventListener('keydown', function (e) {
+        if (!document.getElementById('shelfVirtualOverlay')) return;   // only while the overlay is open
+        if (e.key === 'ArrowLeft') { e.preventDefault(); navShelfVirtual(-1); }
+        else if (e.key === 'ArrowRight') { e.preventDefault(); navShelfVirtual(1); }
+        else if (e.key === 'Escape') closeShelfVirtual();
+    });
+}
+
 // Per-shelf virtual view: render ONE scanned shelf as cover-art spines on the wooden
 // virtual-shelf design, in photographed order (same design as the Virtual Shelf tab).
+// Swipe left/right (or ← →, or the arrows) to move between your scanned shelves.
+// Re-read an already-saved shelf's photo with AI, straight from the virtual bookshelf.
+// Reuses the normal auto-split → review → commit flow; because _shelfScan.photoId is set,
+// committing UPDATES this shelf in place (re-links books, refreshes order) instead of
+// creating a new one. The review step lets you confirm before anything changes.
+function rescanShelfFromVirtual(photoId) {
+    const photo = (app.shelfPhotos || []).find(p => p.id === photoId);
+    if (!photo) { showNotification('Shelf not found', 1200); return; }
+    if (!photo.data) { showNotification('No photo saved for this shelf to rescan', 2000); return; }
+    if (!getShelfVisionUrl()) { showNotification('AI scan isn’t set up yet — open 🧩 Shelf Puzzle → ⚙️ AI setup', 3000); return; }
+    closeShelfVirtual();
+    _pendingFill = null;
+    _shelfScan = { mode: photo.isBookcase ? 'bookcase' : 'auto', images: [photo.data], pieces: [], photoId: photo.id };
+    _runAutoSplit();
+}
+
 function openShelfVirtual(photoId) {
     const photo = (app.shelfPhotos || []).find(p => p.id === photoId);
     if (!photo) { showNotification('Shelf not found', 1200); return; }
     const books = _shelfBooksInOrder(photo);
     if (!books.length) { showNotification('No books on this shelf yet', 1500); return; }
     const rows = _shelfRows(photo);
+    const navList = _shelfVirtualNavList();
+    const pos = navList.findIndex(p => p.id === photo.id);
+    const multi = navList.length > 1;
     closeShelfVirtual();
     const ov = document.createElement('div');
     ov.id = 'shelfVirtualOverlay';
@@ -10214,14 +10545,34 @@ function openShelfVirtual(photoId) {
     ov.dataset.photoId = String(photoId);
     ov.style.cssText = 'position:fixed;inset:0;background:rgba(40,28,18,0.93);z-index:3000;display:flex;flex-direction:column;padding:16px;overflow:auto;';
     ov.addEventListener('click', function (e) { if (e.target === ov) closeShelfVirtual(); });
+    const navBtns = multi
+        ? '<button onclick="navShelfVirtual(-1)" title="Previous shelf (←)" style="background:rgba(255,255,255,0.18);border:none;border-radius:8px;padding:5px 13px;cursor:pointer;font-weight:700;color:#fff;font-size:17px;line-height:1;">&#8249;</button>' +
+          '<span style="font-size:12px;color:#E8DFD5;align-self:center;">' + (pos + 1) + ' / ' + navList.length + '</span>' +
+          '<button onclick="navShelfVirtual(1)" title="Next shelf (→)" style="background:rgba(255,255,255,0.18);border:none;border-radius:8px;padding:5px 13px;cursor:pointer;font-weight:700;color:#fff;font-size:17px;line-height:1;">&#8250;</button>'
+        : '';
+    // Re-read this shelf with AI (only when AI is configured and a photo is saved).
+    const rescanBtn = (getShelfVisionUrl() && photo.data)
+        ? '<button onclick="rescanShelfFromVirtual(' + photo.id + ')" title="Re-read this shelf with AI" style="background:#7D9B76;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-weight:700;color:#fff;">🔄 Rescan</button>'
+        : '';
     ov.innerHTML =
         '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;color:#fff;flex-wrap:wrap;">' +
           '<div><span style="font-family:Quicksand,sans-serif;font-size:18px;font-weight:700;">📚 ' + escapeHtml(photo.label) + '</span> ' +
-          '<span class="vhname" style="font-size:12px;color:#E8DFD5;">' + books.length + ' books · ' + (rows ? (rows.length + ' rows') : 'in shelf order') + ' · hover to see a title</span></div>' +
-          '<button onclick="closeShelfVirtual()" style="background:#fff;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-weight:700;color:#3D5A80;">✕ Close</button>' +
+          '<span class="vhname" style="font-size:12px;color:#E8DFD5;">' + books.length + ' books · ' + (rows ? (rows.length + ' rows') : 'in shelf order') + (multi ? ' · swipe ‹ › for more shelves' : ' · hover to see a title') + '</span></div>' +
+          '<div style="display:flex;gap:8px;align-items:center;">' + navBtns + rescanBtn +
+          '<button onclick="closeShelfVirtual()" style="background:#fff;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-weight:700;color:#3D5A80;">✕ Close</button></div>' +
         '</div>' +
         '<div id="shelfVirtualBody">' + (rows ? _vBookcaseHtmlRows(rows) : _vBookcaseHtml(books)) + '</div>';
     document.body.appendChild(ov);
+    // Swipe between shelves (only when there's more than one).
+    if (multi) {
+        let sx = 0, sy = 0;
+        ov.addEventListener('touchstart', function (e) { const t = e.changedTouches[0]; sx = t.clientX; sy = t.clientY; }, { passive: true });
+        ov.addEventListener('touchend', function (e) {
+            const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+            if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.3) navShelfVirtual(dx < 0 ? 1 : -1);
+        }, { passive: true });
+    }
+    _setupShelfVirtualKeys();
     // Fill any missing cover art, then refresh this overlay's spines.
     try {
         resolveMissingCovers().then(function () {
@@ -12692,7 +13043,7 @@ function addGiftToLibrary(title, author) {
     app.books.push(book);
     app.saveData();
     showNotification('Added "' + title + '" to your TBR 📚', 1500);
-    if (typeof renderBooks === 'function') { try { renderBooks(); } catch (e) {} }
+    if (typeof renderLibraryBooks === 'function') { try { renderLibraryBooks('all'); } catch (e) {} }
 }
 
 // ---- Pull co-op challenges from cloud (partner progress + games friends started) ----
@@ -13459,7 +13810,7 @@ function renderShelfMap() {
         return `
         <div class="shelf-map-card">
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-                <img src="${photo.data}" alt="${escapeHtml(photo.label)}" style="width:60px;height:45px;object-fit:cover;border-radius:8px;cursor:pointer;flex-shrink:0;" onclick="openPhotoLightbox(${realIdx})">
+                <img src="${_photoSrc(photo)}" alt="${escapeHtml(photo.label)}" style="width:60px;height:45px;object-fit:cover;border-radius:8px;cursor:pointer;flex-shrink:0;" onclick="openPhotoLightbox(${realIdx})">
                 <div style="flex:1;min-width:0;">
                     <h4 style="margin:0;font-size:15px;color:#3D5A80;">📍 ${escapeHtml(photo.label)}</h4>
                     <div style="font-size:12px;color:#8B7E74;">${photo.taggedBooks.length} book${photo.taggedBooks.length !== 1 ? 's' : ''}</div>
@@ -14323,7 +14674,7 @@ function tbrStartReading(bookId) {
     if (!book) return;
     book.status = 'reading';
     book.dateStarted = new Date().toISOString();
-    app.save();
+    app.saveData();
     showNotification('📖 "' + book.title + '" moved to Reading!');
     triggerConfetti();
 
@@ -15771,7 +16122,8 @@ function renderVirtualShelf() {
                 sb.forEach(b => { if (b && typeof b.id === 'number') used.add(b.id); });
                 const rws = _shelfRows(photo);
                 const meta = rws ? (sb.length + ' books · ' + rws.length + ' rows') : (sb.length + ' books, in order');
-                html += '<div style="margin:4px 0 6px;font-family:Quicksand,sans-serif;font-size:15px;font-weight:700;color:#3D5A80;">📚 ' + escapeHtml(photo.label) + ' <span style="font-size:11px;color:#8B7E74;font-weight:400;">' + meta + '</span></div>';
+                const vsRescan = (getShelfVisionUrl() && photo.data) ? '<button onclick="rescanShelfFromVirtual(' + photo.id + ')" title="Re-read this shelf with AI" style="background:#7D9B76;border:none;border-radius:7px;padding:3px 10px;cursor:pointer;font-weight:700;color:#fff;font-size:11px;">🔄 Rescan</button>' : '';
+                html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:4px 0 6px;"><span style="font-family:Quicksand,sans-serif;font-size:15px;font-weight:700;color:#3D5A80;">📚 ' + escapeHtml(photo.label) + '</span> <span style="font-size:11px;color:#8B7E74;font-weight:400;">' + meta + '</span>' + vsRescan + '</div>';
                 html += (rws ? _vBookcaseHtmlRows(rws) : _vBookcaseHtml(sb)) + '<div style="height:16px;"></div>';
             });
             const others = all.filter(b => !used.has(b.id));
@@ -15896,39 +16248,37 @@ function renderShelfBuilder() {
     var guideHtml = '<div class="shelf-guide-title">📋 Arrangement Guide</div>';
     guideHtml += '<div class="shelf-guide-tip"><strong>Strategy:</strong> ' + sortDescription + '</div>';
 
-    // Per-shelf breakdown
+    // Per-shelf breakdown — each shelf is its own collapsible drop-down box (tap to expand).
+    guideHtml += '<div style="font-size:12px;color:#8B7E74;margin:10px 0 8px;">Tap a shelf to see its books:</div>';
     shelves.forEach(function(shelfBooks, sIdx) {
         if (shelfBooks.length === 0) return;
         var genres = {};
         shelfBooks.forEach(function(b) { var g = b.genre || 'Other'; genres[g] = (genres[g] || 0) + 1; });
         var genreList = Object.entries(genres).sort(function(a, b) { return b[1] - a[1]; }).map(function(e) { return e[0] + ' (' + e[1] + ')'; }).join(', ');
 
-        guideHtml += '<div class="shelf-guide-section">';
-        guideHtml += '<div style="font-weight:700;color:#3D5A80;font-size:14px;margin-bottom:4px;">Shelf ' + (sIdx + 1) + ' — ' + shelfBooks.length + ' books</div>';
-        guideHtml += '<div style="font-size:12px;color:#8B7E74;margin-bottom:6px;">Genres: ' + genreList + '</div>';
-        guideHtml += '<div style="font-size:12px;color:#8B7E74;">';
+        guideHtml += '<details class="shelf-guide-acc">';
+        guideHtml += '<summary><span>Shelf ' + (sIdx + 1) + ' — ' + shelfBooks.length + ' book' + (shelfBooks.length !== 1 ? 's' : '') + '</span></summary>';
+        guideHtml += '<div class="acc-body">';
+        guideHtml += '<div style="font-size:12px;color:#8B7E74;margin-bottom:6px;">Genres: ' + escapeHtml(genreList) + '</div>';
+        guideHtml += '<div style="font-size:12px;color:#8B7E74;line-height:1.7;">';
         shelfBooks.forEach(function(book, bIdx) {
-            guideHtml += (bIdx + 1) + '. <strong>' + (book.title || 'Untitled') + '</strong> — ' + (book.author || 'Unknown');
+            guideHtml += (bIdx + 1) + '. <strong>' + escapeHtml(book.title || 'Untitled') + '</strong> — ' + escapeHtml(book.author || 'Unknown');
             if (book.pages) guideHtml += ' (' + book.pages + 'p)';
             guideHtml += '<br>';
         });
-        guideHtml += '</div></div>';
+        guideHtml += '</div></div></details>';
     });
 
-    // Tips section
-    guideHtml += '<div class="shelf-guide-section">';
-    guideHtml += '<div style="font-weight:700;color:#3D5A80;font-size:14px;margin-bottom:8px;">💡 Pro Tips</div>';
-    guideHtml += '<div class="shelf-guide-tip">Place your currently reading books at eye level for easy access.</div>';
-    guideHtml += '<div class="shelf-guide-tip">Break up long rows with a small plant, bookend, or candle for visual breathing room.</div>';
-    guideHtml += '<div class="shelf-guide-tip">Stack a few horizontal books between vertical ones to add dimension.</div>';
-    guideHtml += '<div class="shelf-guide-tip">Keep TBR books slightly pulled forward so they catch your eye.</div>';
-
+    // Tips section — also a drop-down box, open by default so the tips stay visible.
+    var tipsHtml = '<div class="shelf-guide-tip">Place your currently reading books at eye level for easy access.</div>';
+    tipsHtml += '<div class="shelf-guide-tip">Break up long rows with a small plant, bookend, or candle for visual breathing room.</div>';
+    tipsHtml += '<div class="shelf-guide-tip">Stack a few horizontal books between vertical ones to add dimension.</div>';
+    tipsHtml += '<div class="shelf-guide-tip">Keep TBR books slightly pulled forward so they catch your eye.</div>';
     var readingBooks = books.filter(function(b) { return b.status === 'reading'; }).length;
     var wantBooks = books.filter(function(b) { return b.status === 'want'; }).length;
-    if (readingBooks > 0) guideHtml += '<div class="shelf-guide-tip">You have <strong>' + readingBooks + ' book' + (readingBooks > 1 ? 's' : '') + '</strong> in progress (blue dots on spines) — keep these within arm\'s reach!</div>';
-    if (wantBooks > 0) guideHtml += '<div class="shelf-guide-tip">You have <strong>' + wantBooks + ' TBR book' + (wantBooks > 1 ? 's' : '') + '</strong> (gold dots) — a dedicated TBR shelf can be motivating!</div>';
-
-    guideHtml += '</div>';
+    if (readingBooks > 0) tipsHtml += '<div class="shelf-guide-tip">You have <strong>' + readingBooks + ' book' + (readingBooks > 1 ? 's' : '') + '</strong> in progress (blue dots on spines) — keep these within arm\'s reach!</div>';
+    if (wantBooks > 0) tipsHtml += '<div class="shelf-guide-tip">You have <strong>' + wantBooks + ' TBR book' + (wantBooks > 1 ? 's' : '') + '</strong> (gold dots) — a dedicated TBR shelf can be motivating!</div>';
+    guideHtml += '<details class="shelf-guide-acc" open><summary><span>💡 Pro Tips</span></summary><div class="acc-body">' + tipsHtml + '</div></details>';
 
     guide.innerHTML = guideHtml;
     guide.style.display = 'block';
