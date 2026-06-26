@@ -16024,6 +16024,27 @@ let _dragCellId = null;
 // When false, hide the per-cubby ✕ delete buttons for a clean display (toggle on to remove shelves).
 let _bcEdit = false;
 function _toggleBcEdit() { _bcEdit = !_bcEdit; renderVirtualShelf(); }
+// Bulk-fill the bookcase from a batch of photos, in column-major order (down each column, then the
+// next column to the right) so shelf 1 → first cubby, shelf 2 → next, etc. Photos sort by filename.
+function _fillBookcaseInOrder() {
+    const side = _activeSideObj();
+    if (!side || !Array.isArray(side.cells) || !side.cells.length) { showNotification('Build the bookcase shape first', 2200); return; }
+    _dynFilePicker('image/*', true, function (inp) {
+        _ingestPhotoFiles(inp.files).then(function (newPhotos) {
+            if (!newPhotos.length) { showNotification('No photos selected', 1800); return; }
+            // cells ordered down each column then the next column right (sort by x, then y)
+            const cells = side.cells.slice().sort(function (a, b) {
+                const dx = Math.round((a.x || 0) * 1000) - Math.round((b.x || 0) * 1000);
+                return dx !== 0 ? dx : ((a.y || 0) - (b.y || 0));
+            });
+            const n = Math.min(cells.length, newPhotos.length);
+            for (let i = 0; i < n; i++) { cells[i].framePhotoId = newPhotos[i].id; cells[i].bookIds = null; cells[i].shelfPhotoId = null; }
+            _bcEdit = false; app.saveData(); _vshelfView = 'bookcase'; renderVirtualShelf();
+            const extra = newPhotos.length - n;
+            showNotification('📥 Filled ' + n + ' shelves in order' + (extra > 0 ? ' · ' + extra + ' extra saved to Photo Shelf' : ''), 2800);
+        });
+    });
+}
 // Read every framed shelf photo in the active bookcase with the AI scanner, adding books to the
 // library and making each photo tappable (hover-tags). Paced + quota-aware (free Gemini tier is limited).
 let _bcScanning = false;
@@ -16130,6 +16151,7 @@ function _bookcaseBlueprintHtml() {
         '<span style="font-size:12px;color:#8B7E74;">' + cells.length + ' shelves · ' + filled + ' filled · ' + (_bcEdit ? 'tap ✕ to remove · ' : '') + 'tap ＋ to fill · drag to rearrange</span>' +
         '<span style="display:flex;gap:6px;flex-wrap:wrap;">' +
           '<button class="btn btn-primary" style="font-size:11px;padding:4px 8px;" onclick="_saveBookcaseConfirm()">💾 Save</button>' +
+          '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_fillBookcaseInOrder()">📥 Fill in order</button>' +
           (filled > 0 ? '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_scanWholeBookcaseAI()">🔍 Read all (AI)</button>' : '') +
           '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_toggleBcEdit()">' + (_bcEdit ? '✓ Done' : '🗑️ Remove') + '</button>' +
           '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_startBookcaseBuilder()">✏️ Edit shape</button>' +
