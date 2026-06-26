@@ -4546,6 +4546,50 @@
             });
             return { out, added };
         }
+        // Cell-aware bookcase merge: a FILLED cubby (on either side) always beats an empty cubby with
+        // the same cell id, so an empty copy of a bookcase can NEVER wipe a filled one — the root
+        // cause of the 2026-06-26 sync clobber. Bookcases matched by id, sides by index, cells by id;
+        // local wins genuine ties (both filled).
+        function _bbCellFilled(c) { return !!(c && (c.framePhotoId != null || (c.bookIds && c.bookIds.length) || c.shelfPhotoId != null)); }
+        function _mergeSideCells(ls, rs) {
+            if (!ls) return rs || { cells: [] };
+            if (!rs) return ls;
+            const out = Object.assign({}, rs, ls); // local scalar fields (aspectW/H) win
+            const lCells = Array.isArray(ls.cells) ? ls.cells : [];
+            const rCells = Array.isArray(rs.cells) ? rs.cells : [];
+            const rById = {}; rCells.forEach(c => { if (c && c.id != null) rById[c.id] = c; });
+            const seen = {};
+            const cells = lCells.map(lc => {
+                if (!lc || lc.id == null) return lc;
+                seen[lc.id] = 1;
+                const rc = rById[lc.id];
+                if (!rc) return lc;
+                if (_bbCellFilled(lc)) return lc;   // local filled → keep it
+                if (_bbCellFilled(rc)) return rc;   // local empty but remote filled → take remote (no loss)
+                return lc;                          // neither filled → keep local
+            });
+            rCells.forEach(rc => { if (rc && rc.id != null && !seen[rc.id]) cells.push(rc); }); // remote-only cubbies
+            out.cells = cells;
+            return out;
+        }
+        function _mergeOneBookcase(local, remote) {
+            if (!local) return remote;
+            if (!remote) return local;
+            const out = Object.assign({}, remote, local); // local name/scalars win
+            const lSides = Array.isArray(local.sides) ? local.sides : [];
+            const rSides = Array.isArray(remote.sides) ? remote.sides : [];
+            const n = Math.max(lSides.length, rSides.length);
+            const sides = [];
+            for (let i = 0; i < n; i++) sides.push(_mergeSideCells(lSides[i], rSides[i]));
+            out.sides = sides;
+            return out;
+        }
+        function _mergeBookcases(localBcs, remoteBcs) {
+            const map = {}, order = [];
+            (Array.isArray(localBcs) ? localBcs : []).forEach(bc => { if (bc && bc.id != null) { (map[bc.id] = map[bc.id] || {}).local = bc; if (order.indexOf(bc.id) < 0) order.push(bc.id); } });
+            (Array.isArray(remoteBcs) ? remoteBcs : []).forEach(bc => { if (bc && bc.id != null) { (map[bc.id] = map[bc.id] || {}).remote = bc; if (order.indexOf(bc.id) < 0) order.push(bc.id); } });
+            return order.map(id => _mergeOneBookcase(map[id].local, map[id].remote));
+        }
         // Union-merge two shelf blobs so a save from one device can NEVER wipe books/XP that
         // only exist on the other. Local wins for scalar settings; collections are unioned.
         // Returns { data, changed } — `changed` is true when the remote contributed something new.
@@ -4576,7 +4620,8 @@
             merged.friends = _mergeArrayById(local.friends, remote.friends, 'id').out;
             merged.gifts = _mergeArrayById(local.gifts, remote.gifts, 'id').out;
             const sp = _mergeArrayById(local.shelfPhotos, remote.shelfPhotos, 'id'); merged.shelfPhotos = sp.out; if (sp.added) changed = true;
-            merged.bookcases = _mergeArrayById(local.bookcases, remote.bookcases, 'id').out;
+            merged.bookcases = _mergeBookcases(local.bookcases, remote.bookcases);
+            if (JSON.stringify(merged.bookcases) !== JSON.stringify(local.bookcases)) changed = true;
             // Profile: keep local, but union the daily reading log (max pages per day).
             const lp = local.profile || {}, rp = remote.profile || {};
             merged.profile = Object.assign({}, rp, lp);
