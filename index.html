@@ -9383,6 +9383,11 @@ function pickRestoreFile() { _dynFilePicker('.json', false, function (inp) { res
 // Default label for a newly added shelf photo: sequential "Shelf N" (matches the scan
 // flow), not the camera filename like "IMG_4521". The user can rename it in the gallery.
 function _nextShelfPhotoLabel() { return 'Shelf ' + ((app.shelfPhotos ? app.shelfPhotos.length : 0) + 1); }
+// Use the uploaded file's own name (minus extension) as the photo label; fall back to a numbered label.
+function _photoLabelFromFile(file) {
+    const n = (file && file.name ? String(file.name) : '').replace(/\.[a-z0-9]+$/i, '').trim();
+    return n || _nextShelfPhotoLabel();
+}
 
 function handlePhotoFiles(files) {
     Array.from(files).forEach(file => {
@@ -9400,7 +9405,7 @@ function handlePhotoFiles(files) {
                     taggedBooks: []
                 };
                 return _storePhotoBlob(photo).then(() => {
-                    photo.label = _nextShelfPhotoLabel();   // numbered by current shelf count, so a batch increments
+                    photo.label = _photoLabelFromFile(file);   // numbered by current shelf count, so a batch increments
                     app.shelfPhotos.push(photo);
                     app.saveData();
                     renderPhotoGallery();
@@ -10214,7 +10219,7 @@ function _ingestPhotoFiles(files) {
                 .then(function (data) {
                     const photo = { id: Date.now() + Math.random(), data: data, label: '', dateAdded: new Date().toISOString(), taggedBooks: [] };
                     return _storePhotoBlob(photo).then(function () {
-                        photo.label = _nextShelfPhotoLabel();
+                        photo.label = _photoLabelFromFile(file);
                         app.shelfPhotos.push(photo); acc.push(photo); return acc;
                     });
                 })
@@ -16013,6 +16018,27 @@ function _addBookcaseSide() { const bc = _activeBc(); if (!bc) return; if (bc.si
 function _renameBookcase() { const bc = _activeBc(); if (!bc) return; const n = prompt('Bookcase name:', bc.name || 'Bookcase'); if (n == null) return; bc.name = (n.trim() || bc.name); app.saveData(); renderVirtualShelf(); }
 function _spinBookcase(step) { const bc = _activeBc(); if (!bc || bc.sides.length < 2) return; _activeSide = ((_activeSide + (step || 1)) % bc.sides.length + bc.sides.length) % bc.sides.length; _bcJustSpun = true; renderVirtualShelf(); }
 function _deleteSide() { const bc = _activeBc(); if (!bc || bc.sides.length <= 1) return; if (!confirm('Delete this side of the bookcase? The books stay in your library.')) return; bc.sides.splice(_activeSide, 1); _activeSide = 0; app.saveData(); renderVirtualShelf(); }
+// Drag-and-drop: rearrange cubby contents by dragging one onto another (swaps their contents).
+let _dragCellId = null;
+function _cubbyDragStart(cellId, ev) {
+    _dragCellId = cellId;
+    try { if (ev && ev.dataTransfer) { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', String(cellId)); } } catch (e) {}
+}
+function _cubbyDrop(targetId, ev) {
+    if (ev && ev.preventDefault) ev.preventDefault();
+    const src = _dragCellId; _dragCellId = null;
+    if (src == null || src === targetId) return;
+    const side = _activeSideObj(); if (!side || !Array.isArray(side.cells)) return;
+    const a = side.cells.find(function (c) { return c.id === src; });
+    const b = side.cells.find(function (c) { return c.id === targetId; });
+    if (!a || !b) return;
+    ['framePhotoId', 'bookIds', 'shelfPhotoId'].forEach(function (k) {
+        const tmp = (a[k] !== undefined ? a[k] : null);
+        a[k] = (b[k] !== undefined ? b[k] : null);
+        b[k] = tmp;
+    });
+    app.saveData(); renderVirtualShelf();
+}
 // The "My Bookcase" view: pick a bookcase, spin its sides, render the active side as a wooden case.
 function _bookcaseBlueprintHtml() {
     _bcMigrate();
@@ -16049,18 +16075,19 @@ function _bookcaseBlueprintHtml() {
         const fromLib = (!framePhoto && c.bookIds && c.bookIds.length) ? c.bookIds.map(id => (app.books || []).find(b => b.id === id)).filter(Boolean) : null;
         const photo = (!framePhoto && !fromLib && c.shelfPhotoId != null) ? (app.shelfPhotos || []).find(p => p.id === c.shelfPhotoId) : null;
         const cbooks = fromLib || (photo ? _shelfBooksInOrder(photo) : null);
+        const isFilled = !!(framePhoto || (cbooks && cbooks.length));
         const inner = framePhoto
             ? '<div onclick="openShelfPhotoTags(' + framePhoto.id + ')" title="' + escapeHtml(framePhoto.label || 'Photo') + '" style="width:100%;height:100%;background-image:url(' + framePhoto.data + ');background-size:cover;background-position:center;border:2px solid rgba(255,250,240,0.5);box-sizing:border-box;cursor:pointer;"></div>'
             : (cbooks && cbooks.length) ? _cubbySpinesHtml(cbooks)
             : '<button onclick="_fillBookcaseCell(' + c.id + ')" title="Add to this shelf" style="width:100%;height:100%;border:1px dashed rgba(255,240,220,0.45);background:rgba(0,0,0,0.14);color:#FCE9D0;font-size:13px;border-radius:3px;cursor:pointer;padding:0;">＋</button>';
-        cellsHtml += '<div style="position:absolute;left:' + (c.x * 100) + '%;top:' + (c.y * 100) + '%;width:' + (c.w * 100) + '%;height:' + (c.h * 100) + '%;box-sizing:border-box;padding:1px;">' +
+        cellsHtml += '<div ondragover="event.preventDefault()" ondrop="_cubbyDrop(' + c.id + ',event)" style="position:absolute;left:' + (c.x * 100) + '%;top:' + (c.y * 100) + '%;width:' + (c.w * 100) + '%;height:' + (c.h * 100) + '%;box-sizing:border-box;padding:1px;">' +
             '<button onclick="_deleteBookcaseCell(' + c.id + ')" title="Delete this shelf" style="position:absolute;top:2px;right:2px;z-index:3;width:16px;height:16px;line-height:13px;text-align:center;border:none;border-radius:3px;background:rgba(120,40,30,0.78);color:#fff;font-size:11px;cursor:pointer;padding:0;">✕</button>' +
-            '<div style="width:100%;height:100%;background:rgba(38,24,12,0.34);border:1px solid rgba(18,10,5,0.55);border-radius:2px;box-shadow:inset 0 0 8px rgba(0,0,0,0.5);overflow:hidden;">' + inner + '</div></div>';
+            '<div ' + (isFilled ? 'draggable="true" ondragstart="_cubbyDragStart(' + c.id + ',event)" ' : '') + 'style="width:100%;height:100%;background:rgba(38,24,12,0.34);border:1px solid rgba(18,10,5,0.55);border-radius:2px;box-shadow:inset 0 0 8px rgba(0,0,0,0.5);overflow:hidden;' + (isFilled ? 'cursor:grab;' : '') + '">' + inner + '</div></div>';
     });
     const spun = _bcJustSpun; _bcJustSpun = false;
     const caseDiv = '<div id="bcCaseWrap" style="position:relative;width:100%;max-width:680px;max-height:74vh;margin:0 auto;aspect-ratio:' + aspW + '/' + aspH + ';background:linear-gradient(180deg,#5e3d22,#4a2e18);border:7px solid #3f2814;border-radius:10px;box-shadow:inset 0 0 40px rgba(0,0,0,0.45),0 12px 30px rgba(0,0,0,0.25);overflow:hidden;' + (spun ? 'animation:bcSpin 0.5s ease;' : '') + '">' + cellsHtml + '</div>';
     const controls = '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0;">' +
-        '<span style="font-size:12px;color:#8B7E74;">' + cells.length + ' shelves · ' + filled + ' filled · tap ＋ to scan books in</span>' +
+        '<span style="font-size:12px;color:#8B7E74;">' + cells.length + ' shelves · ' + filled + ' filled · tap ＋ to fill · drag to rearrange</span>' +
         '<span style="display:flex;gap:6px;flex-wrap:wrap;">' +
           '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_startBookcaseBuilder()">✏️ Edit shape</button>' +
           '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_addBookcaseSide()">' + (bc.sides.length === 1 ? '🔄 Make it spin' : '➕ Add side') + '</button>' +
