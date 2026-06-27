@@ -3387,7 +3387,6 @@
                         <span style="font-size:22px;">📷</span>
                         <input type="text" id="libraryISBNInput" placeholder="Quick add by ISBN number (digits only)…">
                         <button class="btn btn-secondary" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="inlineScanLookup('libraryISBNInput')">Look up</button>
-                        <button class="btn btn-secondary" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="startInlineCamera('library')">Use Camera</button>
                         <a class="btn btn-primary" href="./scan.html" target="_blank" rel="noopener" title="Scan ISBNs with the phone scanner" style="font-size:12px;padding:6px 14px;white-space:nowrap;text-decoration:none;">📷 Scan ISBN</a>
                     </div>
 
@@ -3448,7 +3447,6 @@
                         <span style="font-size:22px;">📷</span>
                         <input type="text" id="searchISBNInput" placeholder="Quick add by ISBN barcode...">
                         <button class="btn btn-secondary" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="inlineScanLookup('searchISBNInput')">Look up</button>
-                        <button class="btn btn-secondary" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="startInlineCamera('search')">Use Camera</button>
                         <a class="btn btn-primary" href="./scan.html" target="_blank" rel="noopener" title="Scan ISBNs with the phone scanner" style="font-size:12px;padding:6px 14px;white-space:nowrap;text-decoration:none;">📷 Scan ISBN</a>
                     </div>
                     <div class="search-container">
@@ -3517,7 +3515,7 @@
                         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                             <h3 style="color:#3D5A80;margin:0;font-size:17px;">🧩 Shelf Puzzle</h3>
                             <span id="shelfScanStatus" style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;"></span>
-                            <button class="btn btn-secondary" style="margin-left:auto;font-size:12px;padding:5px 10px;" onclick="toggleShelfAiSetup()">⚙️ AI scan setup</button>
+                            <button id="aiScanSetupBtn" class="btn btn-secondary" style="margin-left:auto;font-size:12px;padding:5px 10px;" onclick="toggleShelfAiSetup()">⚙️ AI scan setup</button>
                         </div>
                         <p style="color:#8B7E74;font-size:13px;margin:8px 0 14px;">Photograph one shelf — or a whole bookcase — and rebuild it here in order, then link every book to your library.</p>
                         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -3688,7 +3686,6 @@
                         <span style="font-size:22px;">📷</span>
                         <input type="text" id="loanISBNInput" placeholder="Scan ISBN to add a loan or borrow...">
                         <button class="btn btn-secondary" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="inlineScanLookup('loanISBNInput')">Look up</button>
-                        <button class="btn btn-secondary" style="font-size:12px;padding:6px 14px;white-space:nowrap;" onclick="startInlineCamera('loans')">Use Camera</button>
                         <a class="btn btn-primary" href="./scan.html" target="_blank" rel="noopener" title="Scan ISBNs with the phone scanner" style="font-size:12px;padding:6px 14px;white-space:nowrap;text-decoration:none;">📷 Scan ISBN</a>
                     </div>
                     <!-- Loan Stats -->
@@ -3728,12 +3725,8 @@
                     </div>
 
                     <div id="questTab-overview" class="quest-tab-content active">
-                        <!-- Goals content will be moved here -->
-                        <div id="questsGoalsContainer"></div>
-                        <div style="margin-top:32px;border-top:2px solid #E8DFD5;padding-top:24px;">
                         <!-- Challenges content will be moved here -->
                         <div id="questsChallengesContainer"></div>
-                        </div>
                         <div style="margin-top:32px;border-top:2px solid #E8DFD5;padding-top:24px;">
                         <!-- Achievements content will be moved here -->
                         <div id="questsAchievementsContainer"></div>
@@ -3807,39 +3800,6 @@
                     <h2 class="section-header">Achievements</h2>
                     <p style="color: #7D9B76; margin-bottom: 24px; font-size: 14px;"><span id="achievementCount">0</span> / 45 Unlocked</p>
                     <div class="achievement-grid" id="achievementGrid"></div>
-                </div>
-
-                <div id="goalSection" class="content-section" style="display:none !important;">
-                    <h2 class="section-header">Reading Goals</h2>
-                    <div class="goal-setup">
-                        <h3>Set Your Reading Goal</h3>
-                        <div class="goal-inputs">
-                            <input type="number" id="goalYearInput" placeholder="Books per year" min="1" max="365">
-                            <button class="btn btn-primary" onclick="setYearlyGoal()">Set Goal</button>
-                        </div>
-                    </div>
-                    <div class="goal-progress">
-                        <h4>2026 Reading Progress</h4>
-                        <div class="goal-ring-large">
-                            <svg viewBox="0 0 200 200">
-                                <circle cx="100" cy="100" r="90" fill="none" stroke="rgba(212, 167, 106, 0.3)" stroke-width="12"></circle>
-                                <circle cx="100" cy="100" r="90" fill="none" stroke="url(#goalGradient)" stroke-width="12" stroke-dasharray="424 565" stroke-linecap="round" transform="rotate(-90 100 100)"></circle>
-                                <defs>
-                                    <linearGradient id="goalGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                                        <stop offset="0%" style="stop-color:#7D9B76;stop-opacity:1" />
-                                        <stop offset="100%" style="stop-color:#C2705B;stop-opacity:1" />
-                                    </linearGradient>
-                                </defs>
-                            </svg>
-                            <div class="goal-ring-text-large">
-                                <div class="goal-ring-value">8</div>
-                                <div class="goal-ring-label">of 24 books</div>
-                            </div>
-                        </div>
-                        <div class="goal-progress-text">You're on pace to read 32 books this year!</div>
-                        <div class="goal-pace">🎯 4 books ahead of schedule</div>
-                        <div class="monthly-breakdown" id="monthlyBreakdown"></div>
-                    </div>
                 </div>
 
                 <div id="appsSection" class="content-section" style="display:none !important;">
@@ -4724,6 +4684,8 @@
             let reg = _loadProfileRegistry();
             if (reg) {
                 if (!reg.profiles.find(p => p.id === reg.activeId)) reg.activeId = reg.profiles[0].id;
+                // Backfill owner = the original (first) profile so owner-only features have an anchor.
+                if (!reg.ownerId || !reg.profiles.find(p => p.id === reg.ownerId)) { reg.ownerId = reg.profiles[0].id; _saveProfileRegistry(reg); }
                 return reg;
             }
             let name = 'Reader 1', avatar = '😊';
@@ -4731,7 +4693,7 @@
             if (legacy) {
                 try { const d = JSON.parse(legacy); if (d.profile) { name = d.profile.name || name; if (d.profile.avatar && !String(d.profile.avatar).startsWith('data:')) avatar = d.profile.avatar; } } catch (e) {}
             }
-            reg = { activeId: 'default', profiles: [{ id: 'default', name: name, avatar: avatar }] };
+            reg = { activeId: 'default', ownerId: 'default', profiles: [{ id: 'default', name: name, avatar: avatar }] };
             // Preserve existing data by copying it into the default profile's own slot.
             if (legacy && !localStorage.getItem('bookburrow_data__default')) {
                 localStorage.setItem('bookburrow_data__default', legacy);
@@ -4742,6 +4704,10 @@
         function getActiveProfileId() { return ensureProfileRegistry().activeId; }
         function getActiveProfileMeta() { const r = ensureProfileRegistry(); return r.profiles.find(p => p.id === r.activeId) || r.profiles[0]; }
         function profileDataKey(id) { return 'bookburrow_data__' + (id || getActiveProfileId()); }
+
+        // The "owner" is the original (first) reader profile. Owner-only features
+        // (e.g. the AI scan setup) stay hidden for any other profile on the device.
+        function isOwnerProfile() { try { const r = ensureProfileRegistry(); return !r.ownerId || r.activeId === r.ownerId; } catch (e) { return true; } }
 
         // Keep the registry's display name/avatar in step with the active profile's settings.
         function syncActiveProfileMeta() {
@@ -6639,7 +6605,10 @@ function removeDuplicateBooks() {
         + (b.notes ? 1 : 0) + (b.progressPercentage ? 1 : 0)
         + (b.favorite ? 1 : 0) + (b.isbn ? 1 : 0) + (b.coverId ? 1 : 0);
 
-    let removed = 0;
+    // Collect ALL removals (exact + fuzzy) first, then ask in ONE confirmation.
+    // (Operator preference, PRD §6.25: handle every duplicate "all at once" — never
+    //  prompt the user more than once per Remove-Duplicates click.)
+    const toRemove = new Set();
 
     // ---- Pass 1: exact duplicates (same normalised title + author) ----
     const groups = {};
@@ -6649,50 +6618,45 @@ function removeDuplicateBooks() {
         (groups[k] = groups[k] || []).push(b);
     });
     const dupeGroups = Object.values(groups).filter(g => g.length > 1);
-    const dupeCount = dupeGroups.reduce((n, g) => n + (g.length - 1), 0);
+    dupeGroups.forEach(g => {
+        g.sort((a, b) => score(b) - score(a));        // richest first
+        g.slice(1).forEach(b => toRemove.add(b.id));  // keep g[0], drop the rest
+    });
+    const exactCount = toRemove.size;
 
-    if (dupeCount > 0 && confirm(`Found ${dupeCount} exact duplicate book${dupeCount > 1 ? 's' : ''} across ${dupeGroups.length} title${dupeGroups.length > 1 ? 's' : ''}.\n\nKeep the most complete copy of each and remove the rest?`)) {
-        const keepIds = new Set();
-        dupeGroups.forEach(g => { g.sort((a, b) => score(b) - score(a)); keepIds.add(g[0].id); });
-        const keyHasDupe = new Set(dupeGroups.map(g => dedupeKey(g[0])));
-        app.books = app.books.filter(b => {
-            const k = dedupeKey(b);
-            if (!keyHasDupe.has(k)) return true;
-            return keepIds.has(b.id);
-        });
-        removed += dupeCount;
-    }
+    // ---- Pass 2: similar (fuzzy) matches, ignoring books already slated for removal ----
+    const remaining = app.books.filter(b => !toRemove.has(b.id));
+    const clusters = findSimilarClusters(remaining);
+    clusters.forEach(c => c.sort((a, b) => score(b) - score(a)));
+    const fuzzyCount = clusters.reduce((n, c) => n + (c.length - 1), 0);
 
-    // ---- Pass 2: similar (fuzzy) matches — review all groups in ONE confirmation ----
-    const clusters = findSimilarClusters(app.books);
+    // ---- Nothing to do? ----
+    const total = exactCount + fuzzyCount;
+    if (total === 0) { showNotification('No duplicates found ✨', 1500); return; }
+
+    // ---- Build ONE confirmation covering both passes ----
+    let msg = `Found ${total} duplicate book${total > 1 ? 's' : ''} to remove.\n\n`;
+    if (exactCount) msg += `• ${exactCount} exact duplicate${exactCount > 1 ? 's' : ''} (same title & author)\n`;
     if (clusters.length) {
-        const toRemove = new Set();
         const many = clusters.length > 1;
-        let msg = `Found ${clusters.length} group${many ? 's' : ''} of similar-looking books.\n\nKeep the most complete in each group (✓) and remove the rest (✕)?\n\n`;
+        msg += `• ${clusters.length} group${many ? 's' : ''} of similar-looking books:\n`;
         clusters.forEach((cluster, i) => {
-            cluster.sort((a, b) => score(b) - score(a));
-            if (many) msg += `Group ${i + 1}:\n`;
+            if (many) msg += `   Group ${i + 1}:\n`;
             cluster.forEach((b, j) => {
-                msg += `   ${j === 0 ? '✓ keep' : '✕ remove'}: "${b.title}" — ${b.author || 'Unknown'}\n`;
-                if (j > 0) toRemove.add(b.id);
+                msg += `      ${j === 0 ? '✓ keep' : '✕ remove'}: "${b.title}" — ${b.author || 'Unknown'}\n`;
             });
-            msg += '\n';
         });
-        if (confirm(msg)) {
-            app.books = app.books.filter(b => !toRemove.has(b.id));
-            removed += toRemove.size;
-        }
     }
+    msg += `\nKeep the most complete copy of each and remove the rest?`;
 
-    // ---- Wrap up ----
-    if (removed > 0) {
+    if (confirm(msg)) {
+        clusters.forEach(c => c.slice(1).forEach(b => toRemove.add(b.id)));
+        app.books = app.books.filter(b => !toRemove.has(b.id));
         app.saveData();
         applyLibraryFilters();
         renderLibraryStats();
         renderDashboard();
-        showNotification(`Removed ${removed} duplicate${removed > 1 ? 's' : ''} 🧹`, 2000);
-    } else {
-        showNotification('No duplicates found ✨', 1500);
+        showNotification(`Removed ${total} duplicate${total > 1 ? 's' : ''} 🧹`, 2000);
     }
 }
 
@@ -8081,6 +8045,13 @@ function renderGoals() {
 
     const paceEl = document.querySelector('.goal-pace');
     if (paceEl) paceEl.textContent = ahead ? `🚀 You're ${diff} books ahead of schedule!` : `📖 You're ${diff} books behind. No pressure!`;
+
+    // Year-end projection (was a hardcoded "32 books" placeholder that never updated)
+    const projEl = document.querySelector('.goal-progress-text');
+    if (projEl) {
+        const projected = dayOfYear > 0 ? Math.round(booksRead / dayOfYear * 365) : booksRead;
+        projEl.textContent = `You're on pace to read ${projected} book${projected === 1 ? '' : 's'} this year!`;
+    }
 
     // Goal ring SVG
     const ringEl = document.querySelector('.goal-ring-large');
@@ -9856,6 +9827,11 @@ function getShelfVisionUrl() {
     return (app && app.shelfVisionUrl) || (typeof SHELF_VISION_URL !== 'undefined' ? SHELF_VISION_URL : '') || '';
 }
 function refreshShelfScanStatus() {
+    // Owner-only: the AI scan setup is hidden for any non-owner profile on this device.
+    const owner = (typeof isOwnerProfile !== 'function') || isOwnerProfile();
+    const setupBtn = document.getElementById('aiScanSetupBtn');
+    if (setupBtn) setupBtn.style.display = owner ? '' : 'none';
+    if (!owner) { const setupBox = document.getElementById('shelfAiSetup'); if (setupBox) setupBox.style.display = 'none'; }
     const el = document.getElementById('shelfScanStatus');
     if (el) {
         const on = !!getShelfVisionUrl();
@@ -9867,6 +9843,10 @@ function refreshShelfScanStatus() {
     if (input && !input.value) input.value = getShelfVisionUrl();
 }
 function toggleShelfAiSetup() {
+    if (typeof isOwnerProfile === 'function' && !isOwnerProfile()) {
+        showNotification('Only the main profile can set up AI scanning', 2200);
+        return;
+    }
     const box = document.getElementById('shelfAiSetup');
     if (!box) return;
     box.style.display = box.style.display === 'none' ? 'block' : 'none';
@@ -14444,14 +14424,7 @@ function relocateSections() {
         while (ieSection.firstChild) ieTab.appendChild(ieSection.firstChild);
     }
 
-    // Move goals into Quests (top)
-    const goalSection = document.getElementById('goalSection');
-    const questsGoals = document.getElementById('questsGoalsContainer');
-    if (goalSection && questsGoals) {
-        while (goalSection.firstChild) questsGoals.appendChild(goalSection.firstChild);
-    }
-
-    // Move challenges into Quests (middle)
+    // Move challenges into Quests (top)
     const challengeSection = document.getElementById('challengeSection');
     const questsChallenges = document.getElementById('questsChallengesContainer');
     if (challengeSection && questsChallenges) {
