@@ -4684,8 +4684,9 @@
             let reg = _loadProfileRegistry();
             if (reg) {
                 if (!reg.profiles.find(p => p.id === reg.activeId)) reg.activeId = reg.profiles[0].id;
-                // Backfill owner = the original (first) profile so owner-only features have an anchor.
-                if (!reg.ownerId || !reg.profiles.find(p => p.id === reg.ownerId)) { reg.ownerId = reg.profiles[0].id; _saveProfileRegistry(reg); }
+                // Backfill owner = the ACTIVE profile (the main user setting things up), not just
+                // profiles[0] — the first slot can be a vestigial "Reader 1"/default. Falls back to first.
+                if (!reg.ownerId || !reg.profiles.find(p => p.id === reg.ownerId)) { reg.ownerId = reg.activeId || reg.profiles[0].id; _saveProfileRegistry(reg); }
                 return reg;
             }
             let name = 'Reader 1', avatar = '😊';
@@ -4705,8 +4706,9 @@
         function getActiveProfileMeta() { const r = ensureProfileRegistry(); return r.profiles.find(p => p.id === r.activeId) || r.profiles[0]; }
         function profileDataKey(id) { return 'bookburrow_data__' + (id || getActiveProfileId()); }
 
-        // The "owner" is the original (first) reader profile. Owner-only features
-        // (e.g. the AI scan setup) stay hidden for any other profile on the device.
+        // The "owner" is the main profile — whoever is signed in when ownership is first
+        // recorded (see ensureProfileRegistry's backfill). Owner-only features (e.g. the AI
+        // scan setup) stay hidden for any other profile on the device.
         function isOwnerProfile() { try { const r = ensureProfileRegistry(); return !r.ownerId || r.activeId === r.ownerId; } catch (e) { return true; } }
 
         // Keep the registry's display name/avatar in step with the active profile's settings.
