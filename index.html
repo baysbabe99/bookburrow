@@ -16310,6 +16310,39 @@ function _addBookcaseKind(sides) {
     _bcEditing = true; _vshelfView = 'bookcase'; renderVirtualShelf();
 }
 function _addBookcaseSide() { const bc = _activeBc(); if (!bc) return; if (bc.sides.length >= 4) { showNotification('A spinning bookcase can have up to 4 sides', 1800); return; } _bcBuild = { rows: 8, cols: 5, off: {}, target: { bcId: bc.id, newSide: true } }; _bcEditing = true; renderVirtualShelf(); }
+// Clone a side's SHAPE (cubby grid) with cleared contents — used when adding spin sides.
+function _cloneSideShape(side) {
+    const cells = ((side && side.cells) || []).map(function (c, i) {
+        return { x: c.x, y: c.y, w: c.w, h: c.h, row: c.row, col: c.col, id: i, shelfPhotoId: null };
+    });
+    return { cells: cells, aspectW: (side && side.aspectW) || 5, aspectH: (side && side.aspectH) || 8 };
+}
+// "Make it spin" on an existing bookcase: ask how many sides (2–4), then clone the current
+// side's shelf layout up to that many so every side is ready to fill.
+function _makeItSpinChoose() {
+    const bc = _activeBc(); if (!bc) return;
+    _openScanModal('<div style="padding:22px;text-align:center;">' +
+        '<p style="color:#3D5A80;font-weight:700;margin:0 0 6px;">Make it a spinning bookcase</p>' +
+        '<p style="color:#8B7E74;font-size:13px;margin:0 0 14px;">How many sides to rotate through?</p>' +
+        '<div style="display:flex;gap:8px;justify-content:center;">' +
+          '<button class="btn btn-primary" onclick="_makeItSpin(2)">2 sides</button>' +
+          '<button class="btn btn-primary" onclick="_makeItSpin(3)">3 sides</button>' +
+          '<button class="btn btn-primary" onclick="_makeItSpin(4)">4 sides</button>' +
+        '</div>' +
+        '<p style="color:#8B7E74;font-size:12px;margin:14px 0 0;">New sides copy this one\'s shelf layout (empty) — fill them after a ⟳ Spin.</p>' +
+        '</div>', 'Make it spin');
+}
+function _makeItSpin(n) {
+    const bc = _activeBc(); if (!bc) return;
+    n = Math.max(2, Math.min(4, parseInt(n) || 2));
+    try { closeModal('shelfScanModal'); } catch (e) {}
+    const shape = bc.sides[_activeSide] || bc.sides[0];
+    while (bc.sides.length < n) bc.sides.push(_cloneSideShape(shape));
+    app.saveData();
+    if (_activeSide >= bc.sides.length) _activeSide = 0;
+    showNotification('Now a ' + bc.sides.length + '-side spinning bookcase ⟳', 2000);
+    renderVirtualShelf();
+}
 function _renameBookcase() { const bc = _activeBc(); if (!bc) return; const n = prompt('Bookcase name:', bc.name || 'Bookcase'); if (n == null) return; bc.name = (n.trim() || bc.name); app.saveData(); renderVirtualShelf(); }
 function _spinBookcase(step) { const bc = _activeBc(); if (!bc || bc.sides.length < 2) return; _activeSide = ((_activeSide + (step || 1)) % bc.sides.length + bc.sides.length) % bc.sides.length; _bcJustSpun = true; renderVirtualShelf(); }
 function _deleteSide() { const bc = _activeBc(); if (!bc || bc.sides.length <= 1) return; if (!confirm('Delete this side of the bookcase? The books stay in your library.')) return; bc.sides.splice(_activeSide, 1); _activeSide = 0; app.saveData(); renderVirtualShelf(); }
@@ -16436,6 +16469,7 @@ function _bookcaseBlueprintHtml() {
             '<p style="margin:10px 0 4px;color:#3D5A80;font-weight:700;">Build a virtual bookcase shaped like yours</p>' +
             '<p style="font-size:13px;margin:0 0 14px;">Map your shelves, then fill each one with a quick section scan. Build the exact shape by hand, or let the AI map it from one photo.</p>' +
             '<button class="btn btn-primary" onclick="_startBookcaseBuilder()">✏️ Build by hand</button> ' +
+            '<button class="btn btn-secondary" onclick="_addSpinningChoose()">🔄 Spinning bookcase</button> ' +
             '<button class="btn btn-secondary" onclick="startShelfScan(\'layout\')">🏗️ Scan a bookcase (AI)</button></div>';
     }
     const bc = _activeBc();
@@ -16481,7 +16515,7 @@ function _bookcaseBlueprintHtml() {
           (filled > 0 ? '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_scanBookcaseChoose()">🔍 Read all (AI)</button>' : '') +
           '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_toggleBcEdit()">' + (_bcEdit ? '✓ Done' : '🗑️ Remove') + '</button>' +
           '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_startBookcaseBuilder()">✏️ Edit shape</button>' +
-          '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_addBookcaseSide()">' + (bc.sides.length === 1 ? '🔄 Make it spin' : '➕ Add side') + '</button>' +
+          '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="' + (bc.sides.length === 1 ? '_makeItSpinChoose()' : '_addBookcaseSide()') + '">' + (bc.sides.length === 1 ? '🔄 Make it spin' : '➕ Add side') + '</button>' +
           (bc.sides.length > 1 ? '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_deleteSide()">🗑️ Side</button>' : '') +
           '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_renameBookcase()">✎ Rename</button>' +
           '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_removeBookcase()">🗑️ Bookcase</button>' +
@@ -16556,7 +16590,7 @@ function _bcBuildSave() {
     if (t.isNew) {
         const n = (t.sides && t.sides > 1) ? Math.min(4, t.sides) : 1;
         const sidesArr = [newSide];
-        for (let s = 1; s < n; s++) sidesArr.push({ cells: [], aspectW: b.cols, aspectH: b.rows });
+        for (let s = 1; s < n; s++) sidesArr.push(_cloneSideShape(newSide));
         const nb = { id: _newBookcaseId(), name: (n > 1 ? 'Spinning bookcase ' : 'Bookcase ') + (_bcList().length + 1), sides: sidesArr };
         app.bookcases.push(nb); _activeBcId = nb.id; _activeSide = 0;
     } else {
