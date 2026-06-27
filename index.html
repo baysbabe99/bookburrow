@@ -16426,10 +16426,11 @@ function _bcRotateTo(side, animate) {
     _activeSide = s;
     const tower = document.getElementById('bcTower');
     if (tower) {
+        const yaw = _bcRestYaw(s, n);
         tower.style.transition = (animate === false) ? 'none' : 'transform .6s cubic-bezier(.22,.61,.36,1)';
-        tower.style.transform = 'rotateX(-5deg) rotateY(' + (-s * step) + 'deg)';
+        tower.style.transform = _bcTowerTransform(yaw);
         tower.querySelectorAll('.bcFace').forEach(f => f.classList.toggle('is-front', (+f.getAttribute('data-face')) === s));
-        _bcUpdateFaces(-s * step);
+        _bcUpdateFaces(yaw);
     }
     _bcUpdateSpinIndicator(bc);
 }
@@ -16457,29 +16458,38 @@ function _bcUpdateSpinIndicator(bc) {
 function _setupBcTower() {
     const scene = document.getElementById('bcScene'); const tower = document.getElementById('bcTower');
     if (!scene || !tower) return;
-    const n = +tower.getAttribute('data-n') || 1; const step = 360 / n;
-    const w = scene.clientWidth || scene.offsetWidth || 0;
-    if (w) {
-        // Push each face out by the regular-polygon apothem so the faces meet edge-to-edge.
+    const n = +tower.getAttribute('data-n') || 1;
+    // Measure the case and publish dimensions as CSS vars: --bcDepth is the regular-polygon
+    // apothem (so faces meet edge-to-edge); --bcW/--bcH/--bcCapD size the wooden top & base
+    // boards. Returns false while the view is hidden (clientWidth 0), so the ResizeObserver
+    // below can re-apply once the tab actually has a size — that's what stops a tower rendered
+    // while hidden from staying flat (depth 0).
+    const applyDims = () => {
+        const w = scene.clientWidth || scene.offsetWidth || 0;
+        if (!w) return false;
+        const h = scene.clientHeight || scene.offsetHeight || 0;
         const depth = (n >= 2) ? (w / 2) / Math.tan(Math.PI / n) : 0;
         tower.style.setProperty('--bcDepth', depth + 'px');
+        tower.style.setProperty('--bcW', w + 'px');
+        tower.style.setProperty('--bcH', h + 'px');
+        tower.style.setProperty('--bcCapD', (2 * depth) + 'px');
         scene.style.perspective = Math.round(w * 2.6) + 'px';
-    }
+        return true;
+    };
+    applyDims();
+    const yaw = _bcRestYaw(_activeSide, n);
     tower.style.transition = 'none';
-    tower.style.transform = 'rotateX(-5deg) rotateY(' + (-_activeSide * step) + 'deg)';
-    _bcUpdateFaces(-_activeSide * step);
+    tower.style.transform = _bcTowerTransform(yaw);
+    _bcUpdateFaces(yaw);
     requestAnimationFrame(() => { const t = document.getElementById('bcTower'); if (t) t.style.transition = 'transform .6s cubic-bezier(.22,.61,.36,1)'; });
-    if (!_bcEdit) _bcBindDrag(scene, tower, n, step);
-    if (!_bcResizeBound) {
-        _bcResizeBound = true;
-        window.addEventListener('resize', () => {
-            const sc = document.getElementById('bcScene'), tw = document.getElementById('bcTower');
-            if (!sc || !tw) return;
-            const nn = +tw.getAttribute('data-n') || 1; const ww = sc.clientWidth;
-            tw.style.setProperty('--bcDepth', ((nn >= 2) ? (ww / 2) / Math.tan(Math.PI / nn) : 0) + 'px');
-            sc.style.perspective = Math.round(ww * 2.6) + 'px';
-        });
-    }
+    try {
+        if (window.ResizeObserver) {
+            if (_bcRO) { try { _bcRO.disconnect(); } catch (e) {} }
+            _bcRO = new ResizeObserver(() => applyDims());
+            _bcRO.observe(scene);
+        }
+    } catch (e) {}
+    if (!_bcEdit) _bcBindDrag(scene, tower, n, 360 / n);
 }
 
 // Drag / swipe the tower to spin it. Horizontal drag rotates live; release snaps
@@ -16502,11 +16512,11 @@ function _bcBindDrag(scene, tower, n, step) {
         if (dragging) {
             e.preventDefault();
             cur = base + dx * SENS;
-            tower.style.transform = 'rotateX(-5deg) rotateY(' + cur + 'deg)';
+            tower.style.transform = _bcTowerTransform(cur);
             _bcUpdateFaces(cur);
         }
     }
-    function up() { if (dragging) _bcRotateTo(Math.round(-cur / step), true); end(); }
+    function up() { if (dragging) _bcRotateTo(Math.round((_BC_REST - cur) / step), true); end(); }
     function end() {
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
@@ -16517,7 +16527,7 @@ function _bcBindDrag(scene, tower, n, step) {
         if (_bcEdit) return;
         if (e.target && e.target.closest && e.target.closest('button')) return;   // keep ＋ / ✕ / control taps working
         pid = e.pointerId; startX = e.clientX; startY = e.clientY;
-        base = -_activeSide * step; cur = base; decided = false; dragging = false;
+        base = _bcRestYaw(_activeSide, n); cur = base; decided = false; dragging = false;
         window.addEventListener('pointermove', move);
         window.addEventListener('pointerup', up);
         window.addEventListener('pointercancel', up);
@@ -16569,8 +16579,18 @@ function _bcTowerHtml(bc) {
             '<div class="bcFaceShade" style="position:absolute;inset:0;pointer-events:none;background:#160c04;opacity:0;transition:opacity .55s ease;"></div>' +
             '</div>';
     }
+    // Wooden top cap + base board turn the prism into a freestanding piece of furniture. A square
+    // cap is only geometrically exact for a 4-sided tower, so add the boards just for n === 4.
+    let caps = '';
+    if (n === 4) {
+        const capBase = 'position:absolute;left:50%;top:50%;width:var(--bcW,0px);height:var(--bcCapD,0px);margin-left:calc(var(--bcW,0px) / -2);margin-top:calc(var(--bcCapD,0px) / -2);box-sizing:border-box;border-radius:4px;backface-visibility:hidden;box-shadow:inset 0 0 26px rgba(0,0,0,0.5);';
+        caps =
+            '<div class="bcCap" style="' + capBase + 'transform:translateY(calc(var(--bcH,0px) / -2)) rotateX(90deg);background:linear-gradient(135deg,#7a5532,#5e3d22 70%);border:3px solid #3f2814;"></div>' +
+            '<div class="bcCap" style="' + capBase + 'transform:translateY(calc(var(--bcH,0px) / 2)) rotateX(90deg);background:linear-gradient(135deg,#4a2e18,#341f10);border:3px solid #2a1a0c;"></div>';
+    }
+    const yaw = _bcRestYaw(_activeSide, n);
     return '<div id="bcScene" style="position:relative;width:100%;max-width:520px;max-height:72vh;margin:0 auto;aspect-ratio:' + aspW + '/' + aspH + ';perspective:1600px;perspective-origin:50% 42%;touch-action:pan-y;">' +
-        '<div id="bcTower" data-n="' + n + '" style="position:absolute;inset:0;transform-style:preserve-3d;transform:rotateX(-5deg) rotateY(' + (-_activeSide * step) + 'deg);transition:transform .6s cubic-bezier(.22,.61,.36,1);will-change:transform;">' + faces + '</div>' +
+        '<div id="bcTower" data-n="' + n + '" style="position:absolute;inset:0;transform-style:preserve-3d;transform:' + _bcTowerTransform(yaw) + ';transition:transform .6s cubic-bezier(.22,.61,.36,1);will-change:transform;">' + faces + caps + '</div>' +
         '<div style="position:absolute;left:50%;bottom:-12px;width:62%;height:22px;transform:translateX(-50%);background:radial-gradient(ellipse at center,rgba(0,0,0,0.30),rgba(0,0,0,0) 70%);filter:blur(2px);pointer-events:none;"></div>' +
         '</div>';
 }
@@ -16579,7 +16599,12 @@ function _deleteSide() { const bc = _activeBc(); if (!bc || bc.sides.length <= 1
 let _dragCellId = null;
 // When false, hide the per-cubby ✕ delete buttons for a clean display (toggle on to remove shelves).
 let _bcEdit = false;
-let _bcResizeBound = false;            // one-time guard for the tower resize listener (3D revolving bookcase)
+let _bcResizeBound = false;            // (legacy) one-time guard — superseded by the ResizeObserver below
+let _bcRO = null;                      // ResizeObserver: re-measures the tower when it (re)gains size (e.g. its tab is shown)
+const _BC_REST = -20;                  // resting yaw — the tower always sits turned a little so its 3D corner shows
+const _BC_TILT = -11;                  // downward tilt so the wooden top & base boards read
+function _bcTowerTransform(yaw) { return 'rotateX(' + _BC_TILT + 'deg) rotateY(' + yaw + 'deg)'; }
+function _bcRestYaw(side, n) { return -side * (360 / n) + _BC_REST; }
 function _toggleBcEdit() { _bcEdit = !_bcEdit; renderVirtualShelf(); }
 // Bulk-fill the bookcase from a batch of photos, in column-major order (down each column, then the
 // next column to the right) so shelf 1 → first cubby, shelf 2 → next, etc. Photos sort by filename.
