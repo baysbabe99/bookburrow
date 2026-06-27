@@ -2067,6 +2067,10 @@
         .vspine:hover { transform: translateY(-12px); box-shadow: inset 4px 0 6px rgba(255,255,255,0.2), inset -5px 0 9px rgba(0,0,0,0.4), 0 10px 16px rgba(0,0,0,0.45); z-index:3; }
         .vspine .va { font-weight:600; opacity:0.82; }
         @keyframes bcSpin { from { transform: perspective(1200px) rotateY(85deg); opacity:0.25; } to { transform: perspective(1200px) rotateY(0deg); opacity:1; } }
+        /* 3D revolving bookcase tower (2026-06-27): only the front face takes pointer input,
+           so cubby taps/drags land on the side facing the reader, not faces behind it. */
+        .bcFace { pointer-events: none; }
+        .bcFace.is-front { pointer-events: auto; }
 
         /* ── INTERACTIVE SHELF PHOTO (hover tags) ──────── */
         .shelf-hotspot { position:absolute; border:2px solid transparent; border-radius:3px; cursor:pointer; transition: background .12s, border-color .12s; }
@@ -16406,12 +16410,176 @@ function _makeItSpin(n) {
     renderVirtualShelf();
 }
 function _renameBookcase() { const bc = _activeBc(); if (!bc) return; const n = prompt('Bookcase name:', bc.name || 'Bookcase'); if (n == null) return; bc.name = (n.trim() || bc.name); app.saveData(); renderVirtualShelf(); }
-function _spinBookcase(step) { const bc = _activeBc(); if (!bc || bc.sides.length < 2) return; _activeSide = ((_activeSide + (step || 1)) % bc.sides.length + bc.sides.length) % bc.sides.length; _bcJustSpun = true; renderVirtualShelf(); }
+// ── 3D revolving-tower spin (2026-06-27) ──────────────────────────────────────
+// A multi-side bookcase renders as a real CSS-3D prism (the "tower"). Spinning
+// rotates the whole tower so the chosen side turns to the front; rotation is
+// driven imperatively (no full re-render) so the buttons and drag/swipe share
+// one smooth animation path.
+function _spinBookcase(step) { const bc = _activeBc(); if (!bc || bc.sides.length < 2) return; _bcRotateTo(_activeSide + (step || 1), true); }
+
+// Rotate the tower so side `side` (wrapped into range) faces front.
+function _bcRotateTo(side, animate) {
+    const bc = _activeBc(); if (!bc) return;
+    const n = bc.sides.length; if (n < 1) return;
+    const step = 360 / n;
+    const s = ((Math.round(side) % n) + n) % n;
+    _activeSide = s;
+    const tower = document.getElementById('bcTower');
+    if (tower) {
+        tower.style.transition = (animate === false) ? 'none' : 'transform .6s cubic-bezier(.22,.61,.36,1)';
+        tower.style.transform = 'rotateX(-5deg) rotateY(' + (-s * step) + 'deg)';
+        tower.querySelectorAll('.bcFace').forEach(f => f.classList.toggle('is-front', (+f.getAttribute('data-face')) === s));
+        _bcUpdateFaces(-s * step);
+    }
+    _bcUpdateSpinIndicator(bc);
+}
+
+// Shade each face by how far it has turned away from the viewer (cheap depth cue).
+function _bcUpdateFaces(towerAngle) {
+    const tower = document.getElementById('bcTower'); if (!tower) return;
+    const n = +tower.getAttribute('data-n') || 1; const step = 360 / n;
+    tower.querySelectorAll('.bcFace').forEach(f => {
+        const front = Math.cos((towerAngle + (+f.getAttribute('data-face')) * step) * Math.PI / 180);
+        const shade = f.querySelector('.bcFaceShade');
+        if (shade) shade.style.opacity = Math.max(0, Math.min(0.74, 0.62 * (1 - front))).toFixed(3);
+    });
+}
+
+// Keep the dot strip + "side x/n" label in sync without rebuilding the case.
+function _bcUpdateSpinIndicator(bc) {
+    const dots = document.getElementById('bcSpinDots');
+    if (dots) { let h = ''; for (let i = 0; i < bc.sides.length; i++) h += '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + (i === _activeSide ? '#7D9B76' : '#D9CBB8') + ';"></span>'; dots.innerHTML = h; }
+    const lbl = document.getElementById('bcSideLabel'); if (lbl) lbl.textContent = 'side ' + (_activeSide + 1) + '/' + bc.sides.length;
+}
+
+// Post-render setup: measure the case, compute prism depth, seed the transform,
+// wire drag/swipe. Called via requestAnimationFrame after innerHTML is set.
+function _setupBcTower() {
+    const scene = document.getElementById('bcScene'); const tower = document.getElementById('bcTower');
+    if (!scene || !tower) return;
+    const n = +tower.getAttribute('data-n') || 1; const step = 360 / n;
+    const w = scene.clientWidth || scene.offsetWidth || 0;
+    if (w) {
+        // Push each face out by the regular-polygon apothem so the faces meet edge-to-edge.
+        const depth = (n >= 2) ? (w / 2) / Math.tan(Math.PI / n) : 0;
+        tower.style.setProperty('--bcDepth', depth + 'px');
+        scene.style.perspective = Math.round(w * 2.6) + 'px';
+    }
+    tower.style.transition = 'none';
+    tower.style.transform = 'rotateX(-5deg) rotateY(' + (-_activeSide * step) + 'deg)';
+    _bcUpdateFaces(-_activeSide * step);
+    requestAnimationFrame(() => { const t = document.getElementById('bcTower'); if (t) t.style.transition = 'transform .6s cubic-bezier(.22,.61,.36,1)'; });
+    if (!_bcEdit) _bcBindDrag(scene, tower, n, step);
+    if (!_bcResizeBound) {
+        _bcResizeBound = true;
+        window.addEventListener('resize', () => {
+            const sc = document.getElementById('bcScene'), tw = document.getElementById('bcTower');
+            if (!sc || !tw) return;
+            const nn = +tw.getAttribute('data-n') || 1; const ww = sc.clientWidth;
+            tw.style.setProperty('--bcDepth', ((nn >= 2) ? (ww / 2) / Math.tan(Math.PI / nn) : 0) + 'px');
+            sc.style.perspective = Math.round(ww * 2.6) + 'px';
+        });
+    }
+}
+
+// Drag / swipe the tower to spin it. Horizontal drag rotates live; release snaps
+// to the nearest face. Taps (small movement) fall through so cubbies stay clickable;
+// in Remove/edit mode this is disabled so cubby drag-to-rearrange keeps working.
+function _bcBindDrag(scene, tower, n, step) {
+    if (n < 2) return;
+    let startX = 0, startY = 0, base = 0, cur = 0, decided = false, dragging = false, pid = null;
+    const SENS = 0.5;
+    function move(e) {
+        const dx = e.clientX - startX, dy = e.clientY - startY;
+        if (!decided) {
+            if (Math.abs(dx) < 7 && Math.abs(dy) < 7) return;
+            decided = true;
+            if (Math.abs(dx) <= Math.abs(dy)) { end(); return; }   // vertical intent → let the page scroll
+            dragging = true;
+            tower.style.transition = 'none';
+            try { scene.setPointerCapture(pid); } catch (_) {}
+        }
+        if (dragging) {
+            e.preventDefault();
+            cur = base + dx * SENS;
+            tower.style.transform = 'rotateX(-5deg) rotateY(' + cur + 'deg)';
+            _bcUpdateFaces(cur);
+        }
+    }
+    function up() { if (dragging) _bcRotateTo(Math.round(-cur / step), true); end(); }
+    function end() {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+        decided = false; dragging = false; pid = null;
+    }
+    scene.addEventListener('pointerdown', e => {
+        if (_bcEdit) return;
+        if (e.target && e.target.closest && e.target.closest('button')) return;   // keep ＋ / ✕ / control taps working
+        pid = e.pointerId; startX = e.clientX; startY = e.clientY;
+        base = -_activeSide * step; cur = base; decided = false; dragging = false;
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+        window.addEventListener('pointercancel', up);
+    });
+}
+
+// One face's cubbies (shared by the flat single-side case and every tower face).
+// allowRearrange gates HTML5 drag-to-rearrange (on for single-side / edit mode;
+// off in normal multi-side view, where dragging spins the tower instead).
+function _bcFaceCellsHtml(side, allowRearrange) {
+    const cells = (side && side.cells) ? side.cells : [];
+    let cellsHtml = '';
+    cells.forEach(c => {
+        const framePhoto = (c.framePhotoId != null) ? (app.shelfPhotos || []).find(p => p.id === c.framePhotoId) : null;
+        const fromLib = (!framePhoto && c.bookIds && c.bookIds.length) ? c.bookIds.map(id => (app.books || []).find(b => b.id === id)).filter(Boolean) : null;
+        const photo = (!framePhoto && !fromLib && c.shelfPhotoId != null) ? (app.shelfPhotos || []).find(p => p.id === c.shelfPhotoId) : null;
+        const cbooks = fromLib || (photo ? _shelfBooksInOrder(photo) : null);
+        const isFilled = !!(framePhoto || (cbooks && cbooks.length));
+        const inner = framePhoto
+            ? '<div onclick="openShelfPhotoTags(' + framePhoto.id + ')" title="' + escapeHtml(framePhoto.label || 'Photo') + '" style="width:100%;height:100%;background-image:url(' + framePhoto.data + ');background-size:cover;background-position:center;border:2px solid rgba(255,250,240,0.5);box-sizing:border-box;cursor:pointer;"></div>'
+            : (cbooks && cbooks.length) ? _cubbySpinesHtml(cbooks)
+            : '<button onclick="_fillBookcaseCell(' + c.id + ')" title="Add to this shelf" style="width:100%;height:100%;border:1px dashed rgba(255,240,220,0.45);background:rgba(0,0,0,0.14);color:#FCE9D0;font-size:13px;border-radius:3px;cursor:pointer;padding:0;">＋</button>';
+        const dropAttrs = allowRearrange ? 'ondragover="event.preventDefault()" ondrop="_cubbyDrop(' + c.id + ',event)" ' : '';
+        const dragAttrs = (allowRearrange && isFilled) ? 'draggable="true" ondragstart="_cubbyDragStart(' + c.id + ',event)" ' : '';
+        cellsHtml += '<div ' + dropAttrs + 'style="position:absolute;left:' + (c.x * 100) + '%;top:' + (c.y * 100) + '%;width:' + (c.w * 100) + '%;height:' + (c.h * 100) + '%;box-sizing:border-box;padding:1px;">' +
+            (_bcEdit ? '<button onclick="_deleteBookcaseCell(' + c.id + ')" title="Remove photo — keeps the shelf" style="position:absolute;top:2px;right:2px;z-index:3;width:16px;height:16px;line-height:13px;text-align:center;border:none;border-radius:3px;background:rgba(120,40,30,0.78);color:#fff;font-size:11px;cursor:pointer;padding:0;">✕</button>' : '') +
+            '<div ' + dragAttrs + 'style="width:100%;height:100%;background:rgba(38,24,12,0.34);border:1px solid rgba(18,10,5,0.55);border-radius:2px;box-shadow:inset 0 0 8px rgba(0,0,0,0.5);overflow:hidden;' + (dragAttrs ? 'cursor:grab;' : '') + '">' + inner + '</div></div>';
+    });
+    return cellsHtml;
+}
+
+// The 3D prism. n faces evenly spaced around a vertical axis; --bcDepth (set in
+// _setupBcTower) controls the radius so faces meet at the corners. Only the front
+// face is interactive (CSS .bcFace.is-front → pointer-events:auto).
+function _bcTowerHtml(bc) {
+    const n = bc.sides.length;
+    const step = 360 / n;
+    const front = bc.sides[_activeSide] || bc.sides[0];
+    const aspW = front.aspectW || 5, aspH = front.aspectH || 8;
+    let faces = '';
+    for (let i = 0; i < n; i++) {
+        const s = bc.sides[i] || front;
+        faces += '<div class="bcFace' + (i === _activeSide ? ' is-front' : '') + '" data-face="' + i + '" ' +
+            'style="position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;' +
+            'transform:rotateY(' + (i * step) + 'deg) translateZ(var(--bcDepth,0px));' +
+            'background:linear-gradient(180deg,#5e3d22,#4a2e18);border:7px solid #3f2814;border-radius:8px;' +
+            'box-shadow:inset 0 0 40px rgba(0,0,0,0.5);overflow:hidden;box-sizing:border-box;">' +
+            _bcFaceCellsHtml(s, _bcEdit) +
+            '<div class="bcFaceShade" style="position:absolute;inset:0;pointer-events:none;background:#160c04;opacity:0;transition:opacity .55s ease;"></div>' +
+            '</div>';
+    }
+    return '<div id="bcScene" style="position:relative;width:100%;max-width:520px;max-height:72vh;margin:0 auto;aspect-ratio:' + aspW + '/' + aspH + ';perspective:1600px;perspective-origin:50% 42%;touch-action:pan-y;">' +
+        '<div id="bcTower" data-n="' + n + '" style="position:absolute;inset:0;transform-style:preserve-3d;transform:rotateX(-5deg) rotateY(' + (-_activeSide * step) + 'deg);transition:transform .6s cubic-bezier(.22,.61,.36,1);will-change:transform;">' + faces + '</div>' +
+        '<div style="position:absolute;left:50%;bottom:-12px;width:62%;height:22px;transform:translateX(-50%);background:radial-gradient(ellipse at center,rgba(0,0,0,0.30),rgba(0,0,0,0) 70%);filter:blur(2px);pointer-events:none;"></div>' +
+        '</div>';
+}
 function _deleteSide() { const bc = _activeBc(); if (!bc || bc.sides.length <= 1) return; if (!confirm('Delete this side of the bookcase? The books stay in your library.')) return; bc.sides.splice(_activeSide, 1); _activeSide = 0; app.saveData(); renderVirtualShelf(); }
 // Drag-and-drop: rearrange cubby contents by dragging one onto another (swaps their contents).
 let _dragCellId = null;
 // When false, hide the per-cubby ✕ delete buttons for a clean display (toggle on to remove shelves).
 let _bcEdit = false;
+let _bcResizeBound = false;            // one-time guard for the tower resize listener (3D revolving bookcase)
 function _toggleBcEdit() { _bcEdit = !_bcEdit; renderVirtualShelf(); }
 // Bulk-fill the bookcase from a batch of photos, in column-major order (down each column, then the
 // next column to the right) so shelf 1 → first cubby, shelf 2 → next, etc. Photos sort by filename.
@@ -16541,36 +16709,25 @@ function _bookcaseBlueprintHtml() {
     const filled = cells.filter(c => c.framePhotoId != null || (c.bookIds && c.bookIds.length) || c.shelfPhotoId != null).length;
     let chips = list.map(b => '<button onclick="setActiveBookcase(\'' + b.id + '\')" style="font-size:12px;padding:4px 10px;border-radius:14px;border:1.5px solid ' + (b.id === bc.id ? '#7D9B76' : '#E8DFD5') + ';background:' + (b.id === bc.id ? 'rgba(125,155,118,0.15)' : '#FFF8F0') + ';color:#3D5A80;cursor:pointer;font-weight:700;">📚 ' + escapeHtml(b.name || 'Bookcase') + '</button>').join(' ');
     chips += ' <button onclick="_addBookcase()" style="font-size:12px;padding:4px 10px;border-radius:14px;border:1.5px dashed #D4A76A;background:#FFF8F0;color:#D4A76A;cursor:pointer;font-weight:700;">➕ Add bookcase</button>';
+    const nSides = bc.sides.length;
     let spin = '';
-    if (bc.sides.length > 1) {
+    if (nSides > 1) {
         let dots = '';
-        for (let i = 0; i < bc.sides.length; i++) dots += '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + (i === _activeSide ? '#7D9B76' : '#D9CBB8') + ';"></span>';
-        spin = '<div style="display:flex;align-items:center;justify-content:center;gap:10px;margin:4px 0 10px;">' +
-            '<button class="btn btn-secondary" style="font-size:13px;padding:4px 10px;" onclick="_spinBookcase(-1)">‹</button>' +
-            '<span style="display:flex;gap:5px;align-items:center;">' + dots + '</span>' +
-            '<button class="btn btn-secondary" style="font-size:13px;padding:4px 10px;" onclick="_spinBookcase(1)">⟳ Spin</button>' +
-            '<span style="font-size:11px;color:#8B7E74;">side ' + (_activeSide + 1) + '/' + bc.sides.length + '</span>' +
-            '</div>';
+        for (let i = 0; i < nSides; i++) dots += '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + (i === _activeSide ? '#7D9B76' : '#D9CBB8') + ';"></span>';
+        spin = '<div style="display:flex;align-items:center;justify-content:center;gap:10px;margin:4px 0 4px;">' +
+            '<button class="btn btn-secondary" style="font-size:13px;padding:4px 12px;" onclick="_spinBookcase(-1)">‹</button>' +
+            '<span id="bcSpinDots" style="display:flex;gap:5px;align-items:center;">' + dots + '</span>' +
+            '<button class="btn btn-secondary" style="font-size:13px;padding:4px 12px;" onclick="_spinBookcase(1)">⟳ Spin ›</button>' +
+            '<span id="bcSideLabel" style="font-size:11px;color:#8B7E74;">side ' + (_activeSide + 1) + '/' + nSides + '</span>' +
+            '</div>' +
+            '<div style="text-align:center;font-size:11px;color:#A89A8C;margin:0 0 10px;">drag or swipe the tower to spin it ⟳</div>';
     }
-    let cellsHtml = '';
-    cells.forEach(c => {
-        const framePhoto = (c.framePhotoId != null) ? (app.shelfPhotos || []).find(p => p.id === c.framePhotoId) : null;
-        const fromLib = (!framePhoto && c.bookIds && c.bookIds.length) ? c.bookIds.map(id => (app.books || []).find(b => b.id === id)).filter(Boolean) : null;
-        const photo = (!framePhoto && !fromLib && c.shelfPhotoId != null) ? (app.shelfPhotos || []).find(p => p.id === c.shelfPhotoId) : null;
-        const cbooks = fromLib || (photo ? _shelfBooksInOrder(photo) : null);
-        const isFilled = !!(framePhoto || (cbooks && cbooks.length));
-        const inner = framePhoto
-            ? '<div onclick="openShelfPhotoTags(' + framePhoto.id + ')" title="' + escapeHtml(framePhoto.label || 'Photo') + '" style="width:100%;height:100%;background-image:url(' + framePhoto.data + ');background-size:cover;background-position:center;border:2px solid rgba(255,250,240,0.5);box-sizing:border-box;cursor:pointer;"></div>'
-            : (cbooks && cbooks.length) ? _cubbySpinesHtml(cbooks)
-            : '<button onclick="_fillBookcaseCell(' + c.id + ')" title="Add to this shelf" style="width:100%;height:100%;border:1px dashed rgba(255,240,220,0.45);background:rgba(0,0,0,0.14);color:#FCE9D0;font-size:13px;border-radius:3px;cursor:pointer;padding:0;">＋</button>';
-        cellsHtml += '<div ondragover="event.preventDefault()" ondrop="_cubbyDrop(' + c.id + ',event)" style="position:absolute;left:' + (c.x * 100) + '%;top:' + (c.y * 100) + '%;width:' + (c.w * 100) + '%;height:' + (c.h * 100) + '%;box-sizing:border-box;padding:1px;">' +
-            (_bcEdit ? '<button onclick="_deleteBookcaseCell(' + c.id + ')" title="Remove photo — keeps the shelf" style="position:absolute;top:2px;right:2px;z-index:3;width:16px;height:16px;line-height:13px;text-align:center;border:none;border-radius:3px;background:rgba(120,40,30,0.78);color:#fff;font-size:11px;cursor:pointer;padding:0;">✕</button>' : '') +
-            '<div ' + (isFilled ? 'draggable="true" ondragstart="_cubbyDragStart(' + c.id + ',event)" ' : '') + 'style="width:100%;height:100%;background:rgba(38,24,12,0.34);border:1px solid rgba(18,10,5,0.55);border-radius:2px;box-shadow:inset 0 0 8px rgba(0,0,0,0.5);overflow:hidden;' + (isFilled ? 'cursor:grab;' : '') + '">' + inner + '</div></div>';
-    });
-    const spun = _bcJustSpun; _bcJustSpun = false;
-    const caseDiv = '<div id="bcCaseWrap" style="position:relative;width:100%;max-width:680px;max-height:74vh;margin:0 auto;aspect-ratio:' + aspW + '/' + aspH + ';background:linear-gradient(180deg,#5e3d22,#4a2e18);border:7px solid #3f2814;border-radius:10px;box-shadow:inset 0 0 40px rgba(0,0,0,0.45),0 12px 30px rgba(0,0,0,0.25);overflow:hidden;' + (spun ? 'animation:bcSpin 0.5s ease;' : '') + '">' + cellsHtml + '</div>';
+    // Multi-side → real 3D revolving tower; single side → the original flat wooden case.
+    const caseDiv = (nSides > 1)
+        ? _bcTowerHtml(bc)
+        : '<div id="bcCaseWrap" style="position:relative;width:100%;max-width:680px;max-height:74vh;margin:0 auto;aspect-ratio:' + aspW + '/' + aspH + ';background:linear-gradient(180deg,#5e3d22,#4a2e18);border:7px solid #3f2814;border-radius:10px;box-shadow:inset 0 0 40px rgba(0,0,0,0.45),0 12px 30px rgba(0,0,0,0.25);overflow:hidden;">' + _bcFaceCellsHtml(side, true) + '</div>';
     const controls = '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0;">' +
-        '<span style="font-size:12px;color:#8B7E74;">' + cells.length + ' shelves · ' + filled + ' filled · ' + (_bcEdit ? 'tap ✕ to clear a shelf (keeps the slot) · ' : '') + 'tap ＋ to fill · drag to rearrange</span>' +
+        '<span style="font-size:12px;color:#8B7E74;">' + cells.length + ' shelves · ' + filled + ' filled · ' + (_bcEdit ? 'tap ✕ to clear a shelf (keeps the slot) · ' : '') + 'tap ＋ to fill · ' + ((nSides > 1 && !_bcEdit) ? 'drag to spin the tower' : 'drag to rearrange') + '</span>' +
         '<span style="display:flex;gap:6px;flex-wrap:wrap;">' +
           '<button class="btn btn-primary" style="font-size:11px;padding:4px 8px;" onclick="_saveBookcaseConfirm()">💾 Save</button>' +
           '<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="_fillBookcaseInOrder()">📥 Fill in order</button>' +
@@ -16714,6 +16871,7 @@ function renderVirtualShelf() {
 
     if (sort === 'bookcase') {
         host.innerHTML = html + (_bcEditing ? _bookcaseBuilderHtml() : _bookcaseBlueprintHtml()) + '</div>';
+        if (!_bcEditing) { try { requestAnimationFrame(_setupBcTower); } catch (e) {} }
         return;
     }
     if (!all.length) {
