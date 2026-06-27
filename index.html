@@ -3509,6 +3509,7 @@
                     <p style="color: #7D9B76; margin-bottom: 16px; font-size: 14px;">📸 Upload shelf photos and tag books.</p>
                     <!-- Photo Shelf Stats -->
                     <div id="photoShelfStats" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;"></div>
+                    <div style="margin-bottom:16px;"><button class="btn btn-secondary" style="font-size:12px;padding:6px 12px;" onclick="runTidyShelfPhotos()" title="Remove duplicate photos (keeps the newest) and any non-JPEG">🧹 Tidy photos</button> <span style="font-size:11px;color:#8B7E74;">removes duplicate uploads (keeps newest) + non-JPEG</span></div>
 
                     <!-- Shelf Puzzle (AI scan) -->
                     <div style="background:linear-gradient(135deg,#FEF3E2,#FBEAD7);border:1px solid rgba(212,167,106,0.35);border-radius:16px;padding:18px;margin-bottom:22px;">
@@ -9940,6 +9941,67 @@ function _downscaleDataUrl(dataUrl, maxDim) {
     });
 }
 
+// ── Photo tidy: keep the newest of duplicate shelf photos, and drop any non-JPEG ones ──
+// (Uploads are re-encoded to JPEG by _downscaleDataUrl, so duplicates of the same file are
+//  byte-identical and detected by a cheap content signature.)
+function _isJpegData(d) { return /^data:image\/jpe?g/i.test(String(d || '')); }
+function _photoSig(d) {
+    const s = String(d || ''); if (!s) return '';
+    let h = 5381; for (let i = 0; i < s.length; i += 7) { h = ((h << 5) + h + s.charCodeAt(i)) | 0; }
+    return s.length + '_' + (h >>> 0);
+}
+// Re-point bookcase cubbies + books from a removed photo id to the kept (newest) one.
+function _repointPhotoRefs(remap) {
+    (app.bookcases || []).forEach(bc => (bc.sides || []).forEach(s => (s.cells || []).forEach(c => {
+        if (c.framePhotoId != null && remap[c.framePhotoId] != null) c.framePhotoId = remap[c.framePhotoId];
+        if (c.shelfPhotoId != null && remap[c.shelfPhotoId] != null) c.shelfPhotoId = remap[c.shelfPhotoId];
+    })));
+    (app.books || []).forEach(b => { if (b.shelfPhotoId != null && remap[b.shelfPhotoId] != null) b.shelfPhotoId = remap[b.shelfPhotoId]; });
+}
+function _dedupePhotoList(list) {
+    const groups = {}; (list || []).forEach(p => { const k = p._sig || ('id' + p.id); (groups[k] = groups[k] || []).push(p); });
+    const remap = {}, keep = []; let dropped = 0;
+    Object.values(groups).forEach(g => {
+        if (g.length < 2) { keep.push(g[0]); return; }
+        g.sort((a, b) => new Date(b.dateAdded || 0) - new Date(a.dateAdded || 0)); // newest first
+        keep.push(g[0]); g.slice(1).forEach(o => { remap[o.id] = g[0].id; dropped++; });
+    });
+    return { keep, remap, dropped };
+}
+// On-upload pass: drop just-added non-JPEG photos and collapse exact duplicates to the newest.
+function _dedupeNewPhotos() {
+    const ps = app.shelfPhotos || [];
+    ps.forEach(p => { if (p.data && !p._sig) p._sig = _photoSig(p.data); });
+    const keptFmt = []; ps.forEach(p => { if (p.data && !_isJpegData(p.data)) _purgeShelfPhotoRefs(p); else keptFmt.push(p); });
+    const r = _dedupePhotoList(keptFmt);
+    _repointPhotoRefs(r.remap);
+    Object.keys(r.remap).forEach(id => { try { _removePhotoBlob(id); } catch (e) {} });
+    app.shelfPhotos = r.keep;
+    return r.dropped;
+}
+// Full tidy (button + one-time): loads IndexedDB-only photos so duplicates across the whole
+// collection are caught, drops non-JPEG, keeps the newest of each duplicate, repoints references.
+async function tidyShelfPhotos() {
+    const ps = app.shelfPhotos || [];
+    for (const p of ps) { if (!p.data) { try { p.data = await PhotoDB.get(p.id); } catch (e) {} } if (p.data && !p._sig) p._sig = _photoSig(p.data); }
+    const keptFmt = []; let removedFmt = 0;
+    ps.forEach(p => { if (p.data && !_isJpegData(p.data)) { removedFmt++; _purgeShelfPhotoRefs(p); } else keptFmt.push(p); });
+    const r = _dedupePhotoList(keptFmt);
+    _repointPhotoRefs(r.remap);
+    Object.keys(r.remap).forEach(id => { try { _removePhotoBlob(id); } catch (e) {} });
+    app.shelfPhotos = r.keep;
+    app.saveData();
+    try { renderPhotoGallery(); } catch (e) {}
+    try { renderVirtualShelf(); } catch (e) {}
+    return { removedNonJpeg: removedFmt, removedDuplicates: r.dropped, remaining: r.keep.length };
+}
+function runTidyShelfPhotos() {
+    showNotification('Tidying photos…', 1500);
+    tidyShelfPhotos().then(r => {
+        showNotification('Photos tidied — ' + r.removedDuplicates + ' duplicate' + (r.removedDuplicates === 1 ? '' : 's') + ' removed' + (r.removedNonJpeg ? ' · ' + r.removedNonJpeg + ' non-JPEG' : '') + ' ✓', 4000);
+    }).catch(() => showNotification('Could not tidy photos', 2000));
+}
+
 // ---- vision response parsing ----
 function _extractJsonArray(text) {
     if (!text) return null;
@@ -10263,7 +10325,7 @@ function _ingestPhotoFiles(files) {
                 .catch(function () { return acc; });
         });
     }, Promise.resolve([])).then(function (newPhotos) {
-        if (newPhotos.length) { app.saveData(); try { renderPhotoGallery(); } catch (e) {} }
+        if (newPhotos.length) { try { _dedupeNewPhotos(); } catch (e) {} app.saveData(); try { renderPhotoGallery(); } catch (e) {} }
         return newPhotos;
     });
 }
