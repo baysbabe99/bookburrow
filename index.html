@@ -10081,7 +10081,7 @@ async function _runAutoSplit() {
         _openScanModal('<div style="padding:24px;text-align:center;color:#C2705B;">' + msg + '<br><br>' + setupBtn + '<button class="btn btn-primary" onclick="_renderTapMode()">👆 Tap in order</button></div>', bookcase ? 'Scan a bookcase' : 'Auto-split a shelf');
         return;
     }
-    if (bookcase) _assignRowsFromBoxes(_shelfScan.pieces);
+    if (bookcase) { _shelfScan.readOrder = _shelfScan.readOrder || _savedReadOrder(); _orderPiecesByBoxes(_shelfScan.pieces, _shelfScan.readOrder); }
     _renderReview();
 }
 
@@ -10318,6 +10318,51 @@ function _assignRowsFromBoxes(pieces) {
     return true;
 }
 
+// Saved Row/Column reading-order preference (remembered between scans).
+function _savedReadOrder() { try { return localStorage.getItem('bb_shelf_read_order') || 'column'; } catch (e) { return 'column'; } }
+
+// Generalised box-ordering for the AI bookcase scan.
+//   mode 'row'    = across each row   (rows top→bottom, left→right within a row)
+//   mode 'column' = down each column  (columns left→right, top→bottom within a column)
+// Uses each book's box [x,y,w,h]. Reuses piece.row as the group index (row# or column#)
+// so the review dividers and bookcase detection keep working in either mode.
+function _orderPiecesByBoxes(pieces, mode) {
+    mode = (mode === 'row') ? 'row' : 'column';
+    const boxed = pieces.filter(p => p.box && p.box.length >= 4);
+    if (boxed.length < Math.max(2, pieces.length * 0.5)) return false; // too few boxes — leave order as-is
+    const primPos = (mode === 'column') ? 0 : 1;   // group axis: x for columns, y for rows
+    const primSize = (mode === 'column') ? 2 : 3;  // box[2]=w (columns), box[3]=h (rows)
+    const secPos = (mode === 'column') ? 1 : 0;    // within-group sort: y for columns, x for rows
+    const sizes = boxed.map(p => p.box[primSize]).filter(s => s > 0).sort((a, b) => a - b);
+    const medSize = sizes.length ? sizes[Math.floor(sizes.length / 2)] : 0.2;
+    const thr = Math.max(0.04, medSize * 0.6);
+    const items = boxed.map(p => ({ p: p, c: p.box[primPos] + p.box[primSize] / 2, s: p.box[secPos] })).sort((a, b) => a.c - b.c);
+    const groups = [];
+    let cur = [], mean = null;
+    items.forEach(it => {
+        if (cur.length === 0) { cur.push(it); mean = it.c; return; }
+        if ((it.c - mean) <= thr) { cur.push(it); mean = cur.reduce((t, o) => t + o.c, 0) / cur.length; }
+        else { groups.push(cur); cur = [it]; mean = it.c; }
+    });
+    if (cur.length) groups.push(cur);
+    groups.forEach(g => g.sort((a, b) => a.s - b.s)); // order within a group by the secondary axis
+    let ord = 0;
+    groups.forEach((g, gi) => g.forEach(it => { it.p.row = gi; it.p.order = ord++; }));
+    const unboxed2 = pieces.filter(p => !(p.box && p.box.length >= 4));
+    unboxed2.forEach(p => { p.row = groups.length; p.order = ord++; });
+    pieces.sort((a, b) => (a.order || 0) - (b.order || 0));
+    return true;
+}
+
+// Review-screen toggle: re-order the just-scanned books by row or column and redraw.
+function _setShelfReadOrder(mode) {
+    mode = (mode === 'row') ? 'row' : 'column';
+    _shelfScan.readOrder = mode;
+    try { localStorage.setItem('bb_shelf_read_order', mode); } catch (e) {}
+    _orderPiecesByBoxes(_shelfScan.pieces || [], mode);
+    _renderReview();
+}
+
 // ---- TAP IN ORDER (manual) ----
 function _renderTapMode() {
     _shelfScan.mode = 'tap';
@@ -10455,6 +10500,10 @@ function _renderReview() {
     refreshLibraryTitlesDatalist();
     const multiShelf = _shelfScan.mode === 'auto' && _shelfScan.images.length > 1;
     const isBookcase = _shelfScan.mode === 'bookcase';
+    const ro = (_shelfScan.readOrder === 'row') ? 'row' : 'column';
+    const grpWord = (ro === 'column') ? 'column' : 'row';
+    const hasBoxes = _shelfScan.pieces.filter(p => p.box && p.box.length >= 4).length >= 2;
+    const showOrderToggle = isBookcase && hasBoxes;
     const rowCount = isBookcase ? (_shelfScan.pieces.reduce((m, p) => Math.max(m, (p.row != null ? p.row : 0)), 0) + 1) : 0;
     const base = app.shelfPhotos ? app.shelfPhotos.length : 0;
     let lastSrc = -1, lastRow = -1;
@@ -10465,7 +10514,7 @@ function _renderReview() {
             divider = '<div style="font-size:12px;font-weight:700;color:#C2705B;margin:12px 0 4px;">🧩 Shelf ' + (base + (p.src || 0) + 1) + '</div>';
         } else if (isBookcase && p.row !== lastRow) {
             lastRow = p.row;
-            divider = '<div style="font-size:12px;font-weight:700;color:#C2705B;margin:12px 0 4px;">📚 Row ' + ((p.row || 0) + 1) + '</div>';
+            divider = '<div style="font-size:12px;font-weight:700;color:#C2705B;margin:12px 0 4px;">' + (ro === 'column' ? '📙 Column ' : '📚 Row ') + ((p.row || 0) + 1) + '</div>';
         }
         const match = app.books.find(b => isImportDuplicate(b, { title: p.title, author: p.author, isbn: '' }));
         const badge = match
@@ -10481,10 +10530,21 @@ function _renderReview() {
     }).join('');
     const nameField = multiShelf
         ? '<p style="font-size:12px;color:#8B7E74;margin:0 0 12px;">Saving as <strong>' + _shelfScan.images.length + ' shelves</strong> (auto-named Shelf ' + (base + 1) + '–' + (base + _shelfScan.images.length) + ').</p>'
-        : '<label style="font-size:12px;font-weight:700;color:#8B7E74;">' + (isBookcase ? 'Bookcase name' : 'Shelf name') + '</label><input id="scanShelfLabel" value="' + escapeHtml(_defaultShelfLabel()) + '" style="width:100%;padding:7px 9px;margin:4px 0 ' + (isBookcase ? '6' : '12') + 'px;border:2px solid #E8DFD5;border-radius:8px;font-family:Nunito,sans-serif;font-size:13px;color:#3D5A80;">' + (isBookcase ? '<p style="font-size:12px;color:#8B7E74;margin:0 0 12px;">Detected <strong>' + rowCount + ' row' + (rowCount === 1 ? '' : 's') + '</strong> — saved as one bookcase. Fix any title below.</p>' : '');
+        : '<label style="font-size:12px;font-weight:700;color:#8B7E74;">' + (isBookcase ? 'Bookcase name' : 'Shelf name') + '</label><input id="scanShelfLabel" value="' + escapeHtml(_defaultShelfLabel()) + '" style="width:100%;padding:7px 9px;margin:4px 0 ' + (isBookcase ? '6' : '12') + 'px;border:2px solid #E8DFD5;border-radius:8px;font-family:Nunito,sans-serif;font-size:13px;color:#3D5A80;">' + (isBookcase ? '<p style="font-size:12px;color:#8B7E74;margin:0 0 12px;">Detected <strong>' + rowCount + ' ' + grpWord + (rowCount === 1 ? '' : 's') + '</strong> — saved as one bookcase. Fix any title below.</p>' : '');
+    const orderToggle = showOrderToggle
+        ? '<div style="display:flex;align-items:center;gap:8px;margin:0 0 12px;flex-wrap:wrap;">' +
+            '<span style="font-size:12px;color:#8B7E74;font-weight:700;">Reading order</span>' +
+            '<div style="display:inline-flex;border:2px solid #E8DFD5;border-radius:10px;overflow:hidden;">' +
+              '<button onclick="_setShelfReadOrder(\'column\')" style="border:none;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:Nunito,sans-serif;' + (ro === 'column' ? 'background:#7D9B76;color:#fff;' : 'background:#FFF8F0;color:#3D5A80;') + '">↓ Columns</button>' +
+              '<button onclick="_setShelfReadOrder(\'row\')" style="border:none;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:Nunito,sans-serif;' + (ro === 'row' ? 'background:#7D9B76;color:#fff;' : 'background:#FFF8F0;color:#3D5A80;') + '">→ Rows</button>' +
+            '</div>' +
+            '<span style="font-size:11px;color:#8B7E74;">' + (ro === 'column' ? 'down each column, then the next column right' : 'across each row, top to bottom') + '</span>' +
+          '</div>'
+        : '';
     _openScanModal(
         '<p style="color:#8B7E74;font-size:13px;margin:0 0 10px;">In shelf order. Fix any title (autocompletes from your library), then save. Matched books link to your library; new ones are added.</p>' +
         nameField +
+        orderToggle +
         '<div style="max-height:340px;overflow:auto;">' + rows + '</div>' +
         '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">' +
           '<button class="btn btn-primary" onclick="_commitShelfScan()">' + (isBookcase ? '📚 Save bookcase' : ('🧩 Save ' + (multiShelf ? 'shelves' : 'shelf'))) + ' &amp; link library</button>' +
