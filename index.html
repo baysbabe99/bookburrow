@@ -4502,6 +4502,16 @@
             const a = (b.author || '').toLowerCase().replace(/\s+/g, ' ').trim();
             return t ? 't:' + t + '|' + a : 'id:' + b.id;
         }
+        // Rank a book by how far along it is, so cross-device merges keep the furthest copy.
+        // finished > reading(by %) > want/buy/dnf. Ties keep the incumbent (local).
+        function _bookProgressScore(b) {
+            if (!b) return -1;
+            if (b.status === 'read') return 2e9;
+            let pct = (typeof b.progressPercentage === 'number') ? b.progressPercentage : 0;
+            if ((!pct || pct <= 0) && b.pages > 0 && b.currentPage > 0) pct = (b.currentPage / b.pages) * 100;
+            pct = Math.max(0, Math.min(100, pct || 0));
+            return (b.status === 'reading' ? 1000 : 0) + pct;
+        }
         function _mergeArrayById(localArr, remoteArr, idKey) {
             const out = Array.isArray(localArr) ? localArr.slice() : [];
             const seen = new Set(out.map(x => x && x[idKey]));
@@ -4563,11 +4573,15 @@
             let changed = false;
             const merged = Object.assign({}, remote, local); // local wins for shared scalar fields
             // Books: union by stable key; keep every book that exists on either side.
+            // For a book on BOTH sides, keep the more-progressed copy so a stale device
+            // can't revert (and re-push to the cloud) a "finished"/further-along book.
+            // No per-record updatedAt exists yet, so progress is the conflict resolver.
             const byKey = new Map();
             (Array.isArray(local.books) ? local.books : []).forEach(b => byKey.set(_shelfMergeKey(b), b));
             (Array.isArray(remote.books) ? remote.books : []).forEach(b => {
                 const k = _shelfMergeKey(b);
                 if (!byKey.has(k)) { byKey.set(k, b); changed = true; }
+                else if (_bookProgressScore(b) > _bookProgressScore(byKey.get(k))) { byKey.set(k, b); changed = true; }
             });
             merged.books = Array.from(byKey.values());
             // XP / streak: keep the higher value so earned progress survives.
@@ -4582,8 +4596,8 @@
             const ch = _mergeArrayById(local.challenges, remote.challenges, 'id'); merged.challenges = ch.out; if (ch.added) changed = true;
             const ln = _mergeArrayById(local.loans, remote.loans, 'id'); merged.loans = ln.out; if (ln.added) changed = true;
             const bw = _mergeArrayById(local.borrows, remote.borrows, 'id'); merged.borrows = bw.out; if (bw.added) changed = true;
-            merged.friends = _mergeArrayById(local.friends, remote.friends, 'id').out;
-            merged.gifts = _mergeArrayById(local.gifts, remote.gifts, 'id').out;
+            const fr = _mergeArrayById(local.friends, remote.friends, 'id'); merged.friends = fr.out; if (fr.added) changed = true;
+            const gf = _mergeArrayById(local.gifts, remote.gifts, 'id'); merged.gifts = gf.out; if (gf.added) changed = true;
             const sp = _mergeArrayById(local.shelfPhotos, remote.shelfPhotos, 'id'); merged.shelfPhotos = sp.out; if (sp.added) changed = true;
             merged.bookcases = _mergeBookcases(local.bookcases, remote.bookcases);
             // NOTE: do NOT set `changed` from a bookcases diff — the merged object can serialize
@@ -5833,13 +5847,6 @@ function getReadingStats() {
     // Manual pages today
     const manualTodayPages = log[today] || 0;
 
-    // Auto-tracked pages from book progress
-    const autoPages = app.books.reduce((sum, b) => {
-        if (b.status === 'read') return sum + (parseInt(b.pages) || 0);
-        if (b.status === 'reading') return sum + Math.round((parseInt(b.pages) || 0) * ((b.progressPercentage || 0) / 100));
-        return sum;
-    }, 0);
-
     // Pages from reading log for different periods
     const startOfWeek = new Date(now);
     startOfWeek.setDate(now.getDate() - now.getDay());
@@ -6310,7 +6317,7 @@ function logAudiobookProgress(book, oldPct, newPct) {
     if (delta <= 0) return;
     if (!app.profile) app.profile = {};
     if (!app.profile.dailyReadingLog) app.profile.dailyReadingLog = {};
-    var today = new Date().toISOString().split('T')[0];
+    var today = todayKey(); // local day, matching getReadingStats (UTC key mis-credited evening reads to tomorrow)
     app.profile.dailyReadingLog[today] = (app.profile.dailyReadingLog[today] || 0) + delta;
 }
 
@@ -7723,7 +7730,7 @@ function startLibraryChallenge(libId) {
     // one, otherwise auto-generate slots from its target (books / genres / pages).
     const prompts = (Array.isArray(c.prompts) && c.prompts.length > 0) ? c.prompts.slice() : generateChallengeSlots(c);
     app.challenges.push({
-        id: Date.now(), libId: c.id, name: c.name, emoji: c.emoji,
+        id: Date.now() + Math.floor(Math.random() * 100000), libId: c.id, name: c.name, emoji: c.emoji,
         goalType: 'prompts',
         target: prompts.length,
         current: 0, reward: c.reward, badge: c.badge,
@@ -7863,7 +7870,7 @@ function startSuggestedChallenge(name, emoji, goalType, target, reward, badge) {
     if (goalType === 'books') {
         const prompts = generateChallengeSlots({ goalType: 'books', target: target });
         app.challenges.push({
-            id: Date.now(), name, emoji, goalType: 'prompts', target: prompts.length, current: 0,
+            id: Date.now() + Math.floor(Math.random() * 100000), name, emoji, goalType: 'prompts', target: prompts.length, current: 0,
             reward: reward || 200, badge: badge || '🏆',
             prompts: prompts,
             promptDone: prompts.map(function () { return false; }),
@@ -7872,7 +7879,7 @@ function startSuggestedChallenge(name, emoji, goalType, target, reward, badge) {
         });
     } else {
         app.challenges.push({
-            id: Date.now(), name, emoji, goalType, target, current: 0,
+            id: Date.now() + Math.floor(Math.random() * 100000), name, emoji, goalType, target, current: 0,
             reward: reward || 200, badge: badge || '🏆',
             startDate: start, endDate: end, completed: false, type: 'suggested'
         });
@@ -7892,7 +7899,7 @@ function addChallenge() {
     if (!name || !target) { showNotification('Please fill in all fields', 1500); return; }
 
     app.challenges.push({
-        id: Date.now(), name, emoji: '🎯', goalType, target, current: 0,
+        id: Date.now() + Math.floor(Math.random() * 100000), name, emoji: '🎯', goalType, target, current: 0,
         reward: target >= 50 ? 500 : target >= 20 ? 300 : target >= 10 ? 200 : 100,
         badge: '🎯',
         startDate: start, endDate: end, completed: false, type: 'custom'
@@ -7958,30 +7965,56 @@ function getAchievementDefs() {
 }
 
 function getAchievementProgress(a) {
-    // Return {current, target} for progress bar display
-    const read = app.books.filter(b => b.status === 'read');
+    // Return {current, target} for progress bar display.
+    // Keyed by achievement id so the bar mirrors each unlock condition() exactly. The old
+    // description-keyword heuristic mis-counted ~20 badges (e.g. "1/200" instead of "1/1",
+    // or a full bar that stayed locked); it now only serves as a fallback for future ids.
+    const A = app.books || [];
+    const read = A.filter(b => b.status === 'read');
+    const lc = s => (s ? s.toLowerCase() : '');
+    const genre = sub => read.filter(b => b.genre && lc(b.genre).includes(sub)).length;
+    const distinctGenres = new Set(read.filter(b => b.genre).map(b => b.genre)).size;
+    const distinctLangs = new Set(read.filter(b => b.language).map(b => b.language)).size;
+    const ratedAny = A.filter(b => b.rating > 0).length;
+    const buy = A.filter(b => b.status === 'buy').length;
+    const streak = app.streak || 0;
+    const M = {
+        paige: [read.length, 1], dewey: [A.length, 10], ember: [streak, 3],
+        hoot: [genre('non-fiction'), 5], pocket: [read.filter(b => b.pages > 0 && b.pages < 200).length, 1],
+        atlas: [distinctLangs, 3], stormy: [read.length, 10],
+        pixel: [Object.keys(app.connectedApps || {}).length, 1],
+        biscuit: [(app.challenges || []).filter(c => c.completed).length, 1],
+        luna: [read.length, 25], captain: [streak, 7], sage: [read.length, 25], nimbus: [read.length, 50],
+        cleo: [genre('histor'), 5], fizz: [genre('fantasy'), 5], jazz: [ratedAny, 20],
+        maple: [read.filter(b => b.dateFinished && [11, 0, 1].includes(new Date(b.dateFinished).getMonth())).length, 10],
+        phoenix: [booksFinishedThisYear(), app.yearlyGoal || 24],
+        pizza: [read.length, 5], goldstar: [ratedAny, 10], trophy: [read.length, 20],
+        crown: [app.getLevel ? app.getLevel() : 0, 10], diamond: [A.length, 50],
+        rocket: [read.filter(b => b.dateFinished && new Date(b.dateFinished) > Date.now() - 7 * 86400000).length, 3],
+        mirror: [read.filter(b => b.genre && (lc(b.genre).includes('memoir') || lc(b.genre).includes('biography'))).length, 3],
+        brain: [distinctGenres, 5], heart: [A.filter(b => b.rating === 5).length, 2], zen: [streak, 14],
+        butterfly: [read.filter(b => b.genre && (lc(b.genre).includes('self-help') || lc(b.genre).includes('growth') || lc(b.genre).includes('personal'))).length, 10],
+        globe: [distinctLangs, 5], shopper: [buy, 5], collector: [buy, 20],
+        patron: [read.filter(b => b.notes && b.notes.includes('Want to Buy')).length, 10],
+        diverse: [distinctGenres, 8], social: [(app.loans || []).length, 5], photog: [(app.shelfPhotos || []).length, 3],
+        importer: [A.filter(b => b.notes && b.notes.includes('Imported')).length, 20],
+        scanner: [A.filter(b => b.notes && b.notes.includes('barcode')).length, 5],
+        marathon: [read.filter(b => b.pages >= 500).length, 1],
+        quickread: [read.filter(b => b.pages > 0 && b.pages < 150).length, 5]
+    };
+    if (M[a.id]) return { current: M[a.id][0], target: M[a.id][1] };
+    // Boolean (one-shot) achievements: show 0/1 until met.
+    if (a.id === 'completist' || a.id === 'themed') return { current: (a.condition && a.condition()) ? 1 : 0, target: 1 };
+
+    // Fallback heuristic for any achievement id not mapped above.
     const d = a.desc.toLowerCase();
     const match = a.desc.match(/(\d+)/);
     const target = match ? parseInt(match[1]) : 1;
-
-    if (d.includes('read') && d.includes('book') && !d.includes('genre') && !d.includes('language')) {
-        if (d.includes('under 200') || d.includes('under 150')) return { current: read.filter(b => b.pages > 0 && b.pages < 200).length, target };
-        if (d.includes('over 500')) return { current: read.filter(b => b.pages >= 500).length, target };
-        if (d.includes('one week')) return { current: read.filter(b => b.dateFinished && new Date(b.dateFinished) > Date.now() - 7*86400000).length, target };
-        return { current: read.length, target };
-    }
-    if (d.includes('add') && d.includes('book')) return { current: app.books.length, target };
-    if (d.includes('streak')) return { current: app.streak || 0, target };
-    if (d.includes('genre')) return { current: new Set(read.filter(b => b.genre).map(b => b.genre)).size, target };
-    if (d.includes('rate') || d.includes('rating')) return { current: app.books.filter(b => b.rating > 0).length, target };
-    if (d.includes('5-star') || d.includes('five star')) return { current: app.books.filter(b => b.rating === 5).length, target };
-    if (d.includes('language')) return { current: new Set(read.filter(b => b.language).map(b => b.language)).size, target };
-    if (d.includes('loan')) return { current: app.loans.length, target };
-    if (d.includes('photo')) return { current: app.shelfPhotos.length, target };
-    if (d.includes('import')) return { current: app.books.filter(b => b.notes && b.notes.includes('Imported')).length, target };
-    if (d.includes('barcode') || d.includes('scan')) return { current: app.books.filter(b => b.notes && b.notes.includes('barcode')).length, target };
-    if (d.includes('want to buy') || d.includes('buy')) return { current: app.books.filter(b => b.status === 'buy').length, target };
-    if (d.includes('level')) return { current: app.getLevel ? app.getLevel() : 0, target };
+    if (d.includes('streak')) return { current: streak, target };
+    if (d.includes('genre')) return { current: distinctGenres, target };
+    if (d.includes('language')) return { current: distinctLangs, target };
+    if (d.includes('add') && d.includes('book')) return { current: A.length, target };
+    if (d.includes('read') && d.includes('book')) return { current: read.length, target };
     return { current: 0, target };
 }
 
@@ -8751,8 +8784,12 @@ function parseStoryGraphCSV(content) {
         let status = 'want';
         if (statusIdx >= 0) {
             const s = (vals[statusIdx] || '').toLowerCase();
-            if (s.includes('read') && !s.includes('to read') && !s.includes('currently')) status = 'read';
-            else if (s.includes('currently')) status = 'reading';
+            // StoryGraph statuses: to-read, currently-reading, read, did-not-finish.
+            // 'read' is a substring of 'to-read'/'currently', so check specific cases first.
+            if (s.includes('currently')) status = 'reading';
+            else if (s.includes('to-read') || s.includes('to read')) status = 'want';
+            else if (s.includes('did-not-finish') || s.includes('did not finish') || s.includes('dnf')) status = 'dnf';
+            else if (s.includes('read')) status = 'read';
         }
 
         books.push({
@@ -11104,15 +11141,8 @@ function parseCSV(content) {
     const books = [];
 
     for (let i = 1; i < lines.length; i++) {
-        const values = [];
-        let current = '';
-        let inQuotes = false;
-        for (const char of lines[i]) {
-            if (char === '"') inQuotes = !inQuotes;
-            else if (char === ',' && !inQuotes) { values.push(current.trim()); current = ''; }
-            else current += char;
-        }
-        values.push(current.trim());
+        // Use the shared RFC-4180 tokenizer so escaped quotes ("") inside fields survive.
+        const values = parseCSVLine(lines[i]).map(v => v.trim());
 
         const book = {};
         headers.forEach((h, idx) => {
@@ -12281,7 +12311,7 @@ function setupEventListeners() {
             const loanDate = document.getElementById('loanDate')?.value;
             const returnDate = document.getElementById('loanReturnDate')?.value;
             if (!title || !borrower) { showNotification('Please fill all fields', 1500); return; }
-            app.loans.push({ id: Date.now(), title, borrower, loanDate, returnDate, returned: false });
+            app.loans.push({ id: Date.now() + Math.floor(Math.random() * 100000), title, borrower, loanDate, returnDate, returned: false });
             // Mark book as "loaned" in library if it exists
             const book = app.books.find(b => b.title.toLowerCase() === title.toLowerCase());
             if (book) { book.status = 'loaned'; book.loanedTo = borrower; }
@@ -12311,7 +12341,7 @@ function setupEventListeners() {
             const borrowDate = document.getElementById('borrowDate')?.value;
             const returnDate = document.getElementById('borrowReturnDate')?.value;
             if (!title || !lender) { showNotification('Please fill all fields', 1500); return; }
-            app.borrows.push({ id: Date.now(), title, lender, borrowDate, returnDate, returned: false });
+            app.borrows.push({ id: Date.now() + Math.floor(Math.random() * 100000), title, lender, borrowDate, returnDate, returned: false });
             app.saveData();
             closeModal('addBorrowModal');
             renderLoans();
@@ -13391,7 +13421,7 @@ function thankGift(id) {
 }
 function addGiftToLibrary(title, author) {
     if (!title) return;
-    var book = { id: Date.now(), title: title, author: author || '', status: 'want', dateAdded: new Date().toISOString(), rating: 0 };
+    var book = { id: Date.now() + Math.floor(Math.random() * 100000), title: title, author: author || '', status: 'want', dateAdded: new Date().toISOString(), rating: 0 };
     app.books.push(book);
     app.saveData();
     showNotification('Added "' + title + '" to your TBR 📚', 1500);
