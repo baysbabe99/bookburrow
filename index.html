@@ -391,6 +391,48 @@
             margin-bottom: 6px;
         }
 
+        /* ---- Owned / Not-Owned scope toggle (added 2026-07-23) ---- */
+        .own-scope-tabs { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+        .own-scope-btn {
+            display:inline-flex; align-items:center; gap:8px;
+            padding:10px 18px; border:2px solid #E8DFD5; background:#FFF8F0;
+            border-radius:24px; cursor:pointer; font-family:'Nunito',sans-serif;
+            font-weight:700; font-size:15px; color:#8B7E74; transition:all 0.25s ease;
+        }
+        .own-scope-btn:hover:not(.active) { border-color:#D4A76A; color:#C2705B; }
+        .own-scope-btn .own-scope-count {
+            font-size:12px; font-weight:700; background:rgba(139,126,116,0.15);
+            color:#8B7E74; padding:1px 9px; border-radius:12px;
+        }
+        .own-scope-btn.active { color:#FFF8F0; border-color:transparent; }
+        .own-scope-btn.active .own-scope-count { background:rgba(255,255,255,0.28); color:#FFF8F0; }
+        .own-scope-btn[data-scope="all"].active { background:linear-gradient(135deg,#8B7E74,#B0A395); }
+        .own-scope-btn[data-scope="owned"].active { background:linear-gradient(135deg,#5A8A50,#7D9B76); }
+        .own-scope-btn[data-scope="notowned"].active { background:linear-gradient(135deg,#C2705B,#D4A76A); }
+
+        /* ---- Ownership section band (full-width row inside the book grid) ---- */
+        .lib-own-band {
+            grid-column:1 / -1; display:flex; align-items:center; gap:12px;
+            margin:28px 0 4px; padding:12px 18px; border-radius:14px;
+            background:#FEF3E2; border-left:6px solid #8B7E74;
+        }
+        .lib-own-band:first-child { margin-top:6px; }
+        .lib-own-band.owned { border-left-color:#7D9B76; }
+        .lib-own-band.notowned { border-left-color:#C2705B; }
+        .lib-own-band .lib-own-emoji { font-size:24px; }
+        .lib-own-band .lib-own-name { font-family:'Quicksand',sans-serif; font-weight:700; font-size:20px; color:#3D5A80; }
+        .lib-own-band .lib-own-sub { font-size:13px; color:#8B7E74; margin-left:auto; font-weight:600; }
+
+        /* ---- Status shelf sub-header ---- */
+        .lib-shelf-head {
+            grid-column:1 / -1; display:flex; align-items:center; gap:8px;
+            margin:16px 0 2px; font-family:'Nunito',sans-serif; font-weight:700;
+            font-size:15px; color:#8B7E74;
+        }
+        .lib-shelf-head .lib-shelf-count { font-size:12px; background:rgba(139,126,116,0.14); padding:1px 9px; border-radius:12px; color:#8B7E74; }
+        .lib-shelf-head .lib-shelf-rule { flex:1; height:2px; border-radius:2px; background:rgba(139,126,116,0.14); }
+        .lib-empty-shelf { grid-column:1 / -1; color:#8B7E74; padding:8px 4px 20px; font-size:14px; }
+
         /* ---- Profile switcher ---- */
         .profile-switcher {
             position: relative;
@@ -3394,6 +3436,13 @@
                         <a class="btn btn-primary" href="./scan.html" target="_blank" rel="noopener" title="Scan ISBNs with the phone scanner" style="font-size:12px;padding:6px 14px;white-space:nowrap;text-decoration:none;">📷 Scan ISBN</a>
                     </div>
 
+                    <!-- Owned / Not-Owned scope toggle (added 2026-07-23) -->
+                    <div class="own-scope-tabs" id="ownScopeTabs">
+                        <button class="own-scope-btn active" data-scope="all" onclick="setLibOwnershipScope('all')">📚 All <span class="own-scope-count" id="ownCountAll">0</span></button>
+                        <button class="own-scope-btn" data-scope="owned" onclick="setLibOwnershipScope('owned')">📗 Owned <span class="own-scope-count" id="ownCountOwned">0</span></button>
+                        <button class="own-scope-btn" data-scope="notowned" onclick="setLibOwnershipScope('notowned')">📕 Not Owned <span class="own-scope-count" id="ownCountNot">0</span></button>
+                    </div>
+
                     <div class="library-controls">
                         <div class="filter-tabs">
                             <button class="filter-btn active" data-filter="all">All Books</button>
@@ -6073,6 +6122,7 @@ function populateLibraryDropdowns() {
 let _libSearchTimer = null;
 function librarySearchInput() { clearTimeout(_libSearchTimer); _libSearchTimer = setTimeout(applyLibraryFilters, 200); }
 function applyLibraryFilters() {
+    _shelvedIds = null; // refresh shelf-membership set each pass (books may have moved cubbies)
     const statusFilter = document.querySelector('.filter-btn[data-filter].active')?.dataset?.filter || 'all';
     const searchText = (document.getElementById('librarySearch')?.value || '').toLowerCase().trim();
     const genreFilter = document.getElementById('libFilterGenre')?.value || '';
@@ -6170,6 +6220,7 @@ function applyLibraryFilters() {
     try { renderReleasesInto('libReleasesSection', { header: '📅 Upcoming Releases' }); } catch (e) {}
     renderLibraryBooksFiltered(books);
     renderLibraryStats();
+    updateOwnershipScopeCounts();
     applyLibraryViewMode();
 }
 
@@ -6379,17 +6430,94 @@ function markBookFinishedFromDash(id) {
     showNotification('Read — on your shelf! 🎉', 2000);
 }
 
-function renderLibraryBooksFiltered(books) {
-    renderRecentlyScanned();
-    const grid = document.getElementById('libraryGrid');
-    if (!grid) return;
+// ─────────────────────────────────────────────────────────────────────────
+// Owned vs. Not-Owned Library view (added 2026-07-23)
+// Owned when a book has an owning format (Physical/Digital/Audio) OR it is
+// actually on one of Mary's bookshelves. Not Owned when it's explicitly
+// "Do Not Own" / Want-to-Buy, or when it's untagged AND not on any shelf.
+// (Per Mary 2026-07-23: books on the shelves are hers; untagged books that
+//  are NOT on a shelf are left untagged, i.e. Not Owned.)
+// ─────────────────────────────────────────────────────────────────────────
+var OWN_FORMATS = ['Physical', 'Digital', 'Audio'];
 
-    if (books.length === 0) {
-        grid.innerHTML = '<div style="text-align:center;padding:40px;color:#8B7E74;grid-column:1/-1;">No matches — try different filters 🐉</div>';
-        return;
+// Book ids sitting in a virtual-bookcase cubby. Rebuilt lazily; invalidated
+// (set to null) at the top of applyLibraryFilters so placements stay fresh.
+var _shelvedIds = null;
+function rebuildShelvedIds() {
+    var s = new Set();
+    (app.bookcases || []).forEach(function (bc) {
+        (bc.sides || []).forEach(function (side) {
+            (side.cells || []).forEach(function (cell) {
+                (cell.bookIds || []).forEach(function (id) { s.add(id); });
+            });
+        });
+    });
+    _shelvedIds = s;
+    return s;
+}
+function _shelvedSet() { return _shelvedIds === null ? rebuildShelvedIds() : _shelvedIds; }
+
+// Is this book on one of Mary's bookshelves? True when it's linked to a shelf
+// photo, carries a shelf-location label, or is placed in a bookcase cubby.
+function bookOnShelf(book) {
+    if (!book) return false;
+    if (book.shelfPhotoId != null || book.shelfLocation) return true;
+    return _shelvedSet().has(book.id);
+}
+
+function bookOwned(book) {
+    var o = (book && book.ownershipFormat) || [];
+    if (o.indexOf('Do Not Own') >= 0) return false;                 // explicitly not owned
+    if (book && book.status === 'buy') return false;                // want to buy = not owned yet
+    if (o.indexOf('Physical') >= 0 || o.indexOf('Digital') >= 0 || o.indexOf('Audio') >= 0) return true;
+    if (bookOnShelf(book)) return true;                             // untagged but on a shelf → owned
+    return false;                                                    // untagged & not on a shelf → leave untagged
+}
+
+// Current Library ownership scope: 'all' | 'owned' | 'notowned'
+var libOwnershipScope = 'all';
+function setLibOwnershipScope(scope) {
+    libOwnershipScope = scope;
+    var tabs = document.querySelectorAll('#ownScopeTabs .own-scope-btn');
+    for (var i = 0; i < tabs.length; i++) {
+        tabs[i].classList.toggle('active', tabs[i].dataset.scope === scope);
     }
+    applyLibraryFilters();
+}
 
-    grid.innerHTML = books.map(book => {
+// Refresh the three counts on the scope toggle from the full library.
+function updateOwnershipScopeCounts() {
+    var owned = 0, notOwned = 0;
+    (app.books || []).forEach(function (b) { if (bookOwned(b)) owned++; else notOwned++; });
+    var elAll = document.getElementById('ownCountAll');
+    var elOwn = document.getElementById('ownCountOwned');
+    var elNot = document.getElementById('ownCountNot');
+    if (elAll) elAll.textContent = (owned + notOwned).toLocaleString();
+    if (elOwn) elOwn.textContent = owned.toLocaleString();
+    if (elNot) elNot.textContent = notOwned.toLocaleString();
+}
+
+// Status shelves (order + labels) inside each ownership section.
+// Not-Owned adds "Want to Buy" and labels its Read shelf as "read but don't own".
+function libStatusPlan(isOwned) {
+    if (isOwned) {
+        return [
+            { key: 'reading', label: 'Reading' },
+            { key: 'want', label: 'To Be Read' },
+            { key: 'read', label: 'Read' },
+            { key: 'dnf', label: 'DNF' }
+        ];
+    }
+    return [
+        { key: 'buy', label: 'Want to Buy' },
+        { key: 'reading', label: 'Reading' },
+        { key: 'want', label: 'To Be Read' },
+        { key: 'read', label: "Read · Don't Own" },
+        { key: 'dnf', label: 'DNF' }
+    ];
+}
+
+function libBookCardHTML(book) {
         const [c1, c2] = coverGradients[book.id % 5];
         const descSnippet = (book.description || '').substring(0, 150).replace(/'/g, "\\'").replace(/"/g, '&quot;');
         return `
@@ -6424,9 +6552,67 @@ function renderLibraryBooksFiltered(books) {
             ${book.status === 'buy' ? `<button class="btn btn-primary" style="margin-top:8px;font-size:11px;padding:4px 10px;width:100%;" onclick="event.stopPropagation();showWhereToBuy('${book.title.replace(/'/g,"\\'")}','${(book.author||'').replace(/'/g,"\\'")}','${(book.isbn||'').replace(/'/g,"\\'")}')">🏪 Where to Buy</button>` : ''}
             ${book.rating > 0 ? `<div style="margin-top:6px;">${'⭐'.repeat(book.rating)}${'☆'.repeat(5-book.rating)}</div>` : ''}
         </div>`;
-    }).join('');
 }
 
+// Render one ownership section: a full-width band + status shelves, as grid children.
+function libRenderOwnershipSection(kind, list) {
+    var isOwned = kind === 'owned';
+    var band = '<div class="lib-own-band ' + kind + '">' +
+        '<span class="lib-own-emoji">' + (isOwned ? '📗' : '📕') + '</span>' +
+        '<span class="lib-own-name">' + (isOwned ? 'Owned' : 'Not Owned') + '</span>' +
+        '<span class="lib-own-sub">' + (isOwned ? 'On your shelves' : 'Borrowed · wishlist · to-buy') +
+        ' · ' + list.length.toLocaleString() + '</span></div>';
+    if (list.length === 0) {
+        return band + '<div class="lib-empty-shelf">Nothing here yet 🐉</div>';
+    }
+    var groups = {};
+    list.forEach(function (b) { (groups[b.status] = groups[b.status] || []).push(b); });
+    var plan = libStatusPlan(isOwned);
+    var planned = {};
+    plan.forEach(function (p) { planned[p.key] = true; });
+    var shelves = '';
+    function shelf(key, label, arr) {
+        return '<div class="lib-shelf-head">' + (statusEmoji[key] || '📚') + ' ' + label +
+            ' <span class="lib-shelf-count">' + arr.length + '</span>' +
+            '<span class="lib-shelf-rule"></span></div>' + arr.map(libBookCardHTML).join('');
+    }
+    plan.forEach(function (p) {
+        var arr = groups[p.key];
+        if (arr && arr.length) shelves += shelf(p.key, p.label, arr);
+    });
+    // Safety: any status not in the plan (e.g. 'loaned') still gets a shelf.
+    Object.keys(groups).forEach(function (st) {
+        if (planned[st]) return;
+        shelves += shelf(st, (statusLabels[st] || st), groups[st]);
+    });
+    return band + shelves;
+}
+
+function renderLibraryBooksFiltered(books) {
+    renderRecentlyScanned();
+    const grid = document.getElementById('libraryGrid');
+    if (!grid) return;
+
+    if (books.length === 0) {
+        grid.innerHTML = '<div style="text-align:center;padding:40px;color:#8B7E74;grid-column:1/-1;">No matches — try different filters 🐉</div>';
+        return;
+    }
+
+    var scope = libOwnershipScope || 'all';
+    var owned = [], notOwned = [];
+    books.forEach(function (b) { if (bookOwned(b)) owned.push(b); else notOwned.push(b); });
+
+    var html = '';
+    if (scope === 'owned') {
+        html = libRenderOwnershipSection('owned', owned);
+    } else if (scope === 'notowned') {
+        html = libRenderOwnershipSection('notowned', notOwned);
+    } else {
+        if (owned.length) html += libRenderOwnershipSection('owned', owned);
+        if (notOwned.length) html += libRenderOwnershipSection('notowned', notOwned);
+    }
+    grid.innerHTML = html;
+}
 function toggleFavorite(bookId) {
     const book = app.books.find(b => b.id === bookId);
     if (!book) return;
