@@ -3436,13 +3436,6 @@
                         <a class="btn btn-primary" href="./scan.html" target="_blank" rel="noopener" title="Scan ISBNs with the phone scanner" style="font-size:12px;padding:6px 14px;white-space:nowrap;text-decoration:none;">📷 Scan ISBN</a>
                     </div>
 
-                    <!-- Owned / Not-Owned scope toggle (added 2026-07-23) -->
-                    <div class="own-scope-tabs" id="ownScopeTabs">
-                        <button class="own-scope-btn active" data-scope="all" onclick="setLibOwnershipScope('all')">📚 All <span class="own-scope-count" id="ownCountAll">0</span></button>
-                        <button class="own-scope-btn" data-scope="owned" onclick="setLibOwnershipScope('owned')">📗 Owned <span class="own-scope-count" id="ownCountOwned">0</span></button>
-                        <button class="own-scope-btn" data-scope="notowned" onclick="setLibOwnershipScope('notowned')">📕 Not Owned <span class="own-scope-count" id="ownCountNot">0</span></button>
-                    </div>
-
                     <div class="library-controls">
                         <div class="filter-tabs">
                             <button class="filter-btn active" data-filter="all">All Books</button>
@@ -6537,6 +6530,7 @@ function libBookCardHTML(book) {
             <div class="book-title">${book.title}</div>
             <div class="book-author">${book.author}</div>
             <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;">
+                ${(function(){var o=bookOwned(book);return `<span title="${o?'You own this':'Not owned (borrowed / wishlist)'}" style="background:${o?'rgba(125,155,118,0.18)':'rgba(194,112,91,0.15)'};color:${o?'#5A8A50':'#C2705B'};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;">${o?'📗 Owned':'📕 Not Owned'}</span>`;})()}
                 ${book.genre ? `<span style="background:rgba(125,155,118,0.15);color:#7D9B76;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${book.genre}</span>` : ''}
                 ${book.pages ? `<span style="background:rgba(61,90,128,0.1);color:#3D5A80;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">📄 ${book.pages}p</span>` : ''}
                 ${book.format ? `<span style="background:rgba(212,167,106,0.15);color:#D4A76A;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${book.format}</span>` : ''}
@@ -6604,20 +6598,7 @@ function renderLibraryBooksFiltered(books) {
         return;
     }
 
-    var scope = libOwnershipScope || 'all';
-    var owned = [], notOwned = [];
-    books.forEach(function (b) { if (bookOwned(b)) owned.push(b); else notOwned.push(b); });
-
-    var html = '';
-    if (scope === 'owned') {
-        html = libRenderOwnershipSection('owned', owned);
-    } else if (scope === 'notowned') {
-        html = libRenderOwnershipSection('notowned', notOwned);
-    } else {
-        if (owned.length) html += libRenderOwnershipSection('owned', owned);
-        if (notOwned.length) html += libRenderOwnershipSection('notowned', notOwned);
-    }
-    grid.innerHTML = html;
+    grid.innerHTML = books.map(libBookCardHTML).join('');
 }
 function toggleFavorite(bookId) {
     const book = app.books.find(b => b.id === bookId);
@@ -7015,6 +6996,7 @@ function renderLibraryBooks(filter) {
             <div class="book-title">${book.title}</div>
             <div class="book-author">${book.author}</div>
             <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;">
+                ${(function(){var o=bookOwned(book);return `<span title="${o?'You own this':'Not owned (borrowed / wishlist)'}" style="background:${o?'rgba(125,155,118,0.18)':'rgba(194,112,91,0.15)'};color:${o?'#5A8A50':'#C2705B'};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;">${o?'📗 Owned':'📕 Not Owned'}</span>`;})()}
                 ${book.genre ? `<span style="background:rgba(125,155,118,0.15);color:#7D9B76;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${book.genre}</span>` : ''}
                 ${book.pages ? `<span style="background:rgba(61,90,128,0.1);color:#3D5A80;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">📄 ${book.pages}p</span>` : ''}
                 ${book.format ? `<span style="background:rgba(212,167,106,0.15);color:#D4A76A;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${book.format}</span>` : ''}
