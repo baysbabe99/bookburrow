@@ -3454,16 +3454,28 @@
                     </div>
 
 
-                    <div id="bulkActions" style="display:none;background:#FEF3E2;border-radius:12px;padding:12px 16px;margin-bottom:16px;align-items:center;gap:12px;flex-wrap:wrap;border:2px solid #E8DFD5;">
+                    <div id="bulkActions" style="display:none;background:#FEF3E2;border-radius:12px;padding:12px 16px;margin-bottom:16px;align-items:center;gap:8px;flex-wrap:wrap;border:2px solid #E8DFD5;">
                         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;color:#3D5A80;">
                             <input type="checkbox" id="selectAllBooks" onchange="toggleSelectAll(this.checked)" style="width:18px;height:18px;accent-color:#7D9B76;">
                             Select All
                         </label>
                         <span id="selectedCount" style="color:#8B7E74;font-size:13px;">0 selected</span>
-                        <div style="flex:1;"></div>
-                        <button class="btn btn-primary" style="font-size:13px;padding:6px 14px;" onclick="bulkMarkFinished()">✅ Mark as Read</button>
-                        <button class="btn btn-secondary" style="font-size:13px;padding:6px 14px;" onclick="bulkMarkWant()">📖 Mark To Be Read</button>
-                        <button class="btn btn-secondary" style="font-size:13px;padding:6px 14px;" onclick="cancelBulkSelect()">Cancel</button>
+                        <span style="width:100%;height:0;"></span>
+                        <span style="font-size:11px;font-weight:800;color:#8B7E74;letter-spacing:.03em;">STATUS</span>
+                        <button class="btn btn-primary" style="font-size:13px;padding:6px 12px;" onclick="bulkMarkFinished()">✅ Read</button>
+                        <button class="btn btn-secondary" style="font-size:13px;padding:6px 12px;" onclick="bulkMarkWant()">📖 To Be Read</button>
+                        <button class="btn btn-secondary" style="font-size:13px;padding:6px 12px;" onclick="bulkSetStatus('reading')">📚 Reading</button>
+                        <button class="btn btn-secondary" style="font-size:13px;padding:6px 12px;" onclick="bulkSetStatus('dnf')">⏸️ DNF</button>
+                        <button class="btn btn-secondary" style="font-size:13px;padding:6px 12px;" onclick="bulkSetStatus('buy')">🛒 Want to Buy</button>
+                        <span style="width:1px;height:22px;background:#E8DFD5;margin:0 2px;"></span>
+                        <span style="font-size:11px;font-weight:800;color:#8B7E74;letter-spacing:.03em;">OWNERSHIP</span>
+                        <button class="btn btn-secondary" style="font-size:13px;padding:6px 12px;" onclick="bulkAddOwnership('Physical')" title="Mark selected as owned — Physical">📖 Physical</button>
+                        <button class="btn btn-secondary" style="font-size:13px;padding:6px 12px;" onclick="bulkAddOwnership('Digital')" title="Mark selected as owned — Digital">📱 Digital</button>
+                        <button class="btn btn-secondary" style="font-size:13px;padding:6px 12px;" onclick="bulkAddOwnership('Audio')" title="Mark selected as owned — Audio">🎧 Audio</button>
+                        <button class="btn btn-secondary" style="font-size:13px;padding:6px 12px;" onclick="bulkSetNotOwned()" title="Mark selected as Not Owned">🚫 Not Owned</button>
+                        <span style="width:1px;height:22px;background:#E8DFD5;margin:0 2px;"></span>
+                        <button class="btn btn-secondary" style="font-size:13px;padding:6px 12px;color:#F43F5E;border-color:#F43F5E;" onclick="bulkDeleteBooks()">🗑️ Delete</button>
+                        <button class="btn btn-secondary" style="font-size:13px;padding:6px 12px;" onclick="cancelBulkSelect()">Cancel</button>
                     </div>
                     <!-- Upcoming releases in your library -->
                     <div id="libReleasesSection"></div>
@@ -13257,6 +13269,70 @@ function bulkMarkWant() {
 }
 
 function cancelBulkSelect() { toggleBulkMode(); }
+
+// Bulk: set a reading status (reading / dnf / buy) on all selected books.
+function bulkSetStatus(status) {
+    if (selectedBookIds.size === 0) { showNotification('Select some books first!', 1500); return; }
+    const labels = { reading: 'Reading', dnf: 'DNF', buy: 'Want to Buy', want: 'To Be Read', read: 'Read' };
+    let n = 0;
+    selectedBookIds.forEach(id => {
+        const book = app.books.find(b => b.id === id);
+        if (!book) return;
+        book.status = status;
+        if (status === 'reading' && !book.dateStarted) book.dateStarted = new Date().toISOString();
+        n++;
+    });
+    app.saveData();
+    toggleBulkMode();
+    applyLibraryFilters();
+    showNotification(`${n} set to ${labels[status] || status}!`, 1500);
+}
+
+// Bulk: mark all selected as OWNED in a given format (adds the format, clears any "Do Not Own").
+function bulkAddOwnership(fmt) {
+    if (selectedBookIds.size === 0) { showNotification('Select some books first!', 1500); return; }
+    let n = 0;
+    selectedBookIds.forEach(id => {
+        const book = app.books.find(b => b.id === id);
+        if (!book) return;
+        let fmts = (book.ownershipFormat || []).filter(f => f !== 'Do Not Own');
+        if (fmts.indexOf(fmt) < 0) fmts.push(fmt);
+        book.ownershipFormat = fmts;
+        n++;
+    });
+    app.saveData();
+    toggleBulkMode();
+    applyLibraryFilters();
+    showNotification(`${n} marked Owned · ${fmt} 📗`, 1500);
+}
+
+// Bulk: mark all selected as NOT OWNED (explicit "Do Not Own", clears owned formats).
+function bulkSetNotOwned() {
+    if (selectedBookIds.size === 0) { showNotification('Select some books first!', 1500); return; }
+    let n = 0;
+    selectedBookIds.forEach(id => {
+        const book = app.books.find(b => b.id === id);
+        if (!book) return;
+        book.ownershipFormat = ['Do Not Own'];
+        n++;
+    });
+    app.saveData();
+    toggleBulkMode();
+    applyLibraryFilters();
+    showNotification(`${n} marked Not Owned 📕`, 1500);
+}
+
+// Bulk: delete all selected books (irreversible — confirms first).
+function bulkDeleteBooks() {
+    if (selectedBookIds.size === 0) { showNotification('Select some books first!', 1500); return; }
+    const count = selectedBookIds.size;
+    if (!confirm(`Delete ${count} book${count > 1 ? 's' : ''} from your library? This can't be undone.`)) return;
+    app.books = app.books.filter(b => !selectedBookIds.has(b.id));
+    app.saveData();
+    toggleBulkMode();
+    applyLibraryFilters();
+    showNotification(`${count} book${count > 1 ? 's' : ''} deleted 🗑️`, 1500);
+}
 
 // ===== FRIENDS SYSTEM =====
 
