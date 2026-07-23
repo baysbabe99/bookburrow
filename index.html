@@ -4638,6 +4638,12 @@
             if ((remote.xp || 0) > (local.xp || 0)) changed = true;
             merged.streak = Math.max(local.streak || 0, remote.streak || 0);
             merged.yearlyGoal = local.yearlyGoal || remote.yearlyGoal || 24;
+            // AI scanner Worker URL: prefer whichever side actually has one, so a browser
+            // that never set it adopts the cloud's URL instead of clobbering it with an empty
+            // string (the old "local wins" Object.assign let an unset browser wipe it — which is
+            // why the scanner showed "not set up" on a second browser). Added 2026-07-23.
+            merged.shelfVisionUrl = local.shelfVisionUrl || remote.shelfVisionUrl || '';
+            if (!local.shelfVisionUrl && remote.shelfVisionUrl) changed = true;
             // Achievements: union (unlocked on either device stays unlocked).
             merged.achievements = Object.assign({}, remote.achievements || {}, local.achievements || {});
             if (Object.keys(remote.achievements || {}).some(k => !(local.achievements || {})[k])) changed = true;
