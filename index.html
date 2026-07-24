@@ -2700,6 +2700,7 @@
                 <button class="nav-item active" data-section="dashboard"><span>🏠</span><span>Dashboard</span></button>
                 <button class="nav-item" data-section="friends"><span>👫</span><span>Friends</span></button>
                 <button class="nav-item" data-section="library"><span>📖</span><span>My Library</span></button>
+                <button class="nav-item" data-section="recipes"><span>🍳</span><span>Recipe Finder</span></button>
                 <button class="nav-item" data-section="recommendations"><span>💡</span><span>Recommended For You</span></button>
                 <button class="nav-item" data-section="quests"><span>⚔️</span><span>Quests</span></button>
                 <button class="nav-item" data-section="profile"><span>👤</span><span>My Profile</span></button>
@@ -3496,6 +3497,13 @@
                     <div id="libraryTab-vshelf" class="library-tab-content"></div>
 
                 </div><!-- /librarySection -->
+
+                <div id="recipesSection" class="content-section">
+                    <h2 class="section-header">🍳 Recipe Finder</h2>
+                    <p style="color: #7D9B76; margin-bottom: 16px; font-size: 14px;">All your cookbooks &amp; recipe books, gathered in one place.</p>
+                    <div id="recipeStats" style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;"></div>
+                    <div class="book-grid" id="recipeGrid"></div>
+                </div><!-- /recipesSection -->
 
                 <div id="searchSection" class="content-section">
                     <h2 class="section-header">Search Books</h2>
@@ -5466,6 +5474,7 @@ function navigateTo(section) {
         'dashboard': 'dashboardSection',
         'recommendations': 'recommendationsSection',
         'library': 'librarySection',
+        'recipes': 'recipesSection',
         'search': 'searchSection',
         'quests': 'questsSection',
         'friends': 'friendsSection'
@@ -5499,9 +5508,40 @@ function navigateTo(section) {
     if (section === 'profile') { renderProfile(); renderApps(); }
     if (section === 'dashboard') renderDashboard();
     if (section === 'recommendations') renderRecommendations();
+    if (section === 'recipes') renderRecipeFinder();
     if (section === 'library') { switchLibraryTab(currentLibraryTab); try { autoImportCloudScans(); } catch (e) {} try { renderRecentlyScanned(true); } catch (e) {} }
     if (section === 'quests') { renderChallenges(); renderAchievements(); renderGoals(); renderDragonJourney(); }
     if (section === 'friends') initializeFriends();
+}
+
+// ===== RECIPE FINDER — gathers all cookbooks & recipe books in one place =====
+// Detection is by genre first (Cooking, Cookbook, Baking, Cookies, …), then by
+// title keywords, so cookbooks filed under an odd genre still surface.
+function isCookbook(b) {
+    if (!b) return false;
+    var g = (b.genre || '').toLowerCase();
+    if (/cook|recipe|baking|culinar/.test(g)) return true;
+    var t = (b.title || '').toLowerCase();
+    if (/\bcookbook\b|\brecipes?\b|\bcooking\b|air fryer|instant pot|slow cooker|meal prep|\bbaking\b|\bbake\b/.test(t)) return true;
+    return false;
+}
+function renderRecipeFinder() {
+    if (!app || !app.books) return;
+    var books = app.books.filter(isCookbook).sort(function (a, b) { return (a.title || '').localeCompare(b.title || ''); });
+    var stats = document.getElementById('recipeStats');
+    if (stats) {
+        var read = books.filter(function (b) { return b.status === 'read'; }).length;
+        stats.innerHTML =
+            '<span style="background:#FEF3E2;border:2px solid #E8DFD5;border-radius:12px;padding:8px 14px;font-weight:700;color:#C2705B;">🍳 ' + books.length + ' cookbook' + (books.length === 1 ? '' : 's') + '</span>' +
+            (read ? '<span style="background:#FFF8F0;border:2px solid #E8DFD5;border-radius:12px;padding:8px 14px;font-weight:600;color:#7D9B76;">📗 ' + read + ' read</span>' : '');
+    }
+    var grid = document.getElementById('recipeGrid');
+    if (!grid) return;
+    if (!books.length) {
+        grid.innerHTML = '<p style="grid-column:1/-1;color:#8B7E74;text-align:center;padding:40px 20px;line-height:1.6;">No cookbooks found yet.<br>Tag a book’s genre as <b>Cookbook</b> (or Cooking / Baking), or give it a title with <b>Recipes</b> or <b>Cookbook</b>, and it’ll show up here automatically.</p>';
+        return;
+    }
+    grid.innerHTML = books.map(libBookCardHTML).join('');
 }
 
 function updateXPDisplay() {
@@ -17439,6 +17479,7 @@ initializeApp();
       <div class="bb-sheet" role="dialog" aria-label="More">
         <div class="bb-sheet-handle"></div>
         <button class="bb-sheet-item" type="button" data-section="friends"><span class="bb-si">👫</span> Friends</button>
+        <button class="bb-sheet-item" type="button" data-section="recipes"><span class="bb-si">🍳</span> Recipe Finder</button>
         <button class="bb-sheet-item" type="button" data-section="recommendations"><span class="bb-si">💡</span> For You</button>
         <div class="bb-sheet-sep"></div>
         <button class="bb-sheet-item bb-danger" type="button" id="bbLogout"><span class="bb-si">🚪</span> Log out</button>
@@ -17453,7 +17494,7 @@ initializeApp();
         var backdrop = document.getElementById('bbSheetBackdrop');
         var logoutBtn = document.getElementById('bbLogout');
         if(!nav) return;
-        var moreSet = { friends:1, recommendations:1 };
+        var moreSet = { friends:1, recommendations:1, recipes:1 };
         function openSheet(){ if(backdrop) backdrop.classList.add('open'); }
         function closeSheet(){ if(backdrop) backdrop.classList.remove('open'); }
         function syncActive(){
