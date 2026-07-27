@@ -769,6 +769,26 @@
             border-color: #C2705B;
         }
 
+        .filter-count {
+            display: inline-block;
+            min-width: 16px;
+            margin-left: 4px;
+            padding: 1px 7px;
+            border-radius: 10px;
+            background: rgba(194, 112, 91, 0.14);
+            color: inherit;
+            font-size: 12px;
+            font-weight: 700;
+            line-height: 1.5;
+            vertical-align: middle;
+        }
+        .filter-btn.active .filter-count {
+            background: rgba(255, 248, 240, 0.3);
+        }
+        .filter-count:empty {
+            display: none;
+        }
+
         .library-actions {
             display: flex;
             gap: 12px;
@@ -2700,7 +2720,6 @@
                 <button class="nav-item active" data-section="dashboard"><span>🏠</span><span>Dashboard</span></button>
                 <button class="nav-item" data-section="friends"><span>👫</span><span>Friends</span></button>
                 <button class="nav-item" data-section="library"><span>📖</span><span>My Library</span></button>
-                <button class="nav-item" data-section="recipes"><span>🍳</span><span>Recipe Finder</span></button>
                 <button class="nav-item" data-section="recommendations"><span>💡</span><span>Recommended For You</span></button>
                 <button class="nav-item" data-section="quests"><span>⚔️</span><span>Quests</span></button>
                 <button class="nav-item" data-section="profile"><span>👤</span><span>My Profile</span></button>
@@ -3439,12 +3458,12 @@
 
                     <div class="library-controls">
                         <div class="filter-tabs">
-                            <button class="filter-btn active" data-filter="all">All Books</button>
-                            <button class="filter-btn" data-filter="reading">Reading</button>
-                            <button class="filter-btn" data-filter="read">Read</button>
-                            <button class="filter-btn" data-filter="want">To Be Read</button>
-                            <button class="filter-btn" data-filter="dnf">DNF</button>
-                            <button class="filter-btn" data-filter="buy">Want to Buy</button>
+                            <button class="filter-btn active" data-filter="all">All Books <span class="filter-count"></span></button>
+                            <button class="filter-btn" data-filter="reading">Reading <span class="filter-count"></span></button>
+                            <button class="filter-btn" data-filter="read">Read <span class="filter-count"></span></button>
+                            <button class="filter-btn" data-filter="want">To Be Read <span class="filter-count"></span></button>
+                            <button class="filter-btn" data-filter="dnf">DNF <span class="filter-count"></span></button>
+                            <button class="filter-btn" data-filter="buy">Want to Buy <span class="filter-count"></span></button>
                         </div>
                         <div class="library-actions">
                             <button class="btn btn-primary" id="openAddBookBtn2">+ Add Book</button>
@@ -3497,13 +3516,6 @@
                     <div id="libraryTab-vshelf" class="library-tab-content"></div>
 
                 </div><!-- /librarySection -->
-
-                <div id="recipesSection" class="content-section">
-                    <h2 class="section-header">🍳 Recipe Finder</h2>
-                    <p style="color: #7D9B76; margin-bottom: 16px; font-size: 14px;">All your cookbooks &amp; recipe books, gathered in one place.</p>
-                    <div id="recipeStats" style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;"></div>
-                    <div class="book-grid" id="recipeGrid"></div>
-                </div><!-- /recipesSection -->
 
                 <div id="searchSection" class="content-section">
                     <h2 class="section-header">Search Books</h2>
@@ -3742,6 +3754,16 @@
                             </div>
                             <div id="importStats" style="display:none;margin-top:12px;padding:12px;background:rgba(125,155,118,0.1);border-radius:10px;font-size:13px;color:#3D5A80;"></div>
                             <p style="font-size: 12px; color: #7D9B76; margin-top: 16px; line-height: 1.6;"><strong>Supported formats:</strong><br>Bookburrow CSV/JSON · Goodreads CSV export · Any CSV with title/author columns</p>
+                        </div>
+                        <div class="import-export-subsection">
+                            <h3>🔄 Sync from Goodreads / CSV</h3>
+                            <p style="font-size:13px;color:#8B7E74;margin-bottom:12px;">Updates books you already have — fills in missing ratings &amp; finish-dates and moves a status forward (e.g. Want&nbsp;→&nbsp;Read). Never adds duplicates, never overwrites a rating or date you've already set, and never moves a book backward.</p>
+                            <div class="import-drop-zone" id="syncDropZone" onclick="document.getElementById('syncFile').click()" style="cursor:pointer;">
+                                <p>Click to choose your Goodreads or Bookburrow export</p>
+                                <small>CSV or JSON · a backup downloads first</small>
+                                <input type="file" id="syncFile" accept=".csv,.json" style="display:none;" onchange="handleSyncFile(this.files[0]); this.value='';">
+                            </div>
+                            <div id="syncPreview" class="import-preview" style="display:none;margin-top:12px;"></div>
                         </div>
                     </div>
                 </div>
@@ -5474,7 +5496,6 @@ function navigateTo(section) {
         'dashboard': 'dashboardSection',
         'recommendations': 'recommendationsSection',
         'library': 'librarySection',
-        'recipes': 'recipesSection',
         'search': 'searchSection',
         'quests': 'questsSection',
         'friends': 'friendsSection'
@@ -5508,40 +5529,9 @@ function navigateTo(section) {
     if (section === 'profile') { renderProfile(); renderApps(); }
     if (section === 'dashboard') renderDashboard();
     if (section === 'recommendations') renderRecommendations();
-    if (section === 'recipes') renderRecipeFinder();
     if (section === 'library') { switchLibraryTab(currentLibraryTab); try { autoImportCloudScans(); } catch (e) {} try { renderRecentlyScanned(true); } catch (e) {} }
     if (section === 'quests') { renderChallenges(); renderAchievements(); renderGoals(); renderDragonJourney(); }
     if (section === 'friends') initializeFriends();
-}
-
-// ===== RECIPE FINDER — gathers all cookbooks & recipe books in one place =====
-// Detection is by genre first (Cooking, Cookbook, Baking, Cookies, …), then by
-// title keywords, so cookbooks filed under an odd genre still surface.
-function isCookbook(b) {
-    if (!b) return false;
-    var g = (b.genre || '').toLowerCase();
-    if (/cook|recipe|baking|culinar/.test(g)) return true;
-    var t = (b.title || '').toLowerCase();
-    if (/\bcookbook\b|\brecipes?\b|\bcooking\b|air fryer|instant pot|slow cooker|meal prep|\bbaking\b|\bbake\b/.test(t)) return true;
-    return false;
-}
-function renderRecipeFinder() {
-    if (!app || !app.books) return;
-    var books = app.books.filter(isCookbook).sort(function (a, b) { return (a.title || '').localeCompare(b.title || ''); });
-    var stats = document.getElementById('recipeStats');
-    if (stats) {
-        var read = books.filter(function (b) { return b.status === 'read'; }).length;
-        stats.innerHTML =
-            '<span style="background:#FEF3E2;border:2px solid #E8DFD5;border-radius:12px;padding:8px 14px;font-weight:700;color:#C2705B;">🍳 ' + books.length + ' cookbook' + (books.length === 1 ? '' : 's') + '</span>' +
-            (read ? '<span style="background:#FFF8F0;border:2px solid #E8DFD5;border-radius:12px;padding:8px 14px;font-weight:600;color:#7D9B76;">📗 ' + read + ' read</span>' : '');
-    }
-    var grid = document.getElementById('recipeGrid');
-    if (!grid) return;
-    if (!books.length) {
-        grid.innerHTML = '<p style="grid-column:1/-1;color:#8B7E74;text-align:center;padding:40px 20px;line-height:1.6;">No cookbooks found yet.<br>Tag a book’s genre as <b>Cookbook</b> (or Cooking / Baking), or give it a title with <b>Recipes</b> or <b>Cookbook</b>, and it’ll show up here automatically.</p>';
-        return;
-    }
-    grid.innerHTML = books.map(libBookCardHTML).join('');
 }
 
 function updateXPDisplay() {
@@ -6188,9 +6178,6 @@ function applyLibraryFilters() {
 
     let books = app.books;
 
-    // Status filter
-    if (statusFilter !== 'all') books = books.filter(b => b.status === statusFilter);
-
     // Favorites filter
     if (favOnly) books = books.filter(b => b.favorite);
 
@@ -6235,6 +6222,14 @@ function applyLibraryFilters() {
     if (tropeFilter) books = books.filter(b => _libBookMeta(b).tropes.indexOf(tropeFilter) >= 0);
     if (moodFilter) books = books.filter(b => _libBookMeta(b).mood === moodFilter);
 
+    // Per-status tab counts — reflect every OTHER active filter, so each tab's
+    // number matches exactly what you'd see if you clicked it. Computed before
+    // the status filter is applied below.
+    updateLibraryTabCounts(books);
+
+    // Status filter (applied last so the counts above can see every status)
+    if (statusFilter !== 'all') books = books.filter(b => b.status === statusFilter);
+
     // Sorting
     const dashIdx = sortBy.lastIndexOf('-');
     const sortField = sortBy.substring(0, dashIdx);
@@ -6273,6 +6268,19 @@ function applyLibraryFilters() {
     renderLibraryStats();
     updateOwnershipScopeCounts();
     applyLibraryViewMode();
+}
+
+// Fills the little count badge on each status tab (All / Reading / Read / To Be
+// Read / DNF / Want to Buy). Counts come from the filter-respecting set passed in,
+// so the numbers always match what clicking that tab would show.
+function updateLibraryTabCounts(baseBooks) {
+    const counts = { all: baseBooks.length, reading: 0, read: 0, want: 0, dnf: 0, buy: 0 };
+    for (const b of baseBooks) { if (counts[b.status] !== undefined) counts[b.status]++; }
+    document.querySelectorAll('.filter-btn[data-filter]').forEach(btn => {
+        const f = btn.dataset.filter;
+        const span = btn.querySelector('.filter-count');
+        if (span && counts[f] !== undefined) span.textContent = counts[f].toLocaleString();
+    });
 }
 
 function clearLibraryFilters() {
@@ -6580,7 +6588,7 @@ function libBookCardHTML(book) {
             </div>
             ${cardProgressHTML(book)}
             <div class="book-title">${book.title}</div>
-            <div class="book-author">${book.author}</div>
+            <div class="book-author">${book.author || ''}</div>
             <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;">
                 ${(function(){var o=bookOwned(book);return `<span title="${o?'You own this':'Not owned (borrowed / wishlist)'}" style="background:${o?'rgba(125,155,118,0.18)':'rgba(194,112,91,0.15)'};color:${o?'#5A8A50':'#C2705B'};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;">${o?'📗 Owned':'📕 Not Owned'}</span>`;})()}
                 ${book.genre ? `<span style="background:rgba(125,155,118,0.15);color:#7D9B76;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${book.genre}</span>` : ''}
@@ -6589,7 +6597,7 @@ function libBookCardHTML(book) {
                 ${(book.ownershipFormat||[]).map(f => `<span style="background:${f==='Do Not Own'?'rgba(244,63,94,0.12)':'rgba(194,112,91,0.12)'};color:${f==='Do Not Own'?'#F43F5E':'#C2705B'};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${f==='Physical'?'📖':f==='Digital'?'📱':f==='Do Not Own'?'🚫':'🎧'} ${f}</span>`).join('')}
             </div>
             ${book.publisher || book.publicationYear ? `<div style="font-size:11px;color:#8B7E74;margin-top:3px;">${book.publisher ? book.publisher : ''}${book.publisher && book.publicationYear ? ', ' : ''}${book.publicationYear || ''}</div>` : ''}
-            ${book.releaseDate && (() => { const d = daysUntilRelease(book.releaseDate); if (d === null || d < 0) return ''; const label = d === 0 ? '🎉 Releases TODAY' : (d === 1 ? '📅 Releases tomorrow' : `📅 Releases in ${d} days`); const color = d === 0 ? '#C2705B' : (d <= 7 ? '#D4A76A' : '#7D9B76'); return `<div style="display:inline-block;margin-top:6px;padding:3px 10px;background:${color};color:white;border-radius:12px;font-size:11px;font-weight:700;">${label}</div>`; })()}
+            ${book.releaseDate ? (() => { const d = daysUntilRelease(book.releaseDate); if (d === null || d < 0) return ''; const label = d === 0 ? '🎉 Releases TODAY' : (d === 1 ? '📅 Releases tomorrow' : `📅 Releases in ${d} days`); const color = d === 0 ? '#C2705B' : (d <= 7 ? '#D4A76A' : '#7D9B76'); return `<div style="display:inline-block;margin-top:6px;padding:3px 10px;background:${color};color:white;border-radius:12px;font-size:11px;font-weight:700;">${label}</div>`; })() : ''}
             <div style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap;">
                 <div style="position:relative;display:inline-block;">
                     <span class="book-status ${book.status === 'reading' ? 'book-status-reading' : ''}" style="background:${statusColors[book.status]+'22' || '#8B7E7422'};color:${statusColors[book.status] || '#8B7E74'};border-color:${statusColors[book.status] || '#8B7E74'};" onclick="event.stopPropagation();toggleQuickStatus(this,${book.id})">${statusEmoji[book.status]||''} ${statusLabels[book.status] || book.status}</span>
@@ -7046,7 +7054,7 @@ function renderLibraryBooks(filter) {
             </div>
             ${cardProgressHTML(book)}
             <div class="book-title">${book.title}</div>
-            <div class="book-author">${book.author}</div>
+            <div class="book-author">${book.author || ''}</div>
             <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;">
                 ${(function(){var o=bookOwned(book);return `<span title="${o?'You own this':'Not owned (borrowed / wishlist)'}" style="background:${o?'rgba(125,155,118,0.18)':'rgba(194,112,91,0.15)'};color:${o?'#5A8A50':'#C2705B'};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;">${o?'📗 Owned':'📕 Not Owned'}</span>`;})()}
                 ${book.genre ? `<span style="background:rgba(125,155,118,0.15);color:#7D9B76;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${book.genre}</span>` : ''}
@@ -7055,7 +7063,7 @@ function renderLibraryBooks(filter) {
                 ${(book.ownershipFormat||[]).map(f => `<span style="background:${f==='Do Not Own'?'rgba(244,63,94,0.12)':'rgba(194,112,91,0.12)'};color:${f==='Do Not Own'?'#F43F5E':'#C2705B'};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${f==='Physical'?'📖':f==='Digital'?'📱':f==='Do Not Own'?'🚫':'🎧'} ${f}</span>`).join('')}
             </div>
             ${book.publisher || book.publicationYear ? `<div style="font-size:11px;color:#8B7E74;margin-top:3px;">${book.publisher ? book.publisher : ''}${book.publisher && book.publicationYear ? ', ' : ''}${book.publicationYear || ''}</div>` : ''}
-            ${book.releaseDate && (() => { const d = daysUntilRelease(book.releaseDate); if (d === null || d < 0) return ''; const label = d === 0 ? '🎉 Releases TODAY' : (d === 1 ? '📅 Releases tomorrow' : `📅 Releases in ${d} days`); const color = d === 0 ? '#C2705B' : (d <= 7 ? '#D4A76A' : '#7D9B76'); return `<div style="display:inline-block;margin-top:6px;padding:3px 10px;background:${color};color:white;border-radius:12px;font-size:11px;font-weight:700;">${label}</div>`; })()}
+            ${book.releaseDate ? (() => { const d = daysUntilRelease(book.releaseDate); if (d === null || d < 0) return ''; const label = d === 0 ? '🎉 Releases TODAY' : (d === 1 ? '📅 Releases tomorrow' : `📅 Releases in ${d} days`); const color = d === 0 ? '#C2705B' : (d <= 7 ? '#D4A76A' : '#7D9B76'); return `<div style="display:inline-block;margin-top:6px;padding:3px 10px;background:${color};color:white;border-radius:12px;font-size:11px;font-weight:700;">${label}</div>`; })() : ''}
             <div style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap;">
                 <div style="position:relative;display:inline-block;">
                     <span class="book-status ${book.status === 'reading' ? 'book-status-reading' : ''}" style="background:${statusColors[book.status]+'22' || '#8B7E7422'};color:${statusColors[book.status] || '#8B7E74'};border-color:${statusColors[book.status] || '#8B7E74'};" onclick="event.stopPropagation();toggleQuickStatus(this,${book.id})">${statusEmoji[book.status]||''} ${statusLabels[book.status] || book.status}</span>
@@ -11273,6 +11281,131 @@ function setupImportPaste() {
     if (dropZone && dropZone.parentNode) {
         dropZone.parentNode.insertBefore(pasteArea, dropZone.nextSibling);
     }
+}
+
+// ==================== SYNC FROM FILE (updates EXISTING books) ====================
+// Import (above) only ADDS new books and skips ones you already have. Sync does the
+// opposite: it UPDATES books you already have from a Goodreads/Bookburrow export —
+// moving a status forward (never backward), and filling a MISSING rating / finish-date
+// (never overwriting one you've set). Matches by ISBN, else title+author (isImportDuplicate).
+let pendingSync = [];
+
+function handleSyncFile(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const content = e.target.result;
+        let books = [];
+        if (file.name.toLowerCase().endsWith('.json')) {
+            try { const d = JSON.parse(content); books = Array.isArray(d) ? d : (d.books || []); }
+            catch (err) { showNotification('Invalid JSON file', 2000); return; }
+        } else {
+            books = parseCSV(content);
+        }
+        showSyncPreview(books);
+    };
+    reader.readAsText(file);
+}
+
+// Find the existing library book that an incoming row refers to (ISBN, else title+author).
+function _syncFindExisting(b) {
+    const norm = _normISBN(b.isbn);
+    return app.books.find(x => (norm && _normISBN(x.isbn) === norm) ||
+        isImportDuplicate(x, { title: b.title || '', author: b.author || '', isbn: b.isbn || '' }));
+}
+
+// Build the change-set a sync would apply. Each entry: {book, status?, rating?, dateFinished?}.
+// Forward-only status (via _bookProgressScore) + blanks-only rating/date, so nothing is lost.
+function _computeSyncPlan(books) {
+    const plan = [];
+    const seen = new Set();
+    (books || []).forEach(b => {
+        const ex = _syncFindExisting(b);
+        if (!ex || seen.has(ex.id)) return;   // one update per existing book
+        const chg = {};
+        if (b.status && _bookProgressScore(b) > _bookProgressScore(ex)) chg.status = b.status;
+        if ((b.rating || 0) > 0 && !(ex.rating > 0)) chg.rating = b.rating;
+        if (b.dateFinished && !ex.dateFinished) chg.dateFinished = b.dateFinished;
+        if (Object.keys(chg).length) { chg.book = ex; plan.push(chg); seen.add(ex.id); }
+    });
+    return plan;
+}
+
+function showSyncPreview(rawBooks) {
+    const books = dedupeWithin(rawBooks || []);
+    pendingSync = books;
+    const plan = _computeSyncPlan(books);
+    const box = document.getElementById('syncPreview');
+    if (!box) return;
+    box.style.display = 'block';
+    if (!plan.length) {
+        box.innerHTML = `<div style="background:#FEF3E2;border-radius:12px;padding:16px;text-align:center;color:#7D9B76;font-weight:700;">✓ Everything's already in sync — nothing to update.</div>`;
+        return;
+    }
+    const nStatus = plan.filter(p => p.status).length;
+    const nRating = plan.filter(p => p.rating).length;
+    const nDate = plan.filter(p => p.dateFinished).length;
+    const rows = plan.slice(0, 200).map(p => {
+        const parts = [];
+        if (p.status) parts.push('→ ' + (statusLabels[p.status] || p.status));
+        if (p.rating) parts.push('★' + p.rating);
+        if (p.dateFinished) parts.push('📅');
+        return `<tr style="border-top:1px solid #E8DFD5;">
+            <td style="padding:6px 8px;color:#3D5A80;">${escapeHtml(p.book.title || '?')}</td>
+            <td style="padding:6px 8px;color:#8B7E74;white-space:nowrap;">${parts.join(' · ')}</td></tr>`;
+    }).join('');
+    box.innerHTML = `
+        <div style="background:#FEF3E2;border-radius:12px;padding:16px;margin-bottom:12px;">
+            <div style="font-weight:700;color:#3D5A80;margin-bottom:6px;">🔄 Sync Preview</div>
+            <div style="color:#8B7E74;"><strong>${plan.length}</strong> books to update · ${nStatus} statuses · ${nRating} ratings · ${nDate} dates</div>
+        </div>
+        <div style="max-height:280px;overflow-y:auto;border:2px solid #E8DFD5;border-radius:12px;">
+            <table style="width:100%;border-collapse:collapse;font-size:13px;"><tbody>${rows}</tbody></table>
+            ${plan.length > 200 ? `<div style="padding:8px;text-align:center;color:#8B7E74;font-size:12px;">…and ${plan.length - 200} more</div>` : ''}
+        </div>
+        <div style="display:flex;gap:10px;margin-top:12px;">
+            <button class="btn btn-primary" style="flex:1;" onclick="doSync()">🔄 Update ${plan.length} Books</button>
+            <button class="btn btn-secondary" style="flex:1;" onclick="cancelSync()">Cancel</button>
+        </div>`;
+}
+
+function cancelSync() {
+    pendingSync = [];
+    const box = document.getElementById('syncPreview');
+    if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+}
+
+function doSync() {
+    // Safety net: a full backup downloads first (restore via "Restore from Backup" above).
+    try { downloadFile(JSON.stringify(app.books, null, 2), 'bookburrow_pre_sync_backup.json', 'application/json'); } catch (e) {}
+    const plan = _computeSyncPlan(pendingSync);
+    let st = 0, rt = 0, dt = 0;
+    plan.forEach(p => {
+        const ex = p.book;
+        if (p.status && p.status !== ex.status) {
+            ex.status = p.status;
+            if (p.status === 'read') {
+                if (!ex.dateFinished && !p.dateFinished) ex.dateFinished = nowFinishISO();
+                try { app.awardFinishXP(ex); } catch (e) {}
+            }
+            st++;
+        }
+        if (p.rating) { ex.rating = p.rating; rt++; }
+        if (p.dateFinished) { ex.dateFinished = p.dateFinished; dt++; }
+    });
+    app.saveData();
+    try { updateXPDisplay(); } catch (e) {}
+    try { applyLibraryFilters(); } catch (e) {}
+    try { renderDashboard(); } catch (e) {}
+    const box = document.getElementById('syncPreview');
+    if (box) box.innerHTML = `
+        <div style="text-align:center;padding:24px;color:#7D9B76;">
+            <div style="font-size:32px;margin-bottom:8px;">✅</div>
+            <div style="font-weight:700;font-size:18px;margin-bottom:4px;">Synced ${plan.length} books</div>
+            <div style="font-size:14px;color:#8B7E74;">${st} statuses · ${rt} ratings · ${dt} dates · backup saved to your downloads</div>
+        </div>`;
+    pendingSync = [];
+    showNotification(`Synced ${plan.length} books 🔄`, 1800);
 }
 
 function handleImportPaste() {
@@ -17479,7 +17612,6 @@ initializeApp();
       <div class="bb-sheet" role="dialog" aria-label="More">
         <div class="bb-sheet-handle"></div>
         <button class="bb-sheet-item" type="button" data-section="friends"><span class="bb-si">👫</span> Friends</button>
-        <button class="bb-sheet-item" type="button" data-section="recipes"><span class="bb-si">🍳</span> Recipe Finder</button>
         <button class="bb-sheet-item" type="button" data-section="recommendations"><span class="bb-si">💡</span> For You</button>
         <div class="bb-sheet-sep"></div>
         <button class="bb-sheet-item bb-danger" type="button" id="bbLogout"><span class="bb-si">🚪</span> Log out</button>
@@ -17494,7 +17626,7 @@ initializeApp();
         var backdrop = document.getElementById('bbSheetBackdrop');
         var logoutBtn = document.getElementById('bbLogout');
         if(!nav) return;
-        var moreSet = { friends:1, recommendations:1, recipes:1 };
+        var moreSet = { friends:1, recommendations:1 };
         function openSheet(){ if(backdrop) backdrop.classList.add('open'); }
         function closeSheet(){ if(backdrop) backdrop.classList.remove('open'); }
         function syncActive(){
