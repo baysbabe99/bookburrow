@@ -6757,6 +6757,26 @@ function _normTitleStrong(s) {
     return t.replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+// True when one author string is a last-name-only or subset form of the other —
+// e.g. shelf-scan "Collins" vs library "Suzanne Collins", or "Couros/Novak" vs
+// "George Couros, Katie Novak". Shelf scans (AI spine reads) frequently yield a
+// bare surname, which _simRatio() scores too low to match, so a same-title book
+// was wrongly added as a DUPLICATE. This lets those collapse into the real copy.
+// Deliberately narrow: a single surname must appear as a token of the other name,
+// or every token of one name must be contained in the other — so two genuinely
+// different multi-name authors that merely share a surname are NOT merged.
+function _authorSubsetMatch(a, b) {
+    const na = _normLoose(a), nb = _normLoose(b);
+    if (!na || !nb) return false;
+    const ta = na.split(' ').filter(Boolean), tb = nb.split(' ').filter(Boolean);
+    if (!ta.length || !tb.length) return false;
+    if (ta.length === 1 && tb.indexOf(ta[0]) >= 0) return true;      // "Collins" ⊆ "Suzanne Collins"
+    if (tb.length === 1 && ta.indexOf(tb[0]) >= 0) return true;
+    const setB = new Set(tb); if (ta.length > 1 && ta.every(t => setB.has(t))) return true;
+    const setA = new Set(ta); if (tb.length > 1 && tb.every(t => setA.has(t))) return true;
+    return false;
+}
+
 // Conservative "is this the same book?" used at IMPORT time (auto-skips dupes).
 // Stricter than booksSimilar() — no broad substring rule — to avoid false skips.
 function isImportDuplicate(existing, incoming) {
@@ -6767,7 +6787,7 @@ function isImportDuplicate(existing, incoming) {
     const ta = _normTitleStrong(existing.title), tb = _normTitleStrong(incoming.title);
     if (!ta || !tb) return false;
     const aa = _normAuthor(existing.author), ab = _normAuthor(incoming.author);
-    const authorOk = !aa || !ab || aa === ab || _simRatio(aa, ab) >= 0.8;
+    const authorOk = !aa || !ab || aa === ab || _simRatio(aa, ab) >= 0.8 || _authorSubsetMatch(existing.author, incoming.author);
     if (!authorOk) return false;
     if (ta === tb) return true;                                      // same core title + compatible author
     return _simRatio(ta, tb) >= 0.92;                                // near-identical title (typo-level)
