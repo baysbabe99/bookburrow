@@ -3469,7 +3469,7 @@
                             <button class="btn btn-primary" id="openAddBookBtn2">+ Add Book</button>
                             <button class="btn btn-secondary" onclick="toggleBulkMode()">☑️ Bulk Edit</button>
                             <button class="btn btn-secondary" id="viewToggleBtn" onclick="toggleLibraryView()" title="Switch between grid and list view">☰ List View</button>
-                            <button class="btn btn-secondary" onclick="removeDuplicateBooks()" title="Find and remove duplicate books">🧹 Remove Duplicates</button>
+                            <button class="btn btn-secondary" onclick="cleanUpLibrary()" title="Remove duplicates & empty entries, and look up missing authors">🧹 Clean Up</button>
                         </div>
                     </div>
 
@@ -6865,66 +6865,177 @@ function findSimilarClusters(books) {
     return Object.values(map).filter(g => g.length > 1);
 }
 
-function removeDuplicateBooks() {
-    // Score a record so we keep the richest copy
+// Score a record so we keep the richest copy of a duplicate. Prefers a real
+// status, rating, notes, cover, ISBN — and a copy that HAS an author over one
+// that doesn't, so filling authors later never has to fight a chosen-blank copy.
+function _bookRichnessScore(b) {
     const statusWeight = { read: 5, reading: 4, dnf: 3, want: 2, buy: 1, loaned: 3 };
-    const score = b => (statusWeight[b.status] || 0) + (b.rating || 0)
+    const hasAuthor = b.author && (b.author || '').toString().trim().toLowerCase() !== 'unknown';
+    return (statusWeight[b.status] || 0) + (b.rating || 0)
         + (b.notes ? 1 : 0) + (b.progressPercentage ? 1 : 0)
-        + (b.favorite ? 1 : 0) + (b.isbn ? 1 : 0) + (b.coverId ? 1 : 0);
+        + (b.favorite ? 1 : 0) + (b.isbn ? 1 : 0) + (b.coverId ? 1 : 0)
+        + (hasAuthor ? 1 : 0);
+}
 
-    // Collect ALL removals (exact + fuzzy) first, then ask in ONE confirmation.
-    // (Operator preference, PRD §6.25: handle every duplicate "all at once" — never
-    //  prompt the user more than once per Remove-Duplicates click.)
+// Compute (but do NOT apply) every duplicate removal — exact + fuzzy. Shared by
+// removeDuplicateBooks() and cleanUpLibrary() so both agree on what's a dupe.
+function _computeDuplicateRemovals() {
+    const score = _bookRichnessScore;
     const toRemove = new Set();
-
-    // ---- Pass 1: exact duplicates (same normalised title + author) ----
+    // Pass 1: exact duplicates (same normalised title + author)
     const groups = {};
     app.books.forEach(b => {
         const k = dedupeKey(b);
-        if (!k || k === '|') return;
+        if (!k || k === '|') return;                  // skip title-less rows (handled as "empty")
         (groups[k] = groups[k] || []).push(b);
     });
-    const dupeGroups = Object.values(groups).filter(g => g.length > 1);
-    dupeGroups.forEach(g => {
+    Object.values(groups).filter(g => g.length > 1).forEach(g => {
         g.sort((a, b) => score(b) - score(a));        // richest first
         g.slice(1).forEach(b => toRemove.add(b.id));  // keep g[0], drop the rest
     });
     const exactCount = toRemove.size;
-
-    // ---- Pass 2: similar (fuzzy) matches, ignoring books already slated for removal ----
+    // Pass 2: similar (fuzzy) matches, ignoring books already slated for removal
     const remaining = app.books.filter(b => !toRemove.has(b.id));
     const clusters = findSimilarClusters(remaining);
     clusters.forEach(c => c.sort((a, b) => score(b) - score(a)));
     const fuzzyCount = clusters.reduce((n, c) => n + (c.length - 1), 0);
+    return { toRemove, exactCount, clusters, fuzzyCount, total: exactCount + fuzzyCount };
+}
 
-    // ---- Nothing to do? ----
-    const total = exactCount + fuzzyCount;
-    if (total === 0) { showNotification('No duplicates found ✨', 1500); return; }
+// A title is "usable" when it isn't blank or a scanner placeholder.
+function _titleUsable(b) {
+    const t = (b && b.title || '').toString().trim().toLowerCase();
+    return !!t && t !== 'unknown' && t !== 'unknown title' && t !== 'untitled' && t !== 'untitled scan' && t !== 'n/a' && t !== '?';
+}
+// An author is "missing" when it's blank or the "Unknown" placeholder.
+function _authorMissing(b) {
+    const a = (b && b.author || '').toString().trim().toLowerCase();
+    return !a || a === 'unknown' || a === 'n/a' || a === '?';
+}
 
-    // ---- Build ONE confirmation covering both passes ----
-    let msg = `Found ${total} duplicate book${total > 1 ? 's' : ''} to remove.\n\n`;
-    if (exactCount) msg += `• ${exactCount} exact duplicate${exactCount > 1 ? 's' : ''} (same title & author)\n`;
-    if (clusters.length) {
-        const many = clusters.length > 1;
-        msg += `• ${clusters.length} group${many ? 's' : ''} of similar-looking books:\n`;
-        clusters.forEach((cluster, i) => {
+// Look up an author for a title (returns '' when there's no confident match).
+// Requires the found title to match the book's title after strong normalisation,
+// so a generic search never assigns the wrong author. ISBN wins when present.
+async function _lookupAuthorForTitle(title, isbn) {
+    const clean = _normISBN(isbn);
+    if (clean && clean.length >= 10) {
+        try { const m = await fetchBookMeta(clean); if (m && m.author && m.author !== 'Unknown') return m.author; } catch (e) {}
+    }
+    const want = _normTitleStrong(title);
+    if (!want || want.length < 2) return '';
+    // Open Library: title search, take the first result whose title matches
+    try {
+        const d = await (await fetch('https://openlibrary.org/search.json?title=' + encodeURIComponent(title) + '&limit=5&fields=title,author_name')).json();
+        for (const doc of ((d && d.docs) || [])) {
+            if (doc.author_name && doc.author_name.length && _normTitleStrong(doc.title) === want) return doc.author_name.slice(0, 2).join(', ');
+        }
+    } catch (e) {}
+    // Google Books fallback: intitle search
+    try {
+        const gj = await (await fetch('https://www.googleapis.com/books/v1/volumes?q=intitle:' + encodeURIComponent(title) + '&country=US&maxResults=5')).json();
+        for (const it of ((gj && gj.items) || [])) {
+            const vi = it.volumeInfo || {};
+            if (vi.authors && vi.authors.length && _normTitleStrong(vi.title) === want) return vi.authors.slice(0, 2).join(', ');
+        }
+    } catch (e) {}
+    return '';
+}
+
+// ---- Remove duplicate books (standalone button — still available) ----
+function removeDuplicateBooks() {
+    const dup = _computeDuplicateRemovals();
+    if (dup.total === 0) { showNotification('No duplicates found ✨', 1500); return; }
+    let msg = `Found ${dup.total} duplicate book${dup.total > 1 ? 's' : ''} to remove.\n\n`;
+    if (dup.exactCount) msg += `• ${dup.exactCount} exact duplicate${dup.exactCount > 1 ? 's' : ''} (same title & author)\n`;
+    if (dup.clusters.length) {
+        const many = dup.clusters.length > 1;
+        msg += `• ${dup.clusters.length} group${many ? 's' : ''} of similar-looking books:\n`;
+        dup.clusters.forEach((cluster, i) => {
             if (many) msg += `   Group ${i + 1}:\n`;
-            cluster.forEach((b, j) => {
-                msg += `      ${j === 0 ? '✓ keep' : '✕ remove'}: "${b.title}" — ${b.author || 'Unknown'}\n`;
-            });
+            cluster.forEach((b, j) => { msg += `      ${j === 0 ? '✓ keep' : '✕ remove'}: "${b.title}" — ${b.author || 'Unknown'}\n`; });
         });
     }
     msg += `\nKeep the most complete copy of each and remove the rest?`;
-
     if (confirm(msg)) {
-        clusters.forEach(c => c.slice(1).forEach(b => toRemove.add(b.id)));
+        const toRemove = new Set(dup.toRemove);
+        dup.clusters.forEach(c => c.slice(1).forEach(b => toRemove.add(b.id)));
         app.books = app.books.filter(b => !toRemove.has(b.id));
         app.saveData();
         applyLibraryFilters();
         renderLibraryStats();
         renderDashboard();
-        showNotification(`Removed ${total} duplicate${total > 1 ? 's' : ''} 🧹`, 2000);
+        showNotification(`Removed ${dup.total} duplicate${dup.total > 1 ? 's' : ''} 🧹`, 2000);
     }
+}
+
+// ---- Clean Up: dupes + empty (no-title) rows + look up missing authors ----
+// One button, one confirm. Removals apply first; then authors are looked up
+// online (never overwriting one you've set). opts.auto skips the blocking
+// confirm() and returns a summary — used to drive it from automation.
+async function cleanUpLibrary(opts) {
+    opts = opts || {};
+    const auto = !!opts.auto;
+    if (!window.app || !Array.isArray(app.books)) return { error: 'no app' };
+
+    const emptyIds = app.books.filter(b => !_titleUsable(b)).map(b => b.id);   // no usable title
+    const dup = _computeDuplicateRemovals();                                    // duplicates
+    // Books that will still exist after removals AND have a title but no author
+    const removePreview = new Set(emptyIds);
+    dup.toRemove.forEach(id => removePreview.add(id));
+    dup.clusters.forEach(c => c.slice(1).forEach(b => removePreview.add(b.id)));
+    const needAuthor = app.books.filter(b => !removePreview.has(b.id) && _titleUsable(b) && _authorMissing(b));
+
+    const nEmpty = emptyIds.length, nDup = dup.total, nAuthor = needAuthor.length;
+    window.__cleanup = { phase: 'scan', nEmpty, nDup, nAuthor, done: 0, total: nAuthor, filled: 0, missed: 0 };
+
+    if (!nEmpty && !nDup && !nAuthor) {
+        if (!auto) showNotification("Library's already tidy ✨", 1800);
+        window.__cleanup.phase = 'done';
+        return { emptyRemoved: 0, dupsRemoved: 0, authorsFilled: 0, authorsMissed: 0, nothing: true };
+    }
+
+    if (!auto) {
+        let msg = 'Clean up your library?\n\n';
+        if (nDup) msg += `• Remove ${nDup} duplicate${nDup > 1 ? 's' : ''}\n`;
+        if (nEmpty) msg += `• Remove ${nEmpty} empty entr${nEmpty > 1 ? 'ies' : 'y'} (no title)\n`;
+        if (nAuthor) msg += `• Look up authors for ${nAuthor} book${nAuthor > 1 ? 's' : ''} (may take a minute)\n`;
+        msg += '\nKeep the most complete copy of each duplicate.';
+        if (!confirm(msg)) { window.__cleanup.phase = 'cancelled'; return { cancelled: true }; }
+    }
+
+    // 1) Apply removals (dupes + empties) up front, then persist.
+    if (removePreview.size) { app.books = app.books.filter(b => !removePreview.has(b.id)); app.saveData(); }
+
+    // 2) Look up missing authors — sequential + polite delay + progress.
+    let filled = 0, missed = 0;
+    if (nAuthor) {
+        window.__cleanup.phase = 'authors';
+        for (let i = 0; i < needAuthor.length; i++) {
+            const b = app.books.find(x => x.id === needAuthor[i].id);
+            if (!b) { window.__cleanup.done = i + 1; continue; }
+            let au = '';
+            try { au = await _lookupAuthorForTitle(b.title, b.isbn); } catch (e) {}
+            if (au) { b.author = au; filled++; } else { missed++; }
+            window.__cleanup.done = i + 1; window.__cleanup.filled = filled; window.__cleanup.missed = missed;
+            if (!auto && i % 15 === 14) showNotification(`Looking up authors… ${i + 1}/${nAuthor}`, 1100);
+            await new Promise(r => setTimeout(r, 140));
+        }
+        app.saveData();
+    }
+    window.__cleanup.phase = 'done';
+
+    try { applyLibraryFilters(); } catch (e) {}
+    try { renderLibraryStats(); } catch (e) {}
+    try { renderDashboard(); } catch (e) {}
+
+    if (!auto) {
+        const parts = [];
+        if (nDup) parts.push(`${nDup} dup${nDup > 1 ? 's' : ''}`);
+        if (nEmpty) parts.push(`${nEmpty} empty`);
+        if (filled) parts.push(`${filled} author${filled > 1 ? 's' : ''} added`);
+        showNotification('Cleaned: ' + (parts.join(' · ') || 'nothing') + ' 🧹', 2800);
+    }
+    return { emptyRemoved: nEmpty, dupsRemoved: nDup, authorsFilled: filled, authorsMissed: missed };
 }
 
 function toggleQuickStatus(el, bookId) {
@@ -17689,7 +17800,7 @@ initializeApp();
     </script>
     <!-- App version badge — bump APP_VERSION on each release; keep in sync with PRD.md -->
     <script>
-      var APP_VERSION = '3.68.1';
+      var APP_VERSION = '3.69.0';
       (function(){
         function ensure(){
           var logo = document.querySelector('.logo'); if(!logo) return;
