@@ -6975,7 +6975,7 @@ function removeDuplicateBooks() {
 async function cleanUpLibrary(opts) {
     opts = opts || {};
     const auto = !!opts.auto;
-    if (!window.app || !Array.isArray(app.books)) return { error: 'no app' };
+    if (typeof app === 'undefined' || !app || !Array.isArray(app.books)) return { error: 'no app' };
 
     const emptyIds = app.books.filter(b => !_titleUsable(b)).map(b => b.id);   // no usable title
     const dup = _computeDuplicateRemovals();                                    // duplicates
@@ -17800,7 +17800,7 @@ initializeApp();
     </script>
     <!-- App version badge — bump APP_VERSION on each release; keep in sync with PRD.md -->
     <script>
-      var APP_VERSION = '3.69.0';
+      var APP_VERSION = '3.69.1';
       (function(){
         function ensure(){
           var logo = document.querySelector('.logo'); if(!logo) return;
