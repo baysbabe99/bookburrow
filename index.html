@@ -11347,13 +11347,15 @@ function renderShelfPuzzles() {
     if (!wrap) return;
     const puzzles = (app.shelfPhotos || []).filter(p => p.isPuzzle && p.pieces && p.pieces.length);
     if (!puzzles.length) { wrap.innerHTML = ''; return; }
-    const _bbShelfToolbar = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">' +
-        '<span style="font-size:13px;font-weight:700;color:#8B7E74;">🧩 Scanned shelves (' + puzzles.length + ')</span>' +
+    const _bbSec = !!(window.__bbCollapse && window.__bbCollapse.section);
+    const _bbShelfToolbar = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">' +
+        '<button id="bbShelvesSectionArrow" onclick="toggleShelvesSection()" title="' + (_bbSec ? 'Expand section' : 'Collapse section') + '" style="background:none;border:none;cursor:pointer;font-size:16px;color:#8B7E74;padding:0 2px;line-height:1;">' + (_bbSec ? '▸' : '▾') + '</button>' +
+        '<span onclick="toggleShelvesSection()" style="font-size:13px;font-weight:700;color:#8B7E74;cursor:pointer;">🧩 Scanned shelves (' + puzzles.length + ')</span>' +
         '<button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;margin-left:auto;" onclick="setAllShelvesCollapsed(true)">Collapse all</button>' +
         '<button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="setAllShelvesCollapsed(false)">Expand all</button>' +
       '</div>';
-    wrap.innerHTML = _bbShelfToolbar + puzzles.map(photo => {
-        const _bbC = !!(window.__bbCollapse && window.__bbCollapse.shelves && window.__bbCollapse.shelves.has(photo.id));
+    const _bbCards = puzzles.map(photo => {
+        const _bbC = !(window.__bbCollapse && window.__bbCollapse.expanded && window.__bbCollapse.expanded.has(photo.id));
         const tiles = photo.pieces.slice().sort((a, b) => (a.order || 0) - (b.order || 0)).map(p => {
             const lib = (p.libraryId != null) ? app.books.find(b => b.id === p.libraryId) : null;
             const click = lib ? ' onclick="openBookModal(' + lib.id + ')" title="' + escapeHtml(p.title) + '"' : ' title="' + escapeHtml(p.title) + ' (not in library)"';
@@ -11384,20 +11386,24 @@ function renderShelfPuzzles() {
             '<div id="bbShelfBody_' + photo.id + '" style="display:' + (_bbC ? 'none' : 'flex') + ';gap:8px;flex-wrap:wrap;align-items:flex-start;">' + tiles + '</div>' +
         '</div>';
     }).join('');
+    wrap.innerHTML = _bbShelfToolbar + '<div id="bbShelvesSectionBody" style="display:' + (_bbSec ? 'none' : 'block') + ';">' + _bbCards + '</div>';
 }
 
-// ---- Collapsible shelves + photos (added v3.71.0) ----
+// ---- Collapsible shelves + photos (v3.71.0; default-collapsed + section master toggle v3.72.0) ----
+// Scanned shelves are COLLAPSED BY DEFAULT. `expanded` holds the ids the user has explicitly opened.
+// `section` = the whole "Scanned shelves" block is folded (a collapse around the per-shelf collapses).
+// `photos` = the photo gallery is folded.
 window.__bbCollapse = window.__bbCollapse || (function(){
-    var st = { shelves: new Set(), photos: false };
-    try { var s = JSON.parse(localStorage.getItem('bookburrow_ui_collapse') || '{}'); if (Array.isArray(s.shelves)) st.shelves = new Set(s.shelves); st.photos = !!s.photosCollapsed; } catch (e) {}
+    var st = { expanded: new Set(), section: false, photos: false };
+    try { var s = JSON.parse(localStorage.getItem('bookburrow_ui_collapse2') || '{}'); if (Array.isArray(s.expanded)) st.expanded = new Set(s.expanded); st.section = !!s.section; st.photos = !!s.photos; } catch (e) {}
     return st;
 })();
-function _bbSaveCollapse(){ try { localStorage.setItem('bookburrow_ui_collapse', JSON.stringify({ shelves: Array.from(window.__bbCollapse.shelves), photosCollapsed: window.__bbCollapse.photos })); } catch (e) {} }
+function _bbSaveCollapse(){ try { localStorage.setItem('bookburrow_ui_collapse2', JSON.stringify({ expanded: Array.from(window.__bbCollapse.expanded), section: window.__bbCollapse.section, photos: window.__bbCollapse.photos })); } catch (e) {} }
 function toggleShelfCollapse(id){
     var st = window.__bbCollapse;
-    if (st.shelves.has(id)) st.shelves.delete(id); else st.shelves.add(id);
+    if (st.expanded.has(id)) st.expanded.delete(id); else st.expanded.add(id);
     _bbSaveCollapse();
-    var c = st.shelves.has(id);
+    var c = !st.expanded.has(id);
     var body = document.getElementById('bbShelfBody_' + id);
     var arrow = document.getElementById('bbShelfArrow_' + id);
     if (body) body.style.display = c ? 'none' : 'flex';
@@ -11405,9 +11411,18 @@ function toggleShelfCollapse(id){
 }
 function setAllShelvesCollapsed(collapsed){
     var puzzles = (app.shelfPhotos || []).filter(function(p){ return p.isPuzzle && p.pieces && p.pieces.length; });
-    window.__bbCollapse.shelves = collapsed ? new Set(puzzles.map(function(p){ return p.id; })) : new Set();
+    window.__bbCollapse.expanded = collapsed ? new Set() : new Set(puzzles.map(function(p){ return p.id; }));
     _bbSaveCollapse();
     renderShelfPuzzles();
+}
+function toggleShelvesSection(){
+    var st = window.__bbCollapse;
+    st.section = !st.section;
+    _bbSaveCollapse();
+    var body = document.getElementById('bbShelvesSectionBody');
+    var arrow = document.getElementById('bbShelvesSectionArrow');
+    if (body) body.style.display = st.section ? 'none' : 'block';
+    if (arrow) { arrow.textContent = st.section ? '▸' : '▾'; arrow.setAttribute('title', st.section ? 'Expand section' : 'Collapse section'); }
 }
 function togglePhotosCollapse(){
     var st = window.__bbCollapse;
@@ -17846,7 +17861,7 @@ initializeApp();
     </script>
     <!-- App version badge — bump APP_VERSION on each release; keep in sync with PRD.md -->
     <script>
-      var APP_VERSION = '3.71.0';
+      var APP_VERSION = '3.72.0';
       (function(){
         function ensure(){
           var logo = document.querySelector('.logo'); if(!logo) return;
