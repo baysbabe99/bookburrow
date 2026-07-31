@@ -3620,24 +3620,27 @@
                     <input type="file" id="shelfScanInput" accept="image/*" style="display:none;">
                     <input type="file" id="shelfScanInputMulti" accept="image/*" multiple style="display:none;">
 
-                    <div class="photo-upload-zone" id="photoUploadZone" onclick="pickShelfPhotos()" style="cursor:pointer;border:3px dashed #E8DFD5;border-radius:16px;padding:30px 20px;text-align:center;transition:all 0.3s ease;">
-                        <div style="font-size:40px;margin-bottom:8px;">📸</div>
-                        <p style="font-weight:600;color:#3D5A80;margin-bottom:4px;">Drag & drop bookshelf photos here</p>
-                        <small style="color:#8B7E74;">or click to select images (JPG, PNG)</small>
-                        <input type="file" id="photoInput" accept="image/*" multiple style="display:none;">
-                    </div>
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;margin-bottom:12px;">
+                    <!-- 📸 Shelf photos — collapsible section (v3.73.0). The header (arrow + count, both tappable) folds the whole block below: upload zone, toolbar, and gallery. -->
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
                         <div style="display:flex;align-items:center;gap:8px;">
-                            <button id="bbPhotosArrow" onclick="togglePhotosCollapse()" title="Collapse" style="background:none;border:none;cursor:pointer;font-size:14px;color:#8B7E74;padding:0 2px;line-height:1;">▾</button>
-                            <div class="photo-count" id="photoCount" style="color:#8B7E74;font-size:13px;font-weight:600;">0 photos uploaded</div>
+                            <button id="bbPhotosArrow" onclick="togglePhotosCollapse()" title="Collapse" style="background:none;border:none;cursor:pointer;font-size:16px;color:#8B7E74;padding:0 2px;line-height:1;">▾</button>
+                            <div class="photo-count" id="photoCount" onclick="togglePhotosCollapse()" title="Collapse" style="color:#8B7E74;font-size:13px;font-weight:700;cursor:pointer;">0 photos uploaded</div>
                         </div>
-                        <div style="display:flex;gap:8px;">
+                        <div style="display:flex;gap:8px;" id="photoToolbarBtns">
                             <button class="btn btn-secondary" style="font-size:12px;padding:5px 12px;" onclick="togglePhotoSelectMode()" id="photoSelectToggle">☑️ Select</button>
                             <button class="btn btn-secondary" style="font-size:12px;padding:5px 12px;" onclick="togglePhotoView()" id="photoViewToggle">🖼️ Grid</button>
                         </div>
                     </div>
-                    <div id="photoSelectBar" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:8px 12px;background:rgba(61,90,128,0.06);border:1px solid #E8DFD5;border-radius:10px;"></div>
-                    <div class="photo-gallery" id="photoGallery" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;"></div>
+                    <div id="photoSectionBody">
+                        <div class="photo-upload-zone" id="photoUploadZone" onclick="pickShelfPhotos()" style="cursor:pointer;border:3px dashed #E8DFD5;border-radius:16px;padding:30px 20px;text-align:center;transition:all 0.3s ease;margin-bottom:16px;">
+                            <div style="font-size:40px;margin-bottom:8px;">📸</div>
+                            <p style="font-weight:600;color:#3D5A80;margin-bottom:4px;">Drag & drop bookshelf photos here</p>
+                            <small style="color:#8B7E74;">or click to select images (JPG, PNG)</small>
+                            <input type="file" id="photoInput" accept="image/*" multiple style="display:none;">
+                        </div>
+                        <div id="photoSelectBar" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:8px 12px;background:rgba(61,90,128,0.06);border:1px solid #E8DFD5;border-radius:10px;"></div>
+                        <div class="photo-gallery" id="photoGallery" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;"></div>
+                    </div>
 
                     <!-- Shelf Map section removed in v3.70.0 (superseded by the virtual bookshelf). renderShelfMap() is dormant: it guards on the missing #shelfMapGrid. -->
 
@@ -9922,9 +9925,12 @@ function renderPhotoGallery() {
         `).join('');
     }
     renderPhotoSelectBar();
-    // Respect collapsed state for the photos area
+    // Respect collapsed state for the photos area (fold the whole section: upload zone, toolbar, gallery)
     if (window.__bbCollapse && window.__bbCollapse.photos) {
-        gallery.style.display = 'none';
+        var _bbBody = document.getElementById('photoSectionBody');
+        if (_bbBody) _bbBody.style.display = 'none';
+        var _bbBtns = document.getElementById('photoToolbarBtns');
+        if (_bbBtns) _bbBtns.style.display = 'none';
         var _bbPa = document.getElementById('bbPhotosArrow');
         if (_bbPa) { _bbPa.textContent = '▸'; _bbPa.setAttribute('title', 'Expand'); }
     }
@@ -11389,10 +11395,10 @@ function renderShelfPuzzles() {
     wrap.innerHTML = _bbShelfToolbar + '<div id="bbShelvesSectionBody" style="display:' + (_bbSec ? 'none' : 'block') + ';">' + _bbCards + '</div>';
 }
 
-// ---- Collapsible shelves + photos (v3.71.0; default-collapsed + section master toggle v3.72.0) ----
+// ---- Collapsible shelves + photos (v3.71.0; section master toggle v3.72.0; photos fold whole block + tappable header v3.73.0) ----
 // Scanned shelves are COLLAPSED BY DEFAULT. `expanded` holds the ids the user has explicitly opened.
 // `section` = the whole "Scanned shelves" block is folded (a collapse around the per-shelf collapses).
-// `photos` = the photo gallery is folded.
+// `photos` = the whole photo section (upload zone, toolbar, and gallery) is folded via #photoSectionBody.
 window.__bbCollapse = window.__bbCollapse || (function(){
     var st = { expanded: new Set(), section: false, photos: false };
     try { var s = JSON.parse(localStorage.getItem('bookburrow_ui_collapse2') || '{}'); if (Array.isArray(s.expanded)) st.expanded = new Set(s.expanded); st.section = !!s.section; st.photos = !!s.photos; } catch (e) {}
@@ -11428,11 +11434,13 @@ function togglePhotosCollapse(){
     var st = window.__bbCollapse;
     st.photos = !st.photos;
     _bbSaveCollapse();
-    var g = document.getElementById('photoGallery');
-    var bar = document.getElementById('photoSelectBar');
+    // Fold the whole photo section (upload zone + select bar + gallery) via the wrapper,
+    // and hide the Select/Grid toolbar since it acts on the now-hidden gallery.
+    var body = document.getElementById('photoSectionBody');
+    var btns = document.getElementById('photoToolbarBtns');
     var arrow = document.getElementById('bbPhotosArrow');
-    if (g) g.style.display = st.photos ? 'none' : 'grid';
-    if (bar && st.photos) bar.style.display = 'none';
+    if (body) body.style.display = st.photos ? 'none' : 'block';
+    if (btns) btns.style.display = st.photos ? 'none' : 'flex';
     if (arrow) { arrow.textContent = st.photos ? '▸' : '▾'; arrow.setAttribute('title', st.photos ? 'Expand' : 'Collapse'); }
 }
 
@@ -17861,7 +17869,7 @@ initializeApp();
     </script>
     <!-- App version badge — bump APP_VERSION on each release; keep in sync with PRD.md -->
     <script>
-      var APP_VERSION = '3.72.0';
+      var APP_VERSION = '3.73.0';
       (function(){
         function ensure(){
           var logo = document.querySelector('.logo'); if(!logo) return;
