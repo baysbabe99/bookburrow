@@ -3620,11 +3620,12 @@
                     <input type="file" id="shelfScanInput" accept="image/*" style="display:none;">
                     <input type="file" id="shelfScanInputMulti" accept="image/*" multiple style="display:none;">
 
-                    <!-- 📸 Shelf photos — collapsible section (v3.73.0). The header (arrow + count, both tappable) folds the whole block below: upload zone, toolbar, and gallery. -->
+                    <!-- 📸 Shelf photos — collapsible section (v3.73.0; obvious "Hide/Show photos" button v3.73.1). The header (arrow, count, and Hide/Show button — all tappable) folds the whole block below: upload zone, toolbar, and gallery. -->
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
-                        <div style="display:flex;align-items:center;gap:8px;">
+                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                             <button id="bbPhotosArrow" onclick="togglePhotosCollapse()" title="Collapse" style="background:none;border:none;cursor:pointer;font-size:16px;color:#8B7E74;padding:0 2px;line-height:1;">▾</button>
                             <div class="photo-count" id="photoCount" onclick="togglePhotosCollapse()" title="Collapse" style="color:#8B7E74;font-size:13px;font-weight:700;cursor:pointer;">0 photos uploaded</div>
+                            <button class="btn btn-secondary" id="photoCollapseBtn" onclick="togglePhotosCollapse()" title="Fold this whole section" style="font-size:11px;padding:4px 12px;">▾ Hide photos</button>
                         </div>
                         <div style="display:flex;gap:8px;" id="photoToolbarBtns">
                             <button class="btn btn-secondary" style="font-size:12px;padding:5px 12px;" onclick="togglePhotoSelectMode()" id="photoSelectToggle">☑️ Select</button>
@@ -9933,6 +9934,8 @@ function renderPhotoGallery() {
         if (_bbBtns) _bbBtns.style.display = 'none';
         var _bbPa = document.getElementById('bbPhotosArrow');
         if (_bbPa) { _bbPa.textContent = '▸'; _bbPa.setAttribute('title', 'Expand'); }
+        var _bbCb = document.getElementById('photoCollapseBtn');
+        if (_bbCb) _bbCb.textContent = '▸ Show photos';
     }
     // Also render the shelf map below
     renderShelfMap();
@@ -11442,6 +11445,8 @@ function togglePhotosCollapse(){
     if (body) body.style.display = st.photos ? 'none' : 'block';
     if (btns) btns.style.display = st.photos ? 'none' : 'flex';
     if (arrow) { arrow.textContent = st.photos ? '▸' : '▾'; arrow.setAttribute('title', st.photos ? 'Expand' : 'Collapse'); }
+    var cbtn = document.getElementById('photoCollapseBtn');
+    if (cbtn) cbtn.textContent = st.photos ? '▸ Show photos' : '▾ Hide photos';
 }
 
 // ============================================
@@ -17869,7 +17874,8 @@ initializeApp();
     </script>
     <!-- App version badge — bump APP_VERSION on each release; keep in sync with PRD.md -->
     <script>
-      var APP_VERSION = '3.73.0';
+      var APP_VERSION = '3.73.1';
+      /* v3.73.1: added a visible "Hide/Show photos" button to the photos header so the collapse is discoverable (the bare chevron in v3.73.0 was too subtle). */
       (function(){
         function ensure(){
           var logo = document.querySelector('.logo'); if(!logo) return;
