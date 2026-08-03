@@ -5293,6 +5293,7 @@
         }
         if (data) {
             this.books = data.books || [];
+            normalizeOwnershipFormats(this.books);   // repair legacy string ownershipFormat (v3.77.2)
             this.xp = data.xp || 0;
             this.loans = data.loans || [];
             this.borrows = data.borrows || [];
@@ -6740,8 +6741,39 @@ function bookOnShelf(book) {
     return _shelvedSet().has(book.id);
 }
 
+// --- ownershipFormat safety net (added v3.77.2) -------------------------------
+// Legacy/imported records sometimes stored ownershipFormat as a bare STRING
+// ("physical") instead of an array. Any .map()/.includes() on that value
+// throws, and because the whole library grid is built with a single
+// books.map(libBookCardHTML), ONE bad record blanked the entire library.
+// ownFmts() always hands back a clean array; normalizeOwnershipFormats()
+// repairs the stored data once on load so it stops coming back.
+var _OWN_FMT_CANON = { physical: 'Physical', digital: 'Digital', ebook: 'Digital',
+                       audio: 'Audio', audiobook: 'Audio', 'do not own': 'Do Not Own' };
+function ownFmts(book) {
+    var v = book && book.ownershipFormat;
+    if (Array.isArray(v)) return v;
+    if (typeof v === 'string' && v.trim()) {
+        return v.split(/[;,]/).map(function (p) {
+            p = p.trim();
+            return _OWN_FMT_CANON[p.toLowerCase()] || (p.charAt(0).toUpperCase() + p.slice(1));
+        }).filter(Boolean);
+    }
+    return [];
+}
+function normalizeOwnershipFormats(books) {
+    if (!Array.isArray(books)) return 0;
+    var n = 0;
+    books.forEach(function (b) {
+        if (b && b.ownershipFormat != null && !Array.isArray(b.ownershipFormat)) {
+            b.ownershipFormat = ownFmts(b); n++;
+        }
+    });
+    return n;
+}
+
 function bookOwned(book) {
-    var o = (book && book.ownershipFormat) || [];
+    var o = ownFmts(book);
     if (o.indexOf('Do Not Own') >= 0) return false;                 // explicitly not owned
     if (book && book.status === 'buy') return false;                // want to buy = not owned yet
     if (o.indexOf('Physical') >= 0 || o.indexOf('Digital') >= 0 || o.indexOf('Audio') >= 0) return true;
@@ -6809,7 +6841,7 @@ function libBookCardHTML(book) {
                 ${book.genre ? `<span style="background:rgba(125,155,118,0.15);color:#7D9B76;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${escapeHtml(book.genre)}</span>` : ''}
                 ${book.pages ? `<span style="background:rgba(61,90,128,0.1);color:#3D5A80;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">📄 ${book.pages}p</span>` : ''}
                 ${book.format ? `<span style="background:rgba(212,167,106,0.15);color:#855A18;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${book.format}</span>` : ''}
-                ${(book.ownershipFormat||[]).map(f => `<span style="background:${f==='Do Not Own'?'rgba(244,63,94,0.12)':'rgba(194,112,91,0.12)'};color:${f==='Do Not Own'?'#F43F5E':'#C2705B'};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${f==='Physical'?'📖':f==='Digital'?'📱':f==='Do Not Own'?'🚫':'🎧'} ${f}</span>`).join('')}
+                ${ownFmts(book).map(f => `<span style="background:${f==='Do Not Own'?'rgba(244,63,94,0.12)':'rgba(194,112,91,0.12)'};color:${f==='Do Not Own'?'#F43F5E':'#C2705B'};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${f==='Physical'?'📖':f==='Digital'?'📱':f==='Do Not Own'?'🚫':'🎧'} ${f}</span>`).join('')}
             </div>
             ${book.publisher || book.publicationYear ? `<div style="font-size:11px;color:#6E635A;margin-top:3px;">${book.publisher ? book.publisher : ''}${book.publisher && book.publicationYear ? ', ' : ''}${book.publicationYear || ''}</div>` : ''}
             ${book.releaseDate ? (() => { const d = daysUntilRelease(book.releaseDate); if (d === null || d < 0) return ''; const label = d === 0 ? '🎉 Releases TODAY' : (d === 1 ? '📅 Releases tomorrow' : `📅 Releases in ${d} days`); const color = d === 0 ? '#C2705B' : (d <= 7 ? '#D4A76A' : '#7D9B76'); return `<div style="display:inline-block;margin-top:6px;padding:3px 10px;background:${color};color:white;border-radius:12px;font-size:11px;font-weight:700;">${label}</div>`; })() : ''}
@@ -6873,7 +6905,18 @@ function renderLibraryBooksFiltered(books) {
         return;
     }
 
-    grid.innerHTML = books.map(libBookCardHTML).join('');
+    // Render per-card defensively: a single malformed record must never blank
+    // the entire library (see v3.77.2 ownershipFormat incident).
+    grid.innerHTML = books.map(function (b) {
+        try { return libBookCardHTML(b); }
+        catch (e) {
+            console.error('Bookburrow: card render failed', b && b.title, e);
+            return '<div class="book-card" style="padding:14px;color:#C2705B;font-size:12px;">'
+                 + '\u26a0\ufe0f Could not display <b>' + escapeHtml((b && b.title) || 'this book')
+                 + '</b><br><button class="btn btn-secondary" style="margin-top:8px;font-size:11px;padding:4px 10px;"'
+                 + ' onclick="openBookModal(' + (b && b.id) + ')">\u270f\ufe0f Edit</button></div>';
+        }
+    }).join('');
 }
 function toggleFavorite(bookId) {
     const book = app.books.find(b => b.id === bookId);
@@ -7406,7 +7449,7 @@ function renderLibraryBooks(filter) {
                 ${book.genre ? `<span style="background:rgba(125,155,118,0.15);color:#7D9B76;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${escapeHtml(book.genre)}</span>` : ''}
                 ${book.pages ? `<span style="background:rgba(61,90,128,0.1);color:#3D5A80;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">📄 ${book.pages}p</span>` : ''}
                 ${book.format ? `<span style="background:rgba(212,167,106,0.15);color:#855A18;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${book.format}</span>` : ''}
-                ${(book.ownershipFormat||[]).map(f => `<span style="background:${f==='Do Not Own'?'rgba(244,63,94,0.12)':'rgba(194,112,91,0.12)'};color:${f==='Do Not Own'?'#F43F5E':'#C2705B'};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${f==='Physical'?'📖':f==='Digital'?'📱':f==='Do Not Own'?'🚫':'🎧'} ${f}</span>`).join('')}
+                ${ownFmts(book).map(f => `<span style="background:${f==='Do Not Own'?'rgba(244,63,94,0.12)':'rgba(194,112,91,0.12)'};color:${f==='Do Not Own'?'#F43F5E':'#C2705B'};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${f==='Physical'?'📖':f==='Digital'?'📱':f==='Do Not Own'?'🚫':'🎧'} ${f}</span>`).join('')}
             </div>
             ${book.publisher || book.publicationYear ? `<div style="font-size:11px;color:#6E635A;margin-top:3px;">${book.publisher ? book.publisher : ''}${book.publisher && book.publicationYear ? ', ' : ''}${book.publicationYear || ''}</div>` : ''}
             ${book.releaseDate ? (() => { const d = daysUntilRelease(book.releaseDate); if (d === null || d < 0) return ''; const label = d === 0 ? '🎉 Releases TODAY' : (d === 1 ? '📅 Releases tomorrow' : `📅 Releases in ${d} days`); const color = d === 0 ? '#C2705B' : (d <= 7 ? '#D4A76A' : '#7D9B76'); return `<div style="display:inline-block;margin-top:6px;padding:3px 10px;background:${color};color:white;border-radius:12px;font-size:11px;font-weight:700;">${label}</div>`; })() : ''}
@@ -7528,8 +7571,8 @@ function openBookModal(bookId) {
         </div>
         <div style="margin-top:10px;"><label style="font-size:12px;color:#6E635A;font-weight:700;">I OWN / WANT THIS AS</label>
         <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;">
-            ${['Physical','Digital','Audio'].map(fmt => `<label style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;border:2px solid ${(book.ownershipFormat||[]).includes(fmt)?'#7D9B76':'#E8DFD5'};background:${(book.ownershipFormat||[]).includes(fmt)?'rgba(125,155,118,0.1)':'#FFF8F0'};cursor:pointer;font-size:13px;color:#3D5A80;"><input type="checkbox" class="ownershipFmt" value="${fmt}" ${(book.ownershipFormat||[]).includes(fmt)?'checked':''} onchange="handleOwnershipChange(this)" style="accent-color:#7D9B76;"> ${fmt === 'Physical' ? '📖' : fmt === 'Digital' ? '📱' : '🎧'} ${fmt}</label>`).join('')}
-            <label style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;border:2px solid ${(book.ownershipFormat||[]).includes('Do Not Own')?'#F43F5E':'#E8DFD5'};background:${(book.ownershipFormat||[]).includes('Do Not Own')?'rgba(244,63,94,0.1)':'#FFF8F0'};cursor:pointer;font-size:13px;color:${(book.ownershipFormat||[]).includes('Do Not Own')?'#F43F5E':'#3D5A80'};"><input type="checkbox" class="ownershipFmt" value="Do Not Own" ${(book.ownershipFormat||[]).includes('Do Not Own')?'checked':''} onchange="handleDoNotOwnChange(this)" style="accent-color:#F43F5E;"> 🚫 Do Not Own</label>
+            ${['Physical','Digital','Audio'].map(fmt => `<label style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;border:2px solid ${ownFmts(book).includes(fmt)?'#7D9B76':'#E8DFD5'};background:${ownFmts(book).includes(fmt)?'rgba(125,155,118,0.1)':'#FFF8F0'};cursor:pointer;font-size:13px;color:#3D5A80;"><input type="checkbox" class="ownershipFmt" value="${fmt}" ${ownFmts(book).includes(fmt)?'checked':''} onchange="handleOwnershipChange(this)" style="accent-color:#7D9B76;"> ${fmt === 'Physical' ? '📖' : fmt === 'Digital' ? '📱' : '🎧'} ${fmt}</label>`).join('')}
+            <label style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;border:2px solid ${ownFmts(book).includes('Do Not Own')?'#F43F5E':'#E8DFD5'};background:${ownFmts(book).includes('Do Not Own')?'rgba(244,63,94,0.1)':'#FFF8F0'};cursor:pointer;font-size:13px;color:${ownFmts(book).includes('Do Not Own')?'#F43F5E':'#3D5A80'};"><input type="checkbox" class="ownershipFmt" value="Do Not Own" ${ownFmts(book).includes('Do Not Own')?'checked':''} onchange="handleDoNotOwnChange(this)" style="accent-color:#F43F5E;"> 🚫 Do Not Own</label>
         </div></div>
         <div style="margin-top:10px;"><label style="font-size:12px;color:#6E635A;font-weight:700;">RATING</label><div id="editBookRating" style="font-size:24px;cursor:pointer;">${[1,2,3,4,5].map(i => `<span onclick="setBookRating(${i})" style="cursor:pointer;">${i <= (book.rating||0) ? '⭐' : '☆'}</span>`).join('')}</div></div>
         ${_shelfLocationCardHtml(book)}
@@ -13901,7 +13944,7 @@ function bulkAddOwnership(fmt) {
     selectedBookIds.forEach(id => {
         const book = app.books.find(b => b.id === id);
         if (!book) return;
-        let fmts = (book.ownershipFormat || []).filter(f => f !== 'Do Not Own');
+        let fmts = ownFmts(book).filter(f => f !== 'Do Not Own');
         if (fmts.indexOf(fmt) < 0) fmts.push(fmt);
         book.ownershipFormat = fmts;
         n++;
@@ -18124,7 +18167,7 @@ initializeApp();
     </script>
     <!-- App version badge — bump APP_VERSION on each release; keep in sync with PRD.md -->
     <script>
-      var APP_VERSION = '3.77.1';
+      var APP_VERSION = '3.77.2';
       /* v3.77.1: a11y follow-up — reader-profile rename/delete buttons were hover-only, so they were unreachable on touch; now always visible where hover isn't available. (Missed in the v3.74.0 accessibility pass.) */
       /* v3.77.0: polish pass — shortened the verbose toasts, hoisted the palette into :root tokens (CSS block only; canvas can't resolve var()), made the bookstore banner dismissable, replaced 3 blocking browser alert dialogs with toasts, and removed a dead variable. */
       /* v3.76.0: deletion tombstones (`deletedRecords`) for challenges/loans/borrows/friends/gifts, so deleting one sticks instead of being re-added by a cross-device merge. Detected by the same snapshot diff as updatedAt; a record re-created after its delete survives, and restoring one clears its tombstone. */
