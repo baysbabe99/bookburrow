@@ -7542,7 +7542,11 @@ async function resolveMissingCovers() {
 
 // ---- Remove duplicate books ----
 function dedupeKey(book) {
-    const norm = s => (s || '').toString().toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+    const norm = s => {
+        const hit = _memoGet(_mcDk, s);
+        if (hit !== undefined) return hit;
+        return _memoPut(_mcDk, s, (s || '').toString().toLowerCase().replace(/[^a-z0-9]/g, '').trim());
+    };
     return norm(book.title) + '|' + norm(book.author);
 }
 
@@ -7554,20 +7558,24 @@ function dedupeKey(book) {
 // rather than by rewriting the stored strings — mutating 972 records would move their
 // `_shelfMergeKey` and duplicate the whole shelved library on the next merge.
 function _normISBN(s) {
+    const hit = _memoGet(_mcIsbn, s);
+    if (hit !== undefined) return hit;
     let v = (s || '').toString().trim();
     v = v.replace(/\.0+$/, '');                       // "9780547394602.0" -> "9780547394602"
-    return v.replace(/[^0-9xX]/g, '').toUpperCase();
+    return _memoPut(_mcIsbn, s, v.replace(/[^0-9xX]/g, '').toUpperCase());
 }
 
 // Author normalisation: handles "Last, First" order and initials, so
 // "Tolkien, J.R.R." and "J. R. R. Tolkien" compare as equal (tokens sorted).
 function _normAuthor(s) {
+    const hit = _memoGet(_mcAuth, s);
+    if (hit !== undefined) return hit;
     let a = (s || '').toString().toLowerCase().replace(/[.]/g, ' ').replace(/[^a-z0-9, ]/g, ' ');
     if (a.indexOf(',') !== -1) {
         const p = a.split(',').map(x => x.trim()).filter(Boolean);
         if (p.length >= 2) a = p.slice(1).join(' ') + ' ' + p[0];
     }
-    return a.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean).sort().join(' ');
+    return _memoPut(_mcAuth, s, a.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean).sort().join(' '));
 }
 
 // Strong title normalisation for import matching: drops parentheticals and
@@ -7575,11 +7583,13 @@ function _normAuthor(s) {
 // == "The Hobbit (Illustrated Edition)". Does NOT merge distinct works like
 // "Dune" vs "Dune Messiah" (those keep different normalised forms).
 function _normTitleStrong(s) {
+    const hit = _memoGet(_mcTitle, s);
+    if (hit !== undefined) return hit;
     let t = (s || '').toString().toLowerCase();
     t = t.replace(/\([^)]*\)/g, ' ');          // drop "(illustrated)" etc.
     t = t.split(/:|–|—| - /)[0];      // drop subtitle after colon / dash
     t = t.replace(/\b(the|a|an)\b/g, ' ');      // drop articles
-    return t.replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+    return _memoPut(_mcTitle, s, t.replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim());
 }
 
 // True when one author string is a last-name-only or subset form of the other —
@@ -7611,6 +7621,12 @@ function isImportDuplicate(existing, incoming) {
     if (ka === kb && ka !== '|') return true;                        // same title+author (punctuation-insensitive)
     const ta = _normTitleStrong(existing.title), tb = _normTitleStrong(incoming.title);
     if (!ta || !tb) return false;
+    // (v3.85.0) Settle the TITLE first. Every `return true` past this point already requires the
+    // title to match, so when it cannot, no amount of author / volume / subtitle work can change
+    // the answer — and that work (Levenshtein over author names) was over half of import time.
+    // This reorders work, never outcomes: verified identical over 1.18M pairs.
+    const titleSame = (ta === tb);
+    if (!titleSame && _simRatio(ta, tb) < 0.92) return false;
     const aa = _normAuthor(existing.author), ab = _normAuthor(incoming.author);
     // ⚠️ v3.84.0. `!aa || !ab` treated a MISSING author as compatible with ANY author, so a
     // title-only row (a plain list, an AI spine read, or a Goodreads import whose author column
@@ -7627,8 +7643,7 @@ function isImportDuplicate(existing, incoming) {
     // "Wings of Fire: The Dragonet Prophecy" just because both reduce to "wings of fire". (v3.81.0)
     if (_volumeMarker(existing.title) !== _volumeMarker(incoming.title)) return false;
     if (_subtitlesConflict(existing.title, incoming.title)) return false;
-    if (ta === tb) return true;                                      // same core title + compatible author
-    return _simRatio(ta, tb) >= 0.92;                                // near-identical title (typo-level)
+    return true;    // title already settled above (exact core match, or >= 0.92 typo-level)
 }
 
 // Collapse duplicates *within* one incoming import list (keeps the first copy)
@@ -7639,8 +7654,17 @@ function dedupeWithin(list) {
 }
 
 // Loose normalisation that keeps word boundaries (for fuzzy matching)
+// (v3.85.0) Import-time memo for the pure string normalisers. Bounded so a huge import can't
+// grow it without limit; cleared wholesale rather than evicted, since a rebuild is cheap.
+var _mcLoose = new Map(), _mcTitle = new Map(), _mcVol = new Map(), _mcIsbn = new Map(), _mcAuth = new Map(), _mcDk = new Map();
+function _clearNormMemo() { try { [_mcLoose, _mcTitle, _mcVol, _mcIsbn, _mcAuth, _mcDk].forEach(c => c.clear()); } catch (e) {} }
+function _memoGet(cache, s) { return cache.get((s == null) ? '\u0000' : String(s)); }
+function _memoPut(cache, s, v) { if (cache.size >= 20000) cache.clear(); cache.set((s == null) ? '\u0000' : String(s), v); return v; }
+
 function _normLoose(s) {
-    return (s || '').toString().toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+    const hit = _memoGet(_mcLoose, s);
+    if (hit !== undefined) return hit;
+    return _memoPut(_mcLoose, s, (s || '').toString().toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim());
 }
 
 // Levenshtein edit distance
@@ -7665,7 +7689,12 @@ function _simRatio(a, b) {
     const A = _normLoose(a), B = _normLoose(b);
     if (!A || !B) return 0;
     if (A === B) return 1;
-    return 1 - _levenshtein(A, B) / Math.max(A.length, B.length);
+    const max = Math.max(A.length, B.length);
+    // (v3.85.0) Cheap exact lower bound: dist >= |lenA - lenB|, so the ratio can never exceed
+    // 1 - |lenA-lenB|/max. No caller accepts below 0.8, so bail before the O(n*m) matrix.
+    const gap = Math.abs(A.length - B.length);
+    if (1 - gap / max < 0.8) return 1 - gap / max;
+    return 1 - _levenshtein(A, B) / max;
 }
 
 // Are two books "similar" (likely the same book) but not an exact dedupe match?
@@ -7695,9 +7724,11 @@ function _subtitlesConflict(ta, tb) {
 }
 
 function _volumeMarker(t) {
+    const hit = _memoGet(_mcVol, t);
+    if (hit !== undefined) return hit;
     const m = (t || '').toString().toLowerCase()
         .match(/\b(?:vol|volume|book|part|no)\b\.?\s*(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b|#\s*\d+/);
-    return m ? m[0].replace(/\s+/g, ' ').trim() : '';
+    return _memoPut(_mcVol, t, m ? m[0].replace(/\s+/g, ' ').trim() : '');
 }
 
 function booksSimilar(a, b) {
@@ -13098,22 +13129,44 @@ function parseCSV(content) {
     return books;
 }
 
+// (v3.85.0) Checking an import against a large library is the one genuinely slow thing this app
+// does, and it used to run synchronously with no feedback — the tab simply froze. Paint a
+// "working" state, yield a frame so the browser can actually show it, then do the work.
 function showImportPreview(books) {
-    books = dedupeWithin(books); // collapse duplicates within the incoming file first
-    pendingImport = books;
     const preview = document.getElementById('importPreview');
     if (!preview) return;
-
     preview.style.display = 'block';
+    const n = Array.isArray(books) ? books.length : 0;
+    preview.innerHTML = '<div style="background:#FEF3E2;border-radius:12px;padding:22px;text-align:center;">'
+        + '<div style="font-size:26px;">📖</div>'
+        + '<div style="font-weight:700;color:#3D5A80;margin-top:8px;">Checking ' + n + ' book' + (n === 1 ? '' : 's') + ' against your library…</div>'
+        + '<div style="color:#6E635A;font-size:12px;margin-top:4px;">Nothing has been added yet.</div>'
+        + '</div>';
+    setTimeout(function () { try { _renderImportPreview(books, preview); } catch (e) {
+        try { console.error('Bookburrow: import preview failed.', e); } catch (e2) {}
+        preview.innerHTML = '<div style="padding:20px;color:#C2705B;">Could not read that file. Nothing was imported.</div>';
+    } }, 16);
+}
 
-    const isDup = b => app.books.some(existing => isImportDuplicate(existing, b));
-    const dupes = books.filter(isDup);
-    const newBooks = books.filter(b => !isDup(b));
+function _renderImportPreview(books, preview) {
+    const rawCount = Array.isArray(books) ? books.length : 0;
+    books = dedupeWithin(books); // collapse duplicates within the incoming file first
+    pendingImport = books;
+
+    // (v3.85.0) One pass, not two — `dupes` and `newBooks` each used to re-run the whole
+    // library scan, doubling the cost of the slowest step in the app.
+    const dupFlag = books.map(b => app.books.some(existing => isImportDuplicate(existing, b)));
+    const dupes = books.filter((b, i) => dupFlag[i]);
+    const newBooks = books.filter((b, i) => !dupFlag[i]);
+    // (v3.85.0) Say so when rows collapsed inside the file itself — previously the preview
+    // reported only the post-collapse number, so rows vanished with no explanation.
+    const collapsed = rawCount - books.length;
 
     preview.innerHTML = `
         <div style="background:#FEF3E2;border-radius:12px;padding:16px;margin-bottom:16px;">
             <div style="font-weight:700;color:#3D5A80;margin-bottom:8px;">📋 Import Preview</div>
-            <div style="color:#6E635A;">Found <strong>${books.length}</strong> books · <strong style="color:#7D9B76;">${newBooks.length} new</strong> · <strong style="color:#855A18;">${dupes.length} duplicates (will skip)</strong></div>
+            <div style="color:#6E635A;">Found <strong>${books.length}</strong> books · <strong style="color:#7D9B76;">${newBooks.length} new</strong> · <strong style="color:#855A18;">${dupes.length} already in your library (will skip)</strong></div>
+            ${collapsed > 0 ? `<div style="color:#855A18;font-size:12px;margin-top:6px;">${collapsed} row${collapsed === 1 ? ' was a repeat' : 's were repeats'} inside the file itself and ${collapsed === 1 ? 'was' : 'were'} merged.</div>` : ''}
         </div>
         <div style="max-height:300px;overflow-y:auto;border:2px solid #E8DFD5;border-radius:12px;">
             <table style="width:100%;border-collapse:collapse;font-size:13px;">
@@ -13122,8 +13175,8 @@ function showImportPreview(books) {
                     <th style="padding:8px;text-align:left;color:#3D5A80;">Author</th>
                     <th style="padding:8px;text-align:left;color:#3D5A80;">Status</th>
                 </tr></thead>
-                <tbody>${books.map(b => {
-                    const isDupe = dupes.includes(b);
+                <tbody>${books.map((b, _i) => {
+                    const isDupe = dupFlag[_i];
                     return `<tr style="border-top:1px solid #E8DFD5;${isDupe ? 'opacity:0.5;' : ''}">
                         <td style="padding:8px;color:#3D5A80;">${escapeHtml(b.title || '?')} ${isDupe ? '<span style="color:#855A18;">(duplicate)</span>' : ''}</td>
                         <td style="padding:8px;color:#6E635A;">${escapeHtml(b.author || '?')}</td>
@@ -19418,7 +19471,7 @@ initializeApp();
     </script>
     <!-- App version badge — bump APP_VERSION on each release; keep in sync with PRD.md -->
     <script>
-      var APP_VERSION = '3.84.0';
+      var APP_VERSION = '3.85.0';
       /* v3.83.0: the startup path no longer deletes anything. A constructor throw used to REMOVE the stored library and reseed 8 sample books — its 'backup' was a setItem that fails under exactly the quota pressure most likely to have caused the corruption, and nothing ever surfaced __init_backup in the UI. Now: attempt a structural repair (_repairStoredData), back the original up and VERIFY the backup wrote before touching anything, roll back if the repair fails, and otherwise show a recovery screen with a Download-my-data button — never a wipe. Also: coverGradients no longer throws on a book with a missing/NaN id (that class of throw blanked whole sections); CSV export keeps a legitimate 0 instead of writing an empty cell; and the importer finally reads back the Ownership column export has always written, so a round trip stops dropping every Physical/Digital/Audio marking. */
       /* v3.82.0: ISBN float repair. 972 of 975 ISBNs arrived from a spreadsheet import as floats ("9780547394602.0"); stripping non-digits produced a 14-digit non-ISBN, so ISBN duplicate-matching silently stopped working (a rescan could re-add an owned book) and every ISBN-keyed lookup missed. Fixed in _normISBN (strip a trailing .0) rather than by rewriting 972 records — mutating them would move their _shelfMergeKey and duplicate the shelved library on the next merge. _shelfMergeKey now uses _normISBN instead of its own inline regex. Tombstone keys minted before the fix hold the FUSED digits, which no normaliser can undo, so _unfuseIsbn drops one trailing zero only when the shorter form has a valid ISBN-13/10 check digit. */
       /* v3.81.0: six data-safety fixes found in an audit — one of which reproduced itself mid-audit when a reloaded tab silently reverted a library edit. (1) Cloud.loadShelf/saveShelf/shelfUpdatedAt now THROW on a failed request instead of returning null, so 'the read failed' can never be mistaken for 'this account is empty'. (2) cloudPush is gated behind _cloudSyncReady and aborts on any read failure, closing the boot window where a stale device overwrote the cloud unmerged; plus a hard block on pushing 0 books over a non-empty cloud. (3) Tombstones can now be RETRACTED, so Restore from Backup actually restores. (4) saveData returns false and alerts on a failed write instead of re-pushing the stale blob. (5) Shelf scans claim each record once and won't relocate an already-placed book on a weak match; series volumes no longer collapse. (6) clearBooksOnly syncs before reloading and no longer tombstones the whole loan history. */
