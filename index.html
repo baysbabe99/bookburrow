@@ -8951,19 +8951,6 @@ const appGuides = {
         ],
         parser: 'storygraph'
     },
-    kindle: {
-        name: 'Kindle', icon: '📱', color: '#FF9900', format: 'CSV/List',
-        exportUrl: 'https://www.amazon.com/hz/mycd/digital-console/contentlist/booksAll',
-        steps: [
-            'Go to <strong>amazon.com/hz/mycd/digital-console/contentlist/booksAll</strong>',
-            'Log in to your Amazon account',
-            'You\'ll see your <strong>Content Library</strong> with all Kindle books',
-            'Amazon doesn\'t offer a direct CSV export, so you have two options:',
-            '<strong>Option A:</strong> Copy your book list from the page and paste it below',
-            '<strong>Option B:</strong> Use a browser extension like "Kindle My Clippings" to export, then upload the file'
-        ],
-        parser: 'kindle'
-    },
     apple_books: {
         name: 'Apple Books', icon: '📕', color: '#FC3C44', format: 'List',
         steps: [
@@ -8975,19 +8962,6 @@ const appGuides = {
             'Tip: You can also type your book list manually — one book per line, like: <em>Title - Author</em>'
         ],
         parser: 'plaintext'
-    },
-    libby: {
-        name: 'Libby', icon: '📗', color: '#1B7F6B', format: 'CSV/List',
-        exportUrl: 'https://libbyapp.com',
-        steps: [
-            'Open <strong>libbyapp.com</strong> or the Libby app',
-            'Go to <strong>Shelf → Activity</strong> (timeline icon)',
-            'This shows your full borrowing history',
-            'Libby has a <strong>"Export Timeline"</strong> feature — tap the filter/export icon',
-            'Download the CSV and upload below, or copy/paste your list',
-            'You can also just type titles — one per line: <em>Title - Author</em>'
-        ],
-        parser: 'libby'
     },
     kobo: {
         name: 'Kobo', icon: '📘', color: '#BF0000', format: 'CSV',
@@ -9087,9 +9061,7 @@ function renderApps() {
     const apps = [
         { id: 'goodreads', name: 'Goodreads', icon: '📖', color: '#553B08' },
         { id: 'storygraph', name: 'StoryGraph', icon: '📊', color: '#5C469C' },
-        { id: 'kindle', name: 'Kindle', icon: '📱', color: '#FF9900' },
         { id: 'apple_books', name: 'Apple Books', icon: '📕', color: '#FC3C44' },
-        { id: 'libby', name: 'Libby', icon: '📗', color: '#1B7F6B' },
         { id: 'audible', name: 'Audible', icon: '🎧', color: '#F8991C' },
         { id: 'kobo', name: 'Kobo', icon: '📘', color: '#BF0000' },
         { id: 'google_play', name: 'Google Play Books', icon: '📙', color: '#4285F4' },
@@ -18167,7 +18139,8 @@ initializeApp();
     </script>
     <!-- App version badge — bump APP_VERSION on each release; keep in sync with PRD.md -->
     <script>
-      var APP_VERSION = '3.77.2';
+      var APP_VERSION = '3.78.0';
+      /* v3.78.0: removed the Kindle and Libby import sources (guide entries + Connected Apps tiles) at the operator's request — neither export path was reliable and the imported rows were a recurring source of wrong titles/authors. Books already imported from them are untouched by the code change; the library data was cleaned separately. */
       /* v3.77.1: a11y follow-up — reader-profile rename/delete buttons were hover-only, so they were unreachable on touch; now always visible where hover isn't available. (Missed in the v3.74.0 accessibility pass.) */
       /* v3.77.0: polish pass — shortened the verbose toasts, hoisted the palette into :root tokens (CSS block only; canvas can't resolve var()), made the bookstore banner dismissable, replaced 3 blocking browser alert dialogs with toasts, and removed a dead variable. */
       /* v3.76.0: deletion tombstones (`deletedRecords`) for challenges/loans/borrows/friends/gifts, so deleting one sticks instead of being re-added by a cross-device merge. Detected by the same snapshot diff as updatedAt; a record re-created after its delete survives, and restoring one clears its tombstone. */
