@@ -7565,6 +7565,43 @@ function _normISBN(s) {
     return _memoPut(_mcIsbn, s, v.replace(/[^0-9xX]/g, '').toUpperCase());
 }
 
+// Canonical ISBN for COMPARISON ONLY — the 13-digit form.
+//
+// ⚠️ v3.86.0. An ISBN-10 and its ISBN-13 are one identifier written two ways: "1427868190" and
+// "9781427868190" are the same book. `_normISBN` only strips punctuation, so two records holding
+// the two forms read as unrelated numbers. The library has at least two such pairs — "Disney
+// Manga: …Mirror Moon" (#1243/#1244) and "Culturally Responsive Teaching and the Brain"
+// (#1922/#1923) — and neither Clean Up nor the import check could see either of them.
+//
+// Deliberately NOT folded into `_normISBN`. That function feeds `_shelfMergeKey` and `_scanKey`,
+// whose output is PERSISTED as tombstone keys (`i:<isbn>`) in `deletedBooks` / `deletedScanKeys`.
+// Re-keying there would strand every existing ISBN-10 tombstone and resurrect the books it was
+// suppressing — the same hazard that kept the v3.82.0 fix out of the stored strings. Book
+// IDENTITY stays exactly where it is; only the COMPARISON gets smarter.
+//
+// Conversion runs only when the value is a checksum-valid ISBN-10, so a malformed or truncated
+// number is left as it was rather than turned into a plausible-looking wrong one.
+function _isbn13(s) {
+    const raw = _normISBN(s);
+    const hit = _memoGet(_mcIsbn13, raw);
+    if (hit !== undefined) return hit;
+    let v = raw;
+    if (_isValidIsbn10(raw)) {
+        const core = '978' + raw.slice(0, 9);
+        let sum = 0;
+        for (let i = 0; i < 12; i++) sum += (+core[i]) * (i % 2 ? 3 : 1);
+        v = core + ((10 - (sum % 10)) % 10);
+    }
+    return _memoPut(_mcIsbn13, raw, v);
+}
+// True only when BOTH sides carry an ISBN and they are the same identifier.
+// A missing ISBN is UNKNOWN, never a wildcard — the same rule the author check follows.
+function _isbnSame(a, b) {
+    const x = _isbn13(a);
+    if (!x) return false;
+    return x === _isbn13(b);
+}
+
 // Author normalisation: handles "Last, First" order and initials, so
 // "Tolkien, J.R.R." and "J. R. R. Tolkien" compare as equal (tokens sorted).
 function _normAuthor(s) {
@@ -7615,8 +7652,8 @@ function _authorSubsetMatch(a, b) {
 // Conservative "is this the same book?" used at IMPORT time (auto-skips dupes).
 // Stricter than booksSimilar() — no broad substring rule — to avoid false skips.
 function isImportDuplicate(existing, incoming) {
-    const ia = _normISBN(existing.isbn), ib = _normISBN(incoming.isbn);
-    if (ia && ib && ia === ib) return true;                          // same ISBN
+    const isbnSame = _isbnSame(existing.isbn, incoming.isbn);        // either ISBN form (v3.86.0)
+    if (isbnSame) return true;                                       // same ISBN
     const ka = dedupeKey(existing), kb = dedupeKey(incoming);
     if (ka === kb && ka !== '|') return true;                        // same title+author (punctuation-insensitive)
     const ta = _normTitleStrong(existing.title), tb = _normTitleStrong(incoming.title);
@@ -7637,7 +7674,7 @@ function isImportDuplicate(existing, incoming) {
     const bothHaveAuthor = !!(aa && ab);
     const authorOk = bothHaveAuthor
         ? (aa === ab || _simRatio(aa, ab) >= 0.8 || _authorSubsetMatch(existing.author, incoming.author))
-        : (ia && ib && ia === ib);           // no author on one side → only an ISBN match counts
+        : isbnSame;                          // no author on one side → only an ISBN match counts
     if (!authorOk) return false;
     // Series volumes are different books — "Wings of Fire: The Lost Heir" must not match
     // "Wings of Fire: The Dragonet Prophecy" just because both reduce to "wings of fire". (v3.81.0)
@@ -7656,8 +7693,8 @@ function dedupeWithin(list) {
 // Loose normalisation that keeps word boundaries (for fuzzy matching)
 // (v3.85.0) Import-time memo for the pure string normalisers. Bounded so a huge import can't
 // grow it without limit; cleared wholesale rather than evicted, since a rebuild is cheap.
-var _mcLoose = new Map(), _mcTitle = new Map(), _mcVol = new Map(), _mcIsbn = new Map(), _mcAuth = new Map(), _mcDk = new Map();
-function _clearNormMemo() { try { [_mcLoose, _mcTitle, _mcVol, _mcIsbn, _mcAuth, _mcDk].forEach(c => c.clear()); } catch (e) {} }
+var _mcLoose = new Map(), _mcTitle = new Map(), _mcVol = new Map(), _mcIsbn = new Map(), _mcAuth = new Map(), _mcDk = new Map(), _mcIsbn13 = new Map();
+function _clearNormMemo() { try { [_mcLoose, _mcTitle, _mcVol, _mcIsbn, _mcAuth, _mcDk, _mcIsbn13].forEach(c => c.clear()); } catch (e) {} }
 function _memoGet(cache, s) { return cache.get((s == null) ? '\u0000' : String(s)); }
 function _memoPut(cache, s, v) { if (cache.size >= 20000) cache.clear(); cache.set((s == null) ? '\u0000' : String(s), v); return v; }
 
@@ -7751,6 +7788,13 @@ function booksSimilar(a, b) {
     const sa = (a.shelfLocation || '').toString().trim().toLowerCase();
     const sb = (b.shelfLocation || '').toString().trim().toLowerCase();
     if (sa && sb && sa !== sb) return false;
+    // A shared ISBN is decisive — it IS the book's identity, not a guess about it. Placed HERE,
+    // after the three guards added in v3.80.0/v3.81.0, so it can never override them: two
+    // different volumes, two conflicting subtitles, or two copies on different physical shelves
+    // still stay apart even if a bad row gave them the same number. What it does override is the
+    // title/author similarity below, which is the only thing standing between the two ISBN-form
+    // pairs in the library and a merge they obviously deserve. (v3.86.0)
+    if (_isbnSame(a.isbn, b.isbn)) return true;
     // Authors should be compatible (or one is missing) — _normAuthor handles "Last, First"
     const aa = _normAuthor(a.author), ab = _normAuthor(b.author);
     const authorOk = !aa || !ab || aa === ab || _simRatio(aa, ab) >= 0.8;
@@ -12345,7 +12389,7 @@ function _shelfMoveAllowed(existing, incoming, label) {
     const cur = (existing.shelfLocation || '').toString().trim();
     if (!cur || cur === label) return true;
     const ia = _normISBN(existing.isbn), ib = _normISBN(incoming.isbn);
-    if (ia && ib) return ia === ib;
+    if (ia && ib) return _isbnSame(existing.isbn, incoming.isbn);   // either ISBN form (v3.86.0)
     const na = _normLoose(existing.title), nb = _normLoose(incoming.title);
     if (!na || !nb) return false;
     if (na !== nb) return false;
@@ -12860,8 +12904,8 @@ function handleSyncFile(file) {
 
 // Find the existing library book that an incoming row refers to (ISBN, else title+author).
 function _syncFindExisting(b) {
-    const norm = _normISBN(b.isbn);
-    return app.books.find(x => (norm && _normISBN(x.isbn) === norm) ||
+    const norm = _isbn13(b.isbn);                                   // either ISBN form (v3.86.0)
+    return app.books.find(x => (norm && _isbn13(x.isbn) === norm) ||
         isImportDuplicate(x, { title: b.title || '', author: b.author || '', isbn: b.isbn || '' }));
 }
 
@@ -19471,7 +19515,7 @@ initializeApp();
     </script>
     <!-- App version badge — bump APP_VERSION on each release; keep in sync with PRD.md -->
     <script>
-      var APP_VERSION = '3.85.0';
+      var APP_VERSION = '3.86.0';
       /* v3.83.0: the startup path no longer deletes anything. A constructor throw used to REMOVE the stored library and reseed 8 sample books — its 'backup' was a setItem that fails under exactly the quota pressure most likely to have caused the corruption, and nothing ever surfaced __init_backup in the UI. Now: attempt a structural repair (_repairStoredData), back the original up and VERIFY the backup wrote before touching anything, roll back if the repair fails, and otherwise show a recovery screen with a Download-my-data button — never a wipe. Also: coverGradients no longer throws on a book with a missing/NaN id (that class of throw blanked whole sections); CSV export keeps a legitimate 0 instead of writing an empty cell; and the importer finally reads back the Ownership column export has always written, so a round trip stops dropping every Physical/Digital/Audio marking. */
       /* v3.82.0: ISBN float repair. 972 of 975 ISBNs arrived from a spreadsheet import as floats ("9780547394602.0"); stripping non-digits produced a 14-digit non-ISBN, so ISBN duplicate-matching silently stopped working (a rescan could re-add an owned book) and every ISBN-keyed lookup missed. Fixed in _normISBN (strip a trailing .0) rather than by rewriting 972 records — mutating them would move their _shelfMergeKey and duplicate the shelved library on the next merge. _shelfMergeKey now uses _normISBN instead of its own inline regex. Tombstone keys minted before the fix hold the FUSED digits, which no normaliser can undo, so _unfuseIsbn drops one trailing zero only when the shorter form has a valid ISBN-13/10 check digit. */
       /* v3.81.0: six data-safety fixes found in an audit — one of which reproduced itself mid-audit when a reloaded tab silently reverted a library edit. (1) Cloud.loadShelf/saveShelf/shelfUpdatedAt now THROW on a failed request instead of returning null, so 'the read failed' can never be mistaken for 'this account is empty'. (2) cloudPush is gated behind _cloudSyncReady and aborts on any read failure, closing the boot window where a stale device overwrote the cloud unmerged; plus a hard block on pushing 0 books over a non-empty cloud. (3) Tombstones can now be RETRACTED, so Restore from Backup actually restores. (4) saveData returns false and alerts on a failed write instead of re-pushing the stale blob. (5) Shelf scans claim each record once and won't relocate an already-placed book on a weak match; series volumes no longer collapse. (6) clearBooksOnly syncs before reloading and no longer tombstones the whole loan history. */
