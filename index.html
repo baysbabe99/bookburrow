@@ -4219,6 +4219,25 @@
         </div>
     </div>
 
+    <!-- Clean Up merge review (added v3.80.0) — no duplicate is ever removed
+         without being shown here first. -->
+    <div id="mergeReviewModal" class="modal">
+        <div class="modal-content" style="max-width:820px;">
+            <div class="modal-header">
+                <h2>Review before removing</h2>
+                <button class="modal-close" data-modal="mergeReviewModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="mergeReviewIntro" style="color:#6E635A;font-size:14px;margin-bottom:14px;"></p>
+                <div id="mergeReviewList"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-modal="mergeReviewModal">Cancel</button>
+                <button class="btn btn-primary" id="mergeReviewApplyBtn">Remove checked</button>
+            </div>
+        </div>
+    </div>
+
     <div id="photoTagModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -7177,6 +7196,15 @@ function _simRatio(a, b) {
 }
 
 // Are two books "similar" (likely the same book) but not an exact dedupe match?
+// A volume/series marker — "Volume One", "Vol. 2", "Book 3", "Part Two", "#4".
+// If ONE title carries one and the other doesn't, they are different printings
+// of a series, not a book and its subtitle. (v3.80.0)
+function _volumeMarker(t) {
+    const m = (t || '').toString().toLowerCase()
+        .match(/\b(?:vol|volume|book|part|no)\b\.?\s*(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b|#\s*\d+/);
+    return m ? m[0].replace(/\s+/g, ' ').trim() : '';
+}
+
 function booksSimilar(a, b) {
     const ta = _normLoose(a.title), tb = _normLoose(b.title);
     if (!ta || !tb) return false;
@@ -7184,13 +7212,32 @@ function booksSimilar(a, b) {
     const endsDigit = s => /\d\s*$/.test(s);
     const stripNum = s => s.replace(/\s*\d+\s*$/, '').trim();
     if (endsDigit(ta) && endsDigit(tb) && ta !== tb && stripNum(ta) === stripNum(tb)) return false;
+    // ---- Guards added 2026-08-03 (v3.80.0) after Clean Up merged 5 pairs of
+    // ---- genuinely different books. See PRD Design Log.
+    // (1) Different volumes of the same series are different books.
+    //     "Nothing Special" vs "Nothing Special, Volume One".
+    const va = _volumeMarker(a.title), vb = _volumeMarker(b.title);
+    if (va !== vb) return false;
+    // (2) Two copies sitting on DIFFERENT physical shelves are two physical books,
+    //     whatever their titles look like. Mary shelves what she owns.
+    const sa = (a.shelfLocation || '').toString().trim().toLowerCase();
+    const sb = (b.shelfLocation || '').toString().trim().toLowerCase();
+    if (sa && sb && sa !== sb) return false;
     // Authors should be compatible (or one is missing) — _normAuthor handles "Last, First"
     const aa = _normAuthor(a.author), ab = _normAuthor(b.author);
     const authorOk = !aa || !ab || aa === ab || _simRatio(aa, ab) >= 0.8;
     if (!authorOk) return false;
-    // Similar title, or one title contains the other (e.g. subtitle / edition)
+    // Similar title, or one title contains the other (e.g. subtitle / edition).
     const titleSim = _simRatio(ta, tb) >= 0.85;
-    const contains = ta.length >= 6 && tb.length >= 6 && (ta.includes(tb) || tb.includes(ta));
+    // (3) Containment must be a PREFIX, not a suffix. A subtitle EXTENDS a title
+    //     ("The Big Burn" → "The Big Burn: Teddy Roosevelt and…"), whereas a series
+    //     tag TRAILS it ("Sunrise on the Reaping (The Hunger Games)" ends with the
+    //     name of a different book). The old rule used bare `includes()` in either
+    //     direction, which is what swallowed The Hunger Games and The Darkness
+    //     Outside Us into their own sequels.
+    const shortT = ta.length <= tb.length ? ta : tb;
+    const longT  = ta.length <= tb.length ? tb : ta;
+    const contains = shortT.length >= 6 && longT.startsWith(shortT);
     return titleSim || contains;
 }
 
@@ -7235,9 +7282,11 @@ function _computeDuplicateRemovals() {
         if (!k || k === '|') return;                  // skip title-less rows (handled as "empty")
         (groups[k] = groups[k] || []).push(b);
     });
+    const exactGroups = [];
     Object.values(groups).filter(g => g.length > 1).forEach(g => {
         g.sort((a, b) => score(b) - score(a));        // richest first
         g.slice(1).forEach(b => toRemove.add(b.id));  // keep g[0], drop the rest
+        exactGroups.push(g);                          // kept for the review modal (v3.80.0)
     });
     const exactCount = toRemove.size;
     // Pass 2: similar (fuzzy) matches, ignoring books already slated for removal
@@ -7245,7 +7294,7 @@ function _computeDuplicateRemovals() {
     const clusters = findSimilarClusters(remaining);
     clusters.forEach(c => c.sort((a, b) => score(b) - score(a)));
     const fuzzyCount = clusters.reduce((n, c) => n + (c.length - 1), 0);
-    return { toRemove, exactCount, clusters, fuzzyCount, total: exactCount + fuzzyCount };
+    return { toRemove, exactCount, exactGroups, clusters, fuzzyCount, total: exactCount + fuzzyCount };
 }
 
 // A title is "usable" when it isn't blank or a scanner placeholder.
@@ -7288,30 +7337,89 @@ async function _lookupAuthorForTitle(title, isbn) {
 }
 
 // ---- Remove duplicate books (standalone button — still available) ----
+// ---- Clean Up merge review (added 2026-08-03, v3.80.0) ---------------------
+// Why this exists: on 2026-08-03 Clean Up removed 8 books behind a confirm()
+// that showed only a COUNT ("Remove 8 duplicates"). Five of them were genuinely
+// different books — a title and its own sequel. Nothing is removed now without
+// being listed, and FUZZY matches start UNCHECKED, so the risky ones are opt-in
+// while exact title+author matches stay opt-out.
+let _mergeReviewState = null;
+
+function _mrLine(b, keep) {
+    const esc = v => escapeHtml(v == null ? '' : String(v));
+    const bits = [];
+    if (b.status) bits.push(esc(b.status));
+    if (b.shelfLocation) bits.push('📍 ' + esc(b.shelfLocation));
+    if (b.rating) bits.push('★' + esc(b.rating));
+    return '<div style="padding:3px 0;color:' + (keep ? '#3D5A80' : '#855A18') + ';">'
+        + (keep ? '✓ keep ' : '✕ remove ')
+        + '<strong>' + esc(b.title || '(no title)') + '</strong>'
+        + ' — ' + esc(b.author || 'Unknown')
+        + (bits.length ? ' <span style="color:#6E635A;font-size:12px;">(' + bits.join(' · ') + ')</span>' : '')
+        + '</div>';
+}
+
+// groups: array of { kind:'exact'|'similar', books:[richest-first] }
+function openMergeReview(groups, onApply) {
+    _mergeReviewState = { groups: groups, onApply: onApply };
+    const intro = document.getElementById('mergeReviewIntro');
+    const list = document.getElementById('mergeReviewList');
+    if (!intro || !list) return false;
+    const nExact = groups.filter(g => g.kind === 'exact').length;
+    const nSim = groups.length - nExact;
+    intro.innerHTML = 'Each group keeps the most complete copy and removes the rest. '
+        + '<strong>Exact matches</strong> (same title and author) are checked; '
+        + '<strong>similar-looking</strong> ones are not — tick only the ones you agree are the same book.';
+    list.innerHTML = groups.map((g, i) => {
+        const checked = g.kind === 'exact' ? ' checked' : '';
+        const tag = g.kind === 'exact'
+            ? '<span style="font-size:11px;color:#7D9B76;">EXACT</span>'
+            : '<span style="font-size:11px;color:#855A18;">SIMILAR — check carefully</span>';
+        return '<label style="display:block;border:1px solid rgba(218,165,32,0.35);border-radius:10px;'
+            + 'padding:10px 12px;margin-bottom:10px;cursor:pointer;">'
+            + '<input type="checkbox" class="mr-chk" data-i="' + i + '"' + checked + ' style="margin-right:8px;">'
+            + tag
+            + g.books.map((b, j) => _mrLine(b, j === 0)).join('')
+            + '</label>';
+    }).join('');
+    document.getElementById('mergeReviewModal').classList.add('active');
+    return true;
+}
+
+function _applyMergeReview() {
+    if (!_mergeReviewState) return;
+    const chosen = [];
+    document.querySelectorAll('#mergeReviewList .mr-chk').forEach(chk => {
+        if (chk.checked) chosen.push(_mergeReviewState.groups[Number(chk.getAttribute('data-i'))]);
+    });
+    const ids = new Set();
+    chosen.forEach(g => g.books.slice(1).forEach(b => ids.add(b.id)));
+    closeModal('mergeReviewModal');
+    const cb = _mergeReviewState.onApply;
+    _mergeReviewState = null;
+    if (cb) cb(ids);
+}
+
+// Turn a _computeDuplicateRemovals() result into review groups.
+function _dupGroups(dup) {
+    const out = [];
+    (dup.exactGroups || []).forEach(g => out.push({ kind: 'exact', books: g }));
+    (dup.clusters || []).forEach(c => out.push({ kind: 'similar', books: c }));
+    return out;
+}
+
 function removeDuplicateBooks() {
     const dup = _computeDuplicateRemovals();
     if (dup.total === 0) { showNotification('No duplicates found ✨', 1500); return; }
-    let msg = `Found ${dup.total} duplicate book${dup.total > 1 ? 's' : ''} to remove.\n\n`;
-    if (dup.exactCount) msg += `• ${dup.exactCount} exact duplicate${dup.exactCount > 1 ? 's' : ''} (same title & author)\n`;
-    if (dup.clusters.length) {
-        const many = dup.clusters.length > 1;
-        msg += `• ${dup.clusters.length} group${many ? 's' : ''} of similar-looking books:\n`;
-        dup.clusters.forEach((cluster, i) => {
-            if (many) msg += `   Group ${i + 1}:\n`;
-            cluster.forEach((b, j) => { msg += `      ${j === 0 ? '✓ keep' : '✕ remove'}: "${b.title}" — ${b.author || 'Unknown'}\n`; });
-        });
-    }
-    msg += `\nKeep the most complete copy of each and remove the rest?`;
-    if (confirm(msg)) {
-        const toRemove = new Set(dup.toRemove);
-        dup.clusters.forEach(c => c.slice(1).forEach(b => toRemove.add(b.id)));
-        app.books = app.books.filter(b => !toRemove.has(b.id));
+    openMergeReview(_dupGroups(dup), (ids) => {
+        if (!ids.size) { showNotification('Nothing removed', 1500); return; }
+        app.books = app.books.filter(b => !ids.has(b.id));
         app.saveData();
         applyLibraryFilters();
         renderLibraryStats();
         renderDashboard();
-        showNotification(`Removed ${dup.total} duplicate${dup.total > 1 ? 's' : ''} 🧹`, 2000);
-    }
+        showNotification(`Removed ${ids.size} duplicate${ids.size > 1 ? 's' : ''} 🧹`, 2000);
+    });
 }
 
 // ---- Clean Up: dupes + empty (no-title) rows + look up missing authors ----
@@ -7340,17 +7448,43 @@ async function cleanUpLibrary(opts) {
         return { emptyRemoved: 0, dupsRemoved: 0, authorsFilled: 0, authorsMissed: 0, nothing: true };
     }
 
-    if (!auto) {
+    // Duplicate removals are REVIEWED, never assumed (v3.80.0). The old code put
+    // every dupe behind a single count in a confirm() — that is how 5 genuinely
+    // different books were deleted on 2026-08-03. Empty (title-less) rows and the
+    // author lookup are safe and stay on the simple confirm.
+    let approvedDupIds = new Set();
+    if (!auto && nDup) {
+        const groups = _dupGroups(dup);
+        const decided = await new Promise(resolve => {
+            const opened = openMergeReview(groups, ids => resolve(ids));
+            if (!opened) resolve(null);                       // modal missing → fall through
+            const modal = document.getElementById('mergeReviewModal');
+            if (modal) {
+                const watch = setInterval(() => {
+                    if (!modal.classList.contains('active')) { clearInterval(watch); resolve(new Set()); }
+                }, 300);
+                setTimeout(() => clearInterval(watch), 10 * 60 * 1000);
+            }
+        });
+        if (decided === null) { window.__cleanup.phase = 'cancelled'; return { cancelled: true }; }
+        approvedDupIds = decided;
+    } else if (auto) {
+        approvedDupIds = new Set();
+        dup.toRemove.forEach(id => approvedDupIds.add(id));   // automation: exact dupes only
+    }
+
+    if (!auto && (nEmpty || nAuthor)) {
         let msg = 'Clean up your library?\n\n';
-        if (nDup) msg += `• Remove ${nDup} duplicate${nDup > 1 ? 's' : ''}\n`;
         if (nEmpty) msg += `• Remove ${nEmpty} empty entr${nEmpty > 1 ? 'ies' : 'y'} (no title)\n`;
         if (nAuthor) msg += `• Look up authors for ${nAuthor} book${nAuthor > 1 ? 's' : ''} (may take a minute)\n`;
-        msg += '\nKeep the most complete copy of each duplicate.';
+        if (approvedDupIds.size) msg += `• Remove ${approvedDupIds.size} duplicate${approvedDupIds.size > 1 ? 's' : ''} you approved\n`;
         if (!confirm(msg)) { window.__cleanup.phase = 'cancelled'; return { cancelled: true }; }
     }
 
-    // 1) Apply removals (dupes + empties) up front, then persist.
-    if (removePreview.size) { app.books = app.books.filter(b => !removePreview.has(b.id)); app.saveData(); }
+    // 1) Apply removals (approved dupes + empties) up front, then persist.
+    const toApply = new Set(emptyIds);
+    approvedDupIds.forEach(id => toApply.add(id));
+    if (toApply.size) { app.books = app.books.filter(b => !toApply.has(b.id)); app.saveData(); }
 
     // 2) Look up missing authors — sequential + polite delay + progress.
     let filled = 0, missed = 0;
@@ -7376,12 +7510,13 @@ async function cleanUpLibrary(opts) {
 
     if (!auto) {
         const parts = [];
-        if (nDup) parts.push(`${nDup} dup${nDup > 1 ? 's' : ''}`);
+        const nDupApplied = approvedDupIds.size;
+        if (nDupApplied) parts.push(`${nDupApplied} dup${nDupApplied > 1 ? 's' : ''}`);
         if (nEmpty) parts.push(`${nEmpty} empty`);
         if (filled) parts.push(`${filled} author${filled > 1 ? 's' : ''} added`);
         showNotification('Cleaned: ' + (parts.join(' · ') || 'nothing') + ' 🧹', 2800);
     }
-    return { emptyRemoved: nEmpty, dupsRemoved: nDup, authorsFilled: filled, authorsMissed: missed };
+    return { emptyRemoved: nEmpty, dupsRemoved: approvedDupIds.size, authorsFilled: filled, authorsMissed: missed };
 }
 
 function toggleQuickStatus(el, bookId) {
@@ -13316,6 +13451,10 @@ function setupEventListeners() {
     document.querySelectorAll('[data-modal]').forEach(btn => {
         btn.addEventListener('click', () => closeModal(btn.getAttribute('data-modal')));
     });
+
+    // Clean Up merge review — Apply (v3.80.0)
+    const mrApply = document.getElementById('mergeReviewApplyBtn');
+    if (mrApply) mrApply.addEventListener('click', _applyMergeReview);
 }
 
 // ============================================
@@ -18227,7 +18366,8 @@ initializeApp();
     </script>
     <!-- App version badge — bump APP_VERSION on each release; keep in sync with PRD.md -->
     <script>
-      var APP_VERSION = '3.79.0';
+      var APP_VERSION = '3.80.0';
+      /* v3.80.0: Clean Up safety. It removed 8 books on 2026-08-03 behind a confirm() showing only a COUNT — 5 were genuinely different books swallowed by a bare `includes()` containment rule. Now: containment must be a PREFIX (a subtitle extends a title; a series tag trails it), a volume/series marker on one side only blocks the merge, two copies on different shelves are never merged, and every removal is listed in a review modal where SIMILAR matches start UNCHECKED. */
       /* v3.79.0: book deletion tombstones (`deletedBooks`) — books merged by union, so a delete only stuck if no other device still had the book; every library cleanup had to be re-applied. Same snapshot-diff + tombstone machinery as v3.76.0, keyed by _shelfMergeKey and applied after the books union. Guarded by dateAdded re-creation, a no-tombstones-on-wipe rule, and a 300-per-save stale-subset valve. */
       /* v3.78.0: removed the Kindle and Libby import sources (guide entries + Connected Apps tiles) at the operator's request — neither export path was reliable and the imported rows were a recurring source of wrong titles/authors. Books already imported from them are untouched by the code change; the library data was cleaned separately. */
       /* v3.77.1: a11y follow-up — reader-profile rename/delete buttons were hover-only, so they were unreachable on touch; now always visible where hover isn't available. (Missed in the v3.74.0 accessibility pass.) */
