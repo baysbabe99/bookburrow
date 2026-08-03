@@ -2730,6 +2730,12 @@
       .reader-manage-btn,.reader-del-btn{position:absolute;top:6px;background:#FFF8F0;border:1px solid #E8DFD5;border-radius:8px;font-size:12px;cursor:pointer;padding:2px 5px;opacity:0;transition:.15s;line-height:1;}
       .reader-manage-btn{right:34px;} .reader-del-btn{right:6px;}
       .reader-card:hover .reader-manage-btn,.reader-card:hover .reader-del-btn{opacity:1;}
+      /* a11y 2026-08-02: a touch device has no hover, so these stayed invisible and a reader
+         profile could not be renamed or deleted on a phone at all. Show them unconditionally
+         where hover isn't available (and on narrow screens). */
+      @media (hover: none), (max-width: 768px) {
+        .reader-manage-btn,.reader-del-btn{opacity:1;}
+      }
       .switch-reader-btn{width:100%;margin-top:6px;background:rgba(125,155,118,.12);border:1px solid #E8DFD5;border-radius:10px;padding:7px;font-size:12px;color:#3D5A80;cursor:pointer;font-family:'Nunito',sans-serif;font-weight:600;}
       .switch-reader-btn:hover{border-color:#C2705B;color:#C2705B;}
       .login-box{background:#fff;border:2px solid #E8DFD5;border-radius:22px;padding:34px 30px;max-width:380px;width:100%;box-shadow:0 18px 50px rgba(61,90,128,.14);text-align:center;}
@@ -18118,7 +18124,8 @@ initializeApp();
     </script>
     <!-- App version badge — bump APP_VERSION on each release; keep in sync with PRD.md -->
     <script>
-      var APP_VERSION = '3.77.0';
+      var APP_VERSION = '3.77.1';
+      /* v3.77.1: a11y follow-up — reader-profile rename/delete buttons were hover-only, so they were unreachable on touch; now always visible where hover isn't available. (Missed in the v3.74.0 accessibility pass.) */
       /* v3.77.0: polish pass — shortened the verbose toasts, hoisted the palette into :root tokens (CSS block only; canvas can't resolve var()), made the bookstore banner dismissable, replaced 3 blocking browser alert dialogs with toasts, and removed a dead variable. */
       /* v3.76.0: deletion tombstones (`deletedRecords`) for challenges/loans/borrows/friends/gifts, so deleting one sticks instead of being re-added by a cross-device merge. Detected by the same snapshot diff as updatedAt; a record re-created after its delete survives, and restoring one clears its tombstone. */
       /* v3.75.0: per-record `updatedAt` on challenges/loans/borrows/friends/gifts so a cross-device edit to the same record keeps the NEWER copy instead of blindly keeping local. Stamped by change-detection in saveData (diff vs a snapshot) rather than at each mutation site. */
