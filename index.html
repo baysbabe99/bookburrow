@@ -4681,6 +4681,7 @@
         // previous save/load and stamps whatever actually changed.
         const _STAMPED_COLLECTIONS = ['challenges', 'loans', 'borrows', 'friends', 'gifts'];
         let _recSnapshot = null;
+        let _bookSnapshot = null;   // Set of _shelfMergeKey at the last load/save (v3.79.0)
         function _recFingerprint(r) {
             try { const o = Object.assign({}, r); delete o.updatedAt; return JSON.stringify(o); }
             catch (e) { return ''; }
@@ -4695,6 +4696,15 @@
                 snap[k] = m;
             });
             _recSnapshot = snap;
+            // Books are snapshotted by MERGE KEY, not id, because that is the identity the
+            // cross-device union uses — a tombstone has to speak the same language as the
+            // union it is overriding, or it silently matches nothing. (v3.79.0)
+            const bs = new Set();
+            (src && Array.isArray(src.books) ? src.books : []).forEach(b => {
+                const k = _shelfMergeKey(b);
+                if (k) bs.add(k);
+            });
+            _bookSnapshot = bs;
         }
         function _stampChangedRecords(src) {
             // No snapshot yet => nothing to diff against. Skip rather than mass-stamp, or the
@@ -4742,6 +4752,75 @@
                 return !(set && set.has(t.k.slice(i + 1)));
             });
             if (src.deletedRecords.length > _MAX_TOMBSTONES) src.deletedRecords = src.deletedRecords.slice(-_MAX_TOMBSTONES);
+        }
+        // ---- Book deletion tombstones (added 2026-08-03, v3.79.0, field `deletedBooks`) ----
+        // The five collections above got tombstones in v3.76.0, but BOOKS never did: they merge
+        // by union-of-keys (`_shelfMergeKey`) + progress score, and a union cannot express
+        // "gone". So deleting a book only stuck if no other device — and no earlier copy of the
+        // cloud row — still had it; otherwise the next `_mergeShelf` quietly put it back. That
+        // is the single recurring reason a library cleanup "didn't take" (see the 2026-06-26,
+        // 2026-08-02 and 2026-08-03 cleanups, each of which had to be re-applied).
+        //
+        // Shape mirrors `deletedRecords`: { k: <shelfMergeKey>, t: <ISO deleted-at> }, unioned
+        // across devices by `_mergeTombstones` (latest `t` per key) and applied AFTER the union
+        // so a delete beats a stale copy on either side.
+        const _MAX_BOOK_TOMBSTONES = 3000;
+        // Sanity valve. Tombstoning is irreversible-ish across devices, so a single save is
+        // never allowed to bury an implausible number of books at once. This guards the failure
+        // mode that has actually bitten this app before: `app.books` briefly holding a STALE
+        // SUBSET of the real library (documented 2026-08-02, 1,927 → 1,812). Without the valve,
+        // saving in that state would tombstone the ~115 missing books on every device. A real
+        // human cleanup is dozens of books; a wipe is thousands.
+        const _MAX_BOOK_TOMBS_PER_SAVE = 300;
+        function _recordBookDeletions(src) {
+            if (!_bookSnapshot || !src) return;
+            if (!Array.isArray(src.deletedBooks)) src.deletedBooks = [];
+            const live = new Set();
+            (Array.isArray(src.books) ? src.books : []).forEach(b => {
+                const k = _shelfMergeKey(b);
+                if (k) live.add(k);
+            });
+            // "Everything vanished" is never a per-book delete — that is Clear All Data, which
+            // has its own path (cloudScanClearedAt + an emptied remote shelf). Tombstoning there
+            // would make the wipe unrecoverable on the user's other devices.
+            if (!live.size && _bookSnapshot.size) return;
+            const gone = [];
+            _bookSnapshot.forEach(k => { if (!live.has(k)) gone.push(k); });
+            if (gone.length > _MAX_BOOK_TOMBS_PER_SAVE) {
+                try { console.warn('Bookburrow: skipped book tombstones — ' + gone.length + ' books vanished in one save (limit ' + _MAX_BOOK_TOMBS_PER_SAVE + '). Suspected stale book list, not a real delete.'); } catch (e) {}
+                return;
+            }
+            const now = new Date().toISOString();
+            gone.forEach(k => {
+                if (!src.deletedBooks.some(t => t && t.k === k)) src.deletedBooks.push({ k: k, t: now });
+            });
+            // A book that exists again locally (re-added, re-imported, or a backup restore)
+            // clears its tombstone, so a delete is undoable and the list cannot grow forever.
+            src.deletedBooks = src.deletedBooks.filter(t => t && t.k && !live.has(t.k));
+            if (src.deletedBooks.length > _MAX_BOOK_TOMBSTONES) src.deletedBooks = src.deletedBooks.slice(-_MAX_BOOK_TOMBSTONES);
+        }
+        // Drop tombstoned books from a merged blob. A book ADDED BACK after the delete survives:
+        // books carry no `updatedAt`, so `dateAdded` is the re-creation signal (a genuinely
+        // re-added book gets a fresh one). ISO-8601 strings compare lexicographically, so a
+        // string compare is a time compare — same trick as `_applyTombstones`.
+        function _applyBookTombstones(target, tombs) {
+            let removed = 0;
+            if (!target || !Array.isArray(target.books) || !Array.isArray(tombs) || !tombs.length) return removed;
+            const by = new Map();
+            tombs.forEach(t => { if (t && t.k) by.set(t.k, String(t.t || '')); });
+            const kept = target.books.filter(b => {
+                const t = by.get(_shelfMergeKey(b));
+                if (t === undefined) return true;
+                // `new Date(junk).toISOString()` THROWS (RangeError) — and a throw here would
+                // escape _mergeShelf and break the entire cloud merge, not just one book. Any
+                // unparseable dateAdded is simply treated as "no re-creation evidence".
+                let added = '';
+                try { if (b && b.dateAdded) { const d = new Date(b.dateAdded); if (!isNaN(d.getTime())) added = d.toISOString(); } } catch (e) {}
+                return !!(added && added > t);
+            });
+            removed = target.books.length - kept.length;
+            target.books = kept;
+            return removed;
         }
         // Union two tombstone lists, keeping the latest delete time per key.
         function _mergeTombstones(a, b) {
@@ -4893,6 +4972,11 @@
             // because the next load has nothing left to remove.
             merged.deletedRecords = _mergeTombstones(local.deletedRecords, remote.deletedRecords);
             if (_applyTombstones(merged, merged.deletedRecords) > 0) changed = true;
+            // Same story for books (v3.79.0). Must run AFTER the books union above, or the
+            // union would just re-add what this removes. Converges for the same reason the
+            // record tombstones do: a second pass has nothing left to remove.
+            merged.deletedBooks = _mergeTombstones(local.deletedBooks, remote.deletedBooks);
+            if (_applyBookTombstones(merged, merged.deletedBooks) > 0) changed = true;
             // NOTE: do NOT set `changed` from a bookcases diff — the merged object can serialize
             // differently from local on every load (key order), which caused an infinite
             // reload loop (v3.55.2). The merged bookcases are saved to localStorage and used on
@@ -5317,6 +5401,7 @@
             this.cloudScanClearedAt = data.cloudScanClearedAt || '';
             this.deletedScanKeys = Array.isArray(data.deletedScanKeys) ? data.deletedScanKeys : [];
             this.deletedRecords = Array.isArray(data.deletedRecords) ? data.deletedRecords : [];
+            this.deletedBooks = Array.isArray(data.deletedBooks) ? data.deletedBooks : [];
         } else {
             this.initializeSampleData();
         }
@@ -5413,6 +5498,7 @@
         this.cloudScanClearedAt = '';
         this.deletedScanKeys = [];
         this.deletedRecords = [];
+        this.deletedBooks = [];
         this.saveData();
     }
 
@@ -5443,6 +5529,7 @@
     saveData() {
         try { _stampChangedRecords(this); } catch (e) {}
         try { _recordDeletions(this); } catch (e) {}
+        try { _recordBookDeletions(this); } catch (e) {}
         try {
             localStorage.setItem(profileDataKey(), JSON.stringify({
                 books: this.books, xp: this.xp, loans: this.loans, borrows: this.borrows,
@@ -5455,7 +5542,8 @@
                 notifiedReleaseAlerts: this.notifiedReleaseAlerts,
                 cloudScanClearedAt: this.cloudScanClearedAt || '',
                 deletedScanKeys: this.deletedScanKeys || [],
-                deletedRecords: this.deletedRecords || []
+                deletedRecords: this.deletedRecords || [],
+                deletedBooks: this.deletedBooks || []
             }));
         } catch (e) {
             // Most likely the localStorage quota was exceeded (large shelf-photo data URLs).
@@ -18139,7 +18227,8 @@ initializeApp();
     </script>
     <!-- App version badge — bump APP_VERSION on each release; keep in sync with PRD.md -->
     <script>
-      var APP_VERSION = '3.78.0';
+      var APP_VERSION = '3.79.0';
+      /* v3.79.0: book deletion tombstones (`deletedBooks`) — books merged by union, so a delete only stuck if no other device still had the book; every library cleanup had to be re-applied. Same snapshot-diff + tombstone machinery as v3.76.0, keyed by _shelfMergeKey and applied after the books union. Guarded by dateAdded re-creation, a no-tombstones-on-wipe rule, and a 300-per-save stale-subset valve. */
       /* v3.78.0: removed the Kindle and Libby import sources (guide entries + Connected Apps tiles) at the operator's request — neither export path was reliable and the imported rows were a recurring source of wrong titles/authors. Books already imported from them are untouched by the code change; the library data was cleaned separately. */
       /* v3.77.1: a11y follow-up — reader-profile rename/delete buttons were hover-only, so they were unreachable on touch; now always visible where hover isn't available. (Missed in the v3.74.0 accessibility pass.) */
       /* v3.77.0: polish pass — shortened the verbose toasts, hoisted the palette into :root tokens (CSS block only; canvas can't resolve var()), made the bookstore banner dismissable, replaced 3 blocking browser alert dialogs with toasts, and removed a dead variable. */
