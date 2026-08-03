@@ -4745,7 +4745,7 @@
         // while genuinely different books are kept apart.
         function _shelfMergeKey(b) {
             if (!b) return '';
-            const isbn = (b.isbn || '').replace(/[^0-9Xx]/g, '');
+            const isbn = _normISBN(b.isbn);            // was an inline regex that kept the float tail (v3.82.0)
             if (isbn) return 'i:' + isbn;
             const t = (b.title || '').toLowerCase().replace(/\s+/g, ' ').trim();
             const a = (b.author || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -4932,6 +4932,56 @@
             target.books = kept;
             return removed;
         }
+        // Valid ISBN-13 / ISBN-10 check digits — used to decide whether a suspiciously long
+        // key is a float artefact or a genuine identifier. (v3.82.0)
+        function _isValidIsbn13(v) {
+            if (!/^\d{13}$/.test(v)) return false;
+            let sum = 0;
+            for (let i = 0; i < 12; i++) sum += (+v[i]) * (i % 2 ? 3 : 1);
+            return ((10 - (sum % 10)) % 10) === (+v[12]);
+        }
+        function _isValidIsbn10(v) {
+            if (!/^\d{9}[\dX]$/.test(v)) return false;
+            let sum = 0;
+            for (let i = 0; i < 9; i++) sum += (+v[i]) * (10 - i);
+            const c = v[9] === 'X' ? 10 : (+v[9]);
+            return (sum + c) % 11 === 0;
+        }
+
+        // Rewrite tombstone keys minted BEFORE the ISBN normaliser was fixed.
+        //
+        // The old key came from stripping non-digits off a float ISBN, which FUSED the tail into
+        // the number: "9780547394602.0" -> "97805473946020" (14 digits). The dot is gone, so
+        // re-normalising can't recover it — the only signal left is the length plus a valid
+        // check digit on the shortened form. Without this, every ISBN-keyed tombstone stops
+        // matching after the normaliser fix and its deleted book quietly resurrects.
+        // Deliberately conservative: strips ONE trailing zero, and only when the result is a
+        // checksum-valid ISBN. Idempotent; leaves `t:` (title-keyed) tombstones alone.
+        function _unfuseIsbn(v) {
+            if (typeof v !== 'string') return v;
+            if (v.length === 14 && v.slice(-1) === '0' && _isValidIsbn13(v.slice(0, 13))) return v.slice(0, 13);
+            if (v.length === 11 && v.slice(-1) === '0' && _isValidIsbn10(v.slice(0, 10))) return v.slice(0, 10);
+            return v;
+        }
+        function _migrateIsbnTombstoneKeys(src) {
+            if (!src || !Array.isArray(src.deletedBooks)) return 0;
+            let fixed = 0;
+            const seen = new Set();
+            src.deletedBooks = src.deletedBooks.map(t => {
+                if (!t || !t.k || t.k.indexOf('i:') !== 0) return t;
+                const raw = t.k.slice(2);
+                const better = _unfuseIsbn(_normISBN(raw));
+                if (better && better !== raw) { fixed++; return Object.assign({}, t, { k: 'i:' + better }); }
+                return t;
+            }).filter(t => {                                  // collapse keys that now coincide
+                if (!t || !t.k) return false;
+                if (seen.has(t.k)) return false;
+                seen.add(t.k); return true;
+            });
+            if (fixed) { try { console.info('Bookburrow: migrated ' + fixed + ' ISBN tombstone key(s).'); } catch (e) {} }
+            return fixed;
+        }
+
         // Union two tombstone lists, keeping the LATEST entry per key — where an entry may be
         // a delete ({k,t}) or a RETRACTION ({k,t,r:1}).
         //
@@ -5099,6 +5149,7 @@
             // Same story for books (v3.79.0). Must run AFTER the books union above, or the
             // union would just re-add what this removes. Converges for the same reason the
             // record tombstones do: a second pass has nothing left to remove.
+            try { _migrateIsbnTombstoneKeys(local); _migrateIsbnTombstoneKeys(remote); } catch (e) {}   // (v3.82.0)
             merged.deletedBooks = _mergeTombstones(local.deletedBooks, remote.deletedBooks, _MAX_BOOK_TOMBSTONES);   // was capped at 2000, dropping 1000 (v3.81.0)
             if (_applyBookTombstones(merged, merged.deletedBooks) > 0) changed = true;
             // NOTE: do NOT set `changed` from a bookcases diff — the merged object can serialize
@@ -5548,6 +5599,7 @@
             this.deletedScanKeys = Array.isArray(data.deletedScanKeys) ? data.deletedScanKeys : [];
             this.deletedRecords = Array.isArray(data.deletedRecords) ? data.deletedRecords : [];
             this.deletedBooks = Array.isArray(data.deletedBooks) ? data.deletedBooks : [];
+            try { _migrateIsbnTombstoneKeys(this); } catch (e) {}      // (v3.82.0)
         } else {
             this.initializeSampleData();
         }
@@ -7248,7 +7300,17 @@ function dedupeKey(book) {
 }
 
 // Normalised ISBN (digits + X only) — a shared ISBN is a decisive same-book signal
-function _normISBN(s) { return (s || '').toString().replace(/[^0-9xX]/g, '').toUpperCase(); }
+// ⚠️ v3.82.0. 972 of the library's 975 ISBNs arrived from a spreadsheet import as FLOATS —
+// "9780547394602.0". Stripping non-digits turned that into "97805473946020", a 14-digit
+// non-ISBN: duplicate detection by ISBN silently stopped working (a rescan could re-add a book
+// already owned) and every ISBN-keyed cover/author lookup missed. Fixed in the NORMALISER
+// rather than by rewriting the stored strings — mutating 972 records would move their
+// `_shelfMergeKey` and duplicate the whole shelved library on the next merge.
+function _normISBN(s) {
+    let v = (s || '').toString().trim();
+    v = v.replace(/\.0+$/, '');                       // "9780547394602.0" -> "9780547394602"
+    return v.replace(/[^0-9xX]/g, '').toUpperCase();
+}
 
 // Author normalisation: handles "Last, First" order and initials, so
 // "Tolkien, J.R.R." and "J. R. R. Tolkien" compare as equal (tokens sorted).
@@ -18645,7 +18707,8 @@ initializeApp();
     </script>
     <!-- App version badge — bump APP_VERSION on each release; keep in sync with PRD.md -->
     <script>
-      var APP_VERSION = '3.81.0';
+      var APP_VERSION = '3.82.0';
+      /* v3.82.0: ISBN float repair. 972 of 975 ISBNs arrived from a spreadsheet import as floats ("9780547394602.0"); stripping non-digits produced a 14-digit non-ISBN, so ISBN duplicate-matching silently stopped working (a rescan could re-add an owned book) and every ISBN-keyed lookup missed. Fixed in _normISBN (strip a trailing .0) rather than by rewriting 972 records — mutating them would move their _shelfMergeKey and duplicate the shelved library on the next merge. _shelfMergeKey now uses _normISBN instead of its own inline regex. Tombstone keys minted before the fix hold the FUSED digits, which no normaliser can undo, so _unfuseIsbn drops one trailing zero only when the shorter form has a valid ISBN-13/10 check digit. */
       /* v3.81.0: six data-safety fixes found in an audit — one of which reproduced itself mid-audit when a reloaded tab silently reverted a library edit. (1) Cloud.loadShelf/saveShelf/shelfUpdatedAt now THROW on a failed request instead of returning null, so 'the read failed' can never be mistaken for 'this account is empty'. (2) cloudPush is gated behind _cloudSyncReady and aborts on any read failure, closing the boot window where a stale device overwrote the cloud unmerged; plus a hard block on pushing 0 books over a non-empty cloud. (3) Tombstones can now be RETRACTED, so Restore from Backup actually restores. (4) saveData returns false and alerts on a failed write instead of re-pushing the stale blob. (5) Shelf scans claim each record once and won't relocate an already-placed book on a weak match; series volumes no longer collapse. (6) clearBooksOnly syncs before reloading and no longer tombstones the whole loan history. */
       /* v3.80.0: Clean Up safety. It removed 8 books on 2026-08-03 behind a confirm() showing only a COUNT — 5 were genuinely different books swallowed by a bare `includes()` containment rule. Now: containment must be a PREFIX (a subtitle extends a title; a series tag trails it), a volume/series marker on one side only blocks the merge, two copies on different shelves are never merged, and every removal is listed in a review modal where SIMILAR matches start UNCHECKED. */
       /* v3.79.0: book deletion tombstones (`deletedBooks`) — books merged by union, so a delete only stuck if no other device still had the book; every library cleanup had to be re-applied. Same snapshot-diff + tombstone machinery as v3.76.0, keyed by _shelfMergeKey and applied after the books union. Guarded by dateAdded re-creation, a no-tombstones-on-wipe rule, and a 300-per-save stale-subset valve. */
