@@ -4692,6 +4692,7 @@
             const gf = _mergeArrayById(local.gifts, remote.gifts, 'id'); merged.gifts = gf.out; if (gf.added) changed = true;
             const sp = _mergeArrayById(local.shelfPhotos, remote.shelfPhotos, 'id'); merged.shelfPhotos = sp.out; if (sp.added) changed = true;
             merged.bookcases = _mergeBookcases(local.bookcases, remote.bookcases);
+            merged.deletedScanKeys = Array.from(new Set([].concat(Array.isArray(local.deletedScanKeys) ? local.deletedScanKeys : [], Array.isArray(remote.deletedScanKeys) ? remote.deletedScanKeys : [])));
             // NOTE: do NOT set `changed` from a bookcases diff — the merged object can serialize
             // differently from local on every load (key order), which caused an infinite
             // reload loop (v3.55.2). The merged bookcases are saved to localStorage and used on
@@ -5111,6 +5112,7 @@
             this.releaseAlertLeadDays = Array.isArray(data.releaseAlertLeadDays) && data.releaseAlertLeadDays.length ? data.releaseAlertLeadDays : [0, 1, 7];
             this.notifiedReleaseAlerts = data.notifiedReleaseAlerts || {};
             this.cloudScanClearedAt = data.cloudScanClearedAt || '';
+            this.deletedScanKeys = Array.isArray(data.deletedScanKeys) ? data.deletedScanKeys : [];
         } else {
             this.initializeSampleData();
         }
@@ -5203,6 +5205,7 @@
         this.releaseAlertLeadDays = [0, 1, 7];
         this.notifiedReleaseAlerts = {};
         this.cloudScanClearedAt = '';
+        this.deletedScanKeys = [];
         this.saveData();
     }
 
@@ -5241,7 +5244,8 @@
                 releaseAlertsEnabled: this.releaseAlertsEnabled,
                 releaseAlertLeadDays: this.releaseAlertLeadDays,
                 notifiedReleaseAlerts: this.notifiedReleaseAlerts,
-                cloudScanClearedAt: this.cloudScanClearedAt || ''
+                cloudScanClearedAt: this.cloudScanClearedAt || '',
+                deletedScanKeys: this.deletedScanKeys || []
             }));
         } catch (e) {
             // Most likely the localStorage quota was exceeded (large shelf-photo data URLs).
@@ -6589,8 +6593,8 @@ function libBookCardHTML(book) {
                 ${bookCoverInner(book)}
             </div>
             ${cardProgressHTML(book)}
-            <div class="book-title">${book.title}</div>
-            <div class="book-author">${book.author || ''}</div>
+            <div class="book-title">${escapeHtml(book.title)}</div>
+            <div class="book-author">${escapeHtml(book.author || '')}</div>
             <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;">
                 ${(function(){var o=bookOwned(book);return `<span title="${o?'You own this':'Not owned (borrowed / wishlist)'}" style="background:${o?'rgba(125,155,118,0.18)':'rgba(194,112,91,0.15)'};color:${o?'#5A8A50':'#C2705B'};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;">${o?'📗 Owned':'📕 Not Owned'}</span>`;})()}
                 ${book.genre ? `<span style="background:rgba(125,155,118,0.15);color:#7D9B76;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${book.genre}</span>` : ''}
@@ -6611,7 +6615,7 @@ function libBookCardHTML(book) {
                 <button class="btn btn-secondary" style="font-size:10px;padding:4px 10px;border-radius:16px;" onclick="event.stopPropagation();openBookModal(${book.id})">✏️ Edit</button>
             </div>
             ${book.shelfLocation ? `<div style="font-size:11px;color:#D4A76A;margin-top:4px;cursor:pointer;" onclick="event.stopPropagation();showShelfLocation(${book.shelfPhotoId})" title="Click to see shelf photo">📍 ${escapeHtml(book.shelfLocation)}</div>` : ''}
-            ${book.status === 'buy' ? `<button class="btn btn-primary" style="margin-top:8px;font-size:11px;padding:4px 10px;width:100%;" onclick="event.stopPropagation();showWhereToBuy('${book.title.replace(/'/g,"\\'")}','${(book.author||'').replace(/'/g,"\\'")}','${(book.isbn||'').replace(/'/g,"\\'")}')">🏪 Where to Buy</button>` : ''}
+            ${book.status === 'buy' ? `<button class="btn btn-primary" style="margin-top:8px;font-size:11px;padding:4px 10px;width:100%;" onclick="event.stopPropagation();showWhereToBuyId(${book.id})">🏪 Where to Buy</button>` : ''}
             ${book.rating > 0 ? `<div style="margin-top:6px;">${'⭐'.repeat(book.rating)}${'☆'.repeat(5-book.rating)}</div>` : ''}
         </div>`;
 }
@@ -7186,8 +7190,8 @@ function renderLibraryBooks(filter) {
                 ${bookCoverInner(book)}
             </div>
             ${cardProgressHTML(book)}
-            <div class="book-title">${book.title}</div>
-            <div class="book-author">${book.author || ''}</div>
+            <div class="book-title">${escapeHtml(book.title)}</div>
+            <div class="book-author">${escapeHtml(book.author || '')}</div>
             <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;">
                 ${(function(){var o=bookOwned(book);return `<span title="${o?'You own this':'Not owned (borrowed / wishlist)'}" style="background:${o?'rgba(125,155,118,0.18)':'rgba(194,112,91,0.15)'};color:${o?'#5A8A50':'#C2705B'};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;">${o?'📗 Owned':'📕 Not Owned'}</span>`;})()}
                 ${book.genre ? `<span style="background:rgba(125,155,118,0.15);color:#7D9B76;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${book.genre}</span>` : ''}
@@ -7208,7 +7212,7 @@ function renderLibraryBooks(filter) {
                 <button class="btn btn-secondary" style="font-size:10px;padding:4px 10px;border-radius:16px;" onclick="event.stopPropagation();openBookModal(${book.id})">✏️ Edit</button>
             </div>
             ${book.shelfLocation ? `<div style="font-size:11px;color:#D4A76A;margin-top:4px;cursor:pointer;" onclick="event.stopPropagation();showShelfLocation(${book.shelfPhotoId})" title="Click to see shelf photo">📍 ${escapeHtml(book.shelfLocation)}</div>` : ''}
-            ${book.status === 'buy' ? `<button class="btn btn-primary" style="margin-top:8px;font-size:11px;padding:4px 10px;width:100%;" onclick="event.stopPropagation();showWhereToBuy('${book.title.replace(/'/g,"\\'")}','${(book.author||'').replace(/'/g,"\\'")}','${(book.isbn||'').replace(/'/g,"\\'")}')">🏪 Where to Buy</button>` : ''}
+            ${book.status === 'buy' ? `<button class="btn btn-primary" style="margin-top:8px;font-size:11px;padding:4px 10px;width:100%;" onclick="event.stopPropagation();showWhereToBuyId(${book.id})">🏪 Where to Buy</button>` : ''}
             ${book.rating > 0 ? `<div style="margin-top:6px;">${'⭐'.repeat(book.rating)}${'☆'.repeat(5-book.rating)}</div>` : ''}
         </div>`;
     }).join('');
@@ -7552,10 +7556,19 @@ function saveBookChanges(bookId) {
     showNotification('Book updated! ✨', 1500);
 }
 
+function _scanKey(o) {
+    const isbn = (o && o.isbn ? String(o.isbn) : '').replace(/[^0-9Xx]/g, '');
+    if (isbn) return 'i:' + isbn;
+    const t = (o && o.title ? String(o.title) : '').trim().toLowerCase();
+    const a = (o && o.author ? String(o.author) : '').trim().toLowerCase();
+    return 't:' + t + '|' + a;
+}
 function deleteBook(bookId) {
     if (confirm('Remove this book from your library?')) {
         const _b = app.books.find(b => b.id === bookId);
         if (_b) app.revokeFinishXP(_b);
+        // Tombstone so a phone-scanned book we deleted can't auto-re-import from the cloud.
+        if (_b) { if (!Array.isArray(app.deletedScanKeys)) app.deletedScanKeys = []; const k = _scanKey(_b); if (!app.deletedScanKeys.includes(k)) { app.deletedScanKeys.push(k); if (app.deletedScanKeys.length > 3000) app.deletedScanKeys = app.deletedScanKeys.slice(-3000); } }
         app.books = app.books.filter(b => b.id !== bookId);
         app.saveData();
         closeModal('bookModal');
@@ -7650,6 +7663,10 @@ function addFromSearch(idx) {
     if (typeof applyLibraryFilters === 'function') applyLibraryFilters();
 }
 
+function showWhereToBuyId(bookId) {
+    const b = (window.app && app.books) ? app.books.find(x => x.id === bookId) : null;
+    if (b) showWhereToBuy(b.title || '', b.author || '', b.isbn || '');
+}
 function showWhereToBuy(title, author, isbn) {
     const location = (app.profile && app.profile.location) ? app.profile.location : '';
     const searchQuery = encodeURIComponent(`${title} ${author}`);
@@ -9595,6 +9612,7 @@ async function autoImportCloudScans() {
             // After "Clear all data", don't auto-re-import scans that existed at/before the clear.
             if (clearedAt && (!r.date_added || new Date(r.date_added).getTime() <= clearedAt)) return;
             const incoming = { title: r.title || '', author: r.author || '', isbn: r.isbn || '' };
+            if (Array.isArray(app.deletedScanKeys) && app.deletedScanKeys.includes(_scanKey(incoming))) return; // user deleted this scan; don't resurrect
             const dup = app.books.some(lb => (r.isbn && (lb.isbn || '').replace(/[^0-9Xx]/g, '') === r.isbn) || isImportDuplicate(lb, incoming));
             if (dup) return;
             const year = r.published_date ? (parseInt((r.published_date.match(/\d{4}/) || [])[0]) || null) : null;
@@ -9626,6 +9644,7 @@ async function importCloudScans() {
     rows.forEach(r => {
         const incoming = { title: r.title || '', author: r.author || '', isbn: r.isbn || '' };
         if (app.books.some(lb => isImportDuplicate(lb, incoming))) return;
+        if (Array.isArray(app.deletedScanKeys)) { const _k = _scanKey(incoming); app.deletedScanKeys = app.deletedScanKeys.filter(x => x !== _k); } // explicit re-import clears the tombstone
         const year = r.published_date ? (parseInt((r.published_date.match(/\d{4}/) || [])[0]) || null) : null;
         app.books.push({
             id: app.getNextId(), title: r.title || 'Unknown', author: r.author || 'Unknown',
@@ -13887,7 +13906,7 @@ async function renderCloudFriends() {
     const outgoing = rows.filter(r => r.status === 'pending' && r.user_a === uid);
     const otherIds = [...new Set(rows.map(r => (r.user_a === uid ? r.user_b : r.user_a)))];
     const profs = await Cloud.profilesByIds(otherIds);
-    const nameFor = id => ((profs[id] && profs[id].display_name) || 'Reader');
+    const nameFor = id => _esc((profs[id] && profs[id].display_name) || 'Reader');
     let html = '';
     html += '<div style="background:#FFF8F0;border:1.5px solid #E8DFD5;border-radius:10px;padding:12px;margin-bottom:12px;">'
         + '<div style="font-size:11px;color:#8B7E74;font-weight:700;">YOUR FRIEND CODE</div>'
@@ -17874,7 +17893,8 @@ initializeApp();
     </script>
     <!-- App version badge — bump APP_VERSION on each release; keep in sync with PRD.md -->
     <script>
-      var APP_VERSION = '3.73.1';
+      var APP_VERSION = '3.73.2';
+      /* v3.73.2: security/data audit fixes — escape user/cloud strings in the library grid & friends list (XSS), and tombstone deleted phone-scanned books (deletedScanKeys) so they can't auto-re-import from the cloud. */
       /* v3.73.1: added a visible "Hide/Show photos" button to the photos header so the collapse is discoverable (the bare chevron in v3.73.0 was too subtle). */
       (function(){
         function ensure(){
