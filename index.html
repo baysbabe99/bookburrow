@@ -4682,6 +4682,72 @@
                 });
             });
         }
+        // ---- Deletion tombstones for the same five collections (added 2026-08-02, v3.76.0) --
+        // Without these, deleting a challenge/loan/friend only stuck if no other device wrote
+        // in between: the union merge would re-add it from the cloud. A tombstone is
+        // { k: '<collection>:<id>', t: <ISO deleted-at> }, synced like the records themselves.
+        // Deletions are DETECTED the same way changes are — by diffing against the snapshot —
+        // so every delete path is covered without touching each call site.
+        const _MAX_TOMBSTONES = 2000;
+        function _tombKey(coll, id) { return coll + ':' + id; }
+        function _recordDeletions(src) {
+            if (!_recSnapshot || !src) return;
+            if (!Array.isArray(src.deletedRecords)) src.deletedRecords = [];
+            const now = new Date().toISOString();
+            const live = {};
+            _STAMPED_COLLECTIONS.forEach(coll => {
+                const ids = new Set();
+                (Array.isArray(src[coll]) ? src[coll] : []).forEach(r => { if (r && r.id != null) ids.add(String(r.id)); });
+                live[coll] = ids;
+                Object.keys(_recSnapshot[coll] || {}).forEach(id => {
+                    if (ids.has(String(id))) return;
+                    const k = _tombKey(coll, id);
+                    if (!src.deletedRecords.some(t => t && t.k === k)) src.deletedRecords.push({ k: k, t: now });
+                });
+            });
+            // A record that exists again locally (restore, or re-created) clears its tombstone,
+            // so a deletion can be undone and the list can't grow forever.
+            src.deletedRecords = src.deletedRecords.filter(t => {
+                if (!t || !t.k) return false;
+                const i = t.k.indexOf(':');
+                if (i < 0) return false;
+                const set = live[t.k.slice(0, i)];
+                return !(set && set.has(t.k.slice(i + 1)));
+            });
+            if (src.deletedRecords.length > _MAX_TOMBSTONES) src.deletedRecords = src.deletedRecords.slice(-_MAX_TOMBSTONES);
+        }
+        // Union two tombstone lists, keeping the latest delete time per key.
+        function _mergeTombstones(a, b) {
+            const m = new Map();
+            [].concat(Array.isArray(a) ? a : [], Array.isArray(b) ? b : []).forEach(x => {
+                if (!x || !x.k) return;
+                const prev = m.get(x.k);
+                if (!prev || String(x.t || '') > String(prev.t || '')) m.set(x.k, x);
+            });
+            const out = Array.from(m.values());
+            return out.length > _MAX_TOMBSTONES ? out.slice(-_MAX_TOMBSTONES) : out;
+        }
+        // Drop tombstoned records from a merged blob. A record whose `updatedAt` is NEWER than
+        // the tombstone survives — that means it was re-created after the delete.
+        // ISO-8601 UTC strings compare lexicographically, so a string compare is a time compare.
+        function _applyTombstones(target, tombs) {
+            let removed = 0;
+            if (!target || !Array.isArray(tombs) || !tombs.length) return removed;
+            const by = new Map();
+            tombs.forEach(t => { if (t && t.k) by.set(t.k, String(t.t || '')); });
+            _STAMPED_COLLECTIONS.forEach(coll => {
+                if (!Array.isArray(target[coll])) return;
+                const kept = target[coll].filter(r => {
+                    if (!r || r.id == null) return true;
+                    const t = by.get(_tombKey(coll, r.id));
+                    if (t === undefined) return true;
+                    return !!(r.updatedAt && String(r.updatedAt) > t);
+                });
+                removed += target[coll].length - kept.length;
+                target[coll] = kept;
+            });
+            return removed;
+        }
         // Which of two same-id records is newer? A stamped record beats an unstamped one
         // (unstamped == untouched since before this shipped). Ties keep the incumbent (local),
         // which also guarantees the merge converges instead of flip-flopping across reloads.
@@ -4794,6 +4860,12 @@
             const sp = _mergeArrayById(local.shelfPhotos, remote.shelfPhotos, 'id'); merged.shelfPhotos = sp.out; if (sp.added) changed = true;
             merged.bookcases = _mergeBookcases(local.bookcases, remote.bookcases);
             merged.deletedScanKeys = Array.from(new Set([].concat(Array.isArray(local.deletedScanKeys) ? local.deletedScanKeys : [], Array.isArray(remote.deletedScanKeys) ? remote.deletedScanKeys : [])));
+            // Deletions win over the union above: a record deleted on ANY device stays deleted
+            // unless it was re-created afterwards. Removing something the local copy still had
+            // is a real local change, so flag it for the one-time reload — this converges
+            // because the next load has nothing left to remove.
+            merged.deletedRecords = _mergeTombstones(local.deletedRecords, remote.deletedRecords);
+            if (_applyTombstones(merged, merged.deletedRecords) > 0) changed = true;
             // NOTE: do NOT set `changed` from a bookcases diff — the merged object can serialize
             // differently from local on every load (key order), which caused an infinite
             // reload loop (v3.55.2). The merged bookcases are saved to localStorage and used on
@@ -5216,6 +5288,7 @@
             this.notifiedReleaseAlerts = data.notifiedReleaseAlerts || {};
             this.cloudScanClearedAt = data.cloudScanClearedAt || '';
             this.deletedScanKeys = Array.isArray(data.deletedScanKeys) ? data.deletedScanKeys : [];
+            this.deletedRecords = Array.isArray(data.deletedRecords) ? data.deletedRecords : [];
         } else {
             this.initializeSampleData();
         }
@@ -5311,6 +5384,7 @@
         this.notifiedReleaseAlerts = {};
         this.cloudScanClearedAt = '';
         this.deletedScanKeys = [];
+        this.deletedRecords = [];
         this.saveData();
     }
 
@@ -5340,6 +5414,7 @@
 
     saveData() {
         try { _stampChangedRecords(this); } catch (e) {}
+        try { _recordDeletions(this); } catch (e) {}
         try {
             localStorage.setItem(profileDataKey(), JSON.stringify({
                 books: this.books, xp: this.xp, loans: this.loans, borrows: this.borrows,
@@ -5351,7 +5426,8 @@
                 releaseAlertLeadDays: this.releaseAlertLeadDays,
                 notifiedReleaseAlerts: this.notifiedReleaseAlerts,
                 cloudScanClearedAt: this.cloudScanClearedAt || '',
-                deletedScanKeys: this.deletedScanKeys || []
+                deletedScanKeys: this.deletedScanKeys || [],
+                deletedRecords: this.deletedRecords || []
             }));
         } catch (e) {
             // Most likely the localStorage quota was exceeded (large shelf-photo data URLs).
@@ -18014,7 +18090,8 @@ initializeApp();
     </script>
     <!-- App version badge — bump APP_VERSION on each release; keep in sync with PRD.md -->
     <script>
-      var APP_VERSION = '3.75.0';
+      var APP_VERSION = '3.76.0';
+      /* v3.76.0: deletion tombstones (`deletedRecords`) for challenges/loans/borrows/friends/gifts, so deleting one sticks instead of being re-added by a cross-device merge. Detected by the same snapshot diff as updatedAt; a record re-created after its delete survives, and restoring one clears its tombstone. */
       /* v3.75.0: per-record `updatedAt` on challenges/loans/borrows/friends/gifts so a cross-device edit to the same record keeps the NEWER copy instead of blindly keeping local. Stamped by change-detection in saveData (diff vs a snapshot) rather than at each mutation site. */
       /* v3.74.0: audit follow-ups — cloudPush now merge-before-push when a 2nd device wrote (anti-clobber), 25 more HTML-escaping sinks closed, and an a11y pass (WCAG AA text contrast, alt text on all images, keyboard-operable div controls + focus rings, 44px close button). */
       /* v3.73.2: security/data audit fixes — escape user/cloud strings in the library grid & friends list (XSS), and tombstone deleted phone-scanned books (deletedScanKeys) so they can't auto-re-import from the cloud. */
