@@ -4595,11 +4595,32 @@
             async signIn(email, password) { const c = await this.load(); if (!c) throw new Error('Cloud unavailable'); const { data, error } = await c.auth.signInWithPassword({ email, password }); if (error) throw error; return data.user; },
             async signUp(email, password) { const c = await this.load(); if (!c) throw new Error('Cloud unavailable'); const { data, error } = await c.auth.signUp({ email, password }); if (error) throw error; return data.user; },
             async signOut() { const c = await this.load(); if (c) { try { await c.auth.signOut(); } catch (e) {} } },
-            async loadShelf(uid) { const c = await this.load(); if (!c) return null; try { const { data } = await c.from('shelves').select('data').eq('user_id', uid).maybeSingle(); return data ? data.data : null; } catch (e) { return null; } },
-            async saveShelf(uid, payload) { const c = await this.load(); if (!c) return; try { await c.from('shelves').upsert({ user_id: uid, data: payload, updated_at: new Date().toISOString() }); } catch (e) {} },
+            // Returns the shelf blob, or null when the account genuinely has no row.
+            // ⚠️ THROWS on a failed READ. supabase-js does NOT throw on query errors — it
+            // resolves to { data:null, error } — so the old code returned null for BOTH
+            // "no row yet" and "the request failed". Callers then merged against nothing and
+            // wrote an EMPTY shelf back over a full library. (v3.81.0)
+            async loadShelf(uid) {
+                const c = await this.load(); if (!c) throw new Error('Cloud unavailable');
+                const { data, error } = await c.from('shelves').select('data').eq('user_id', uid).maybeSingle();
+                if (error) throw new Error('shelf read failed: ' + (error.message || 'unknown'));
+                return data ? data.data : null;
+            },
+            // Never-throws wrapper for callers that only want a best-effort read.
+            async loadShelfSafe(uid) { try { return { ok: true, data: await this.loadShelf(uid) }; } catch (e) { return { ok: false, data: null, err: e }; } },
+            async saveShelf(uid, payload) {
+                const c = await this.load(); if (!c) throw new Error('Cloud unavailable');
+                const { error } = await c.from('shelves').upsert({ user_id: uid, data: payload, updated_at: new Date().toISOString() });
+                if (error) throw new Error('shelf write failed: ' + (error.message || 'unknown'));   // was silently swallowed (v3.81.0)
+            },
             // Cheap single-column probe: lets cloudPush detect that ANOTHER device wrote the
             // shelf since we last saw it, without pulling the whole (large) blob every save.
-            async shelfUpdatedAt(uid) { const c = await this.load(); if (!c) return null; try { const { data } = await c.from('shelves').select('updated_at').eq('user_id', uid).maybeSingle(); return data ? data.updated_at : null; } catch (e) { return null; } },
+            async shelfUpdatedAt(uid) {
+                const c = await this.load(); if (!c) throw new Error('Cloud unavailable');
+                const { data, error } = await c.from('shelves').select('updated_at').eq('user_id', uid).maybeSingle();
+                if (error) throw new Error('stamp read failed: ' + (error.message || 'unknown'));
+                return data ? data.updated_at : null;                       // null here means genuinely no row
+            },
             // ---- Scan-a-Book: per-row cloud `books` table (bookburrow-books-table.sql) ----
             // Works with the anon key (no login needed) — RLS Option A allows anon insert/update.
             async saveScannedBook(b) {
@@ -4643,10 +4664,30 @@
         // `updated_at` of the cloud shelf as this device last saw it. Used to spot a concurrent
         // write from a SECOND device between our loads.
         let _cloudLastSeenUpdatedAt = null;
+        // ⚠️ v3.81.0. `_cloudLastSeenUpdatedAt` is null on every fresh page load, which made the
+        // anti-clobber check below dead on arrival — and `Cloud._uid` was armed BEFORE the initial
+        // shelf load finished, so any save() in that window pushed this device's stale blob over
+        // the cloud unmerged. Observed for real on 2026-08-03: a reloaded tab silently reverted a
+        // library edit. `_cloudSyncReady` now gates every push until the true state is known.
+        let _cloudSyncReady = false;
+        // Set to true ONLY by a deliberate wipe (clearAllData), so the empty-push guard below
+        // can tell "the user really meant it" from "this device lost its data".
+        let _allowEmptyPush = false;
+        // One alert per failure streak, so a full disk can't spam a modal on every keystroke.
+        let _saveFailureAnnounced = false;
+        // Set once we've either read the stamp or confirmed there is genuinely no row.
+        function _cloudMarkReady() { _cloudSyncReady = true; }
         function _noteCloudStamp(v) { if (v) _cloudLastSeenUpdatedAt = v; }
-        async function _cloudRefreshStamp() { try { _noteCloudStamp(await Cloud.shelfUpdatedAt(Cloud._uid)); } catch (e) {} }
+        async function _cloudRefreshStamp() {
+            try { _noteCloudStamp(await Cloud.shelfUpdatedAt(Cloud._uid)); _cloudMarkReady(); }
+            catch (e) { _cloudSyncReady = false; try { console.warn('Bookburrow: cloud stamp unreadable — pushes held.', e); } catch (e2) {} }
+        }
         function cloudPush() {
             if (!Cloud.enabled() || !Cloud._uid || !app) return;
+            if (!_cloudSyncReady) {                       // (v3.81.0) don't write blind
+                try { console.warn('Bookburrow: push skipped — cloud state not established yet.'); } catch (e) {}
+                return;
+            }
             clearTimeout(_cloudSaveTimer);
             _cloudSaveTimer = setTimeout(async () => {
                 try {
@@ -4658,14 +4699,43 @@
                     // it, another device wrote in between -> union-merge first so its data lives.
                     // If nothing changed underneath us we push straight through, which keeps
                     // deletions propagating normally (a blind always-merge would resurrect them).
+                    // A read failure here USED to be swallowed and fall straight through to a
+                    // blind upsert. Now it aborts the push — better a delayed sync than a
+                    // clobbered library. (v3.81.0)
+                    let stamp;
                     try {
-                        const stamp = await Cloud.shelfUpdatedAt(Cloud._uid);
-                        if (stamp && _cloudLastSeenUpdatedAt && stamp !== _cloudLastSeenUpdatedAt) {
-                            const remote = await Cloud.loadShelf(Cloud._uid);
-                            if (remote) payload = _mergeShelf(local, remote).data;
+                        stamp = await Cloud.shelfUpdatedAt(Cloud._uid);
+                    } catch (e) {
+                        try { console.warn('Bookburrow: push aborted — could not read cloud stamp.', e); } catch (e2) {}
+                        return;
+                    }
+                    if (stamp && _cloudLastSeenUpdatedAt && stamp !== _cloudLastSeenUpdatedAt) {
+                        let remote;
+                        try { remote = await Cloud.loadShelf(Cloud._uid); }
+                        catch (e) {
+                            try { console.warn('Bookburrow: push aborted — another device wrote but its copy is unreadable.', e); } catch (e2) {}
+                            return;                        // do NOT overwrite a write we cannot see
                         }
-                    } catch (e) {}
-                    await Cloud.saveShelf(Cloud._uid, payload);
+                        if (remote) payload = _mergeShelf(local, remote).data;
+                    }
+                    // Last line of defence (v3.81.0): an EMPTY local library must never
+                    // silently overwrite a cloud that still has books. Every legitimate wipe
+                    // (Clear All Data) sets `_allowEmptyPush` explicitly right before it runs.
+                    if (!_allowEmptyPush && (!Array.isArray(payload.books) || payload.books.length === 0)) {
+                        let remoteNow = null;
+                        try { remoteNow = await Cloud.loadShelf(Cloud._uid); } catch (e) { return; }
+                        if (remoteNow && Array.isArray(remoteNow.books) && remoteNow.books.length > 0) {
+                            try { console.error('Bookburrow: BLOCKED a push of 0 books over a cloud holding ' + remoteNow.books.length + '.'); } catch (e) {}
+                            try { showNotification('Sync paused — this device looks empty but your cloud library is not', 'error'); } catch (e) {}
+                            return;
+                        }
+                    }
+                    try { await Cloud.saveShelf(Cloud._uid, payload); }
+                    catch (e) {
+                        try { console.warn('Bookburrow: cloud save failed.', e); } catch (e2) {}
+                        try { showNotification('Cloud sync failed — changes saved on this device only', 'error'); } catch (e2) {}
+                        return;
+                    }
                     await _cloudRefreshStamp();
                 } catch (e) {}
             }, 1200);
@@ -4750,6 +4820,17 @@
             if (!_recSnapshot || !src) return;
             if (!Array.isArray(src.deletedRecords)) src.deletedRecords = [];
             const now = new Date().toISOString();
+            // (v3.81.0) Mirror the book rule: a collection going from "many" to "completely
+            // empty" in one save is a wipe, not N individual deletes. `clearBooksOnly` emptied
+            // loans and borrows this way and permanently tombstoned the user's entire lending
+            // history — the one thing its confirm() promised to leave alone.
+            let _wiped = false;
+            _STAMPED_COLLECTIONS.forEach(coll => {
+                const before = Object.keys(_recSnapshot[coll] || {}).length;
+                const after = (Array.isArray(src[coll]) ? src[coll] : []).length;
+                if (before > 0 && after === 0) _wiped = true;
+            });
+            if (_wiped) return;
             const live = {};
             _STAMPED_COLLECTIONS.forEach(coll => {
                 const ids = new Set();
@@ -4763,13 +4844,16 @@
             });
             // A record that exists again locally (restore, or re-created) clears its tombstone,
             // so a deletion can be undone and the list can't grow forever.
-            src.deletedRecords = src.deletedRecords.filter(t => {
-                if (!t || !t.k) return false;
+            src.deletedRecords = src.deletedRecords.map(t => {
+                if (!t || !t.k) return null;
                 const i = t.k.indexOf(':');
-                if (i < 0) return false;
+                if (i < 0) return null;
                 const set = live[t.k.slice(0, i)];
-                return !(set && set.has(t.k.slice(i + 1)));
-            });
+                const alive = !!(set && set.has(t.k.slice(i + 1)));
+                if (!alive) return t;
+                if (t.r) return t;
+                return { k: t.k, t: now, r: 1 };                   // retraction (v3.81.0)
+            }).filter(Boolean);
             if (src.deletedRecords.length > _MAX_TOMBSTONES) src.deletedRecords = src.deletedRecords.slice(-_MAX_TOMBSTONES);
         }
         // ---- Book deletion tombstones (added 2026-08-03, v3.79.0, field `deletedBooks`) ----
@@ -4813,9 +4897,15 @@
             gone.forEach(k => {
                 if (!src.deletedBooks.some(t => t && t.k === k)) src.deletedBooks.push({ k: k, t: now });
             });
-            // A book that exists again locally (re-added, re-imported, or a backup restore)
-            // clears its tombstone, so a delete is undoable and the list cannot grow forever.
-            src.deletedBooks = src.deletedBooks.filter(t => t && t.k && !live.has(t.k));
+            // A book that exists again locally (re-added, re-imported, or a backup restore) turns
+            // its tombstone into a RETRACTION stamped now, so the delete is genuinely undone
+            // everywhere instead of being resurrected by another device's copy. (v3.81.0)
+            src.deletedBooks = src.deletedBooks.map(t => {
+                if (!t || !t.k) return null;
+                if (!live.has(t.k)) return t;                      // still deleted — leave as is
+                if (t.r) return t;                                 // already a retraction
+                return { k: t.k, t: now, r: 1 };                   // delete -> retraction
+            }).filter(Boolean);
             if (src.deletedBooks.length > _MAX_BOOK_TOMBSTONES) src.deletedBooks = src.deletedBooks.slice(-_MAX_BOOK_TOMBSTONES);
         }
         // Drop tombstoned books from a merged blob. A book ADDED BACK after the delete survives:
@@ -4823,6 +4913,7 @@
         // re-added book gets a fresh one). ISO-8601 strings compare lexicographically, so a
         // string compare is a time compare — same trick as `_applyTombstones`.
         function _applyBookTombstones(target, tombs) {
+            tombs = (Array.isArray(tombs) ? tombs : []).filter(_isLiveTomb);   // retractions never delete (v3.81.0)
             let removed = 0;
             if (!target || !Array.isArray(target.books) || !Array.isArray(tombs) || !tombs.length) return removed;
             const by = new Map();
@@ -4841,22 +4932,36 @@
             target.books = kept;
             return removed;
         }
-        // Union two tombstone lists, keeping the latest delete time per key.
-        function _mergeTombstones(a, b) {
+        // Union two tombstone lists, keeping the LATEST entry per key — where an entry may be
+        // a delete ({k,t}) or a RETRACTION ({k,t,r:1}).
+        //
+        // ⚠️ v3.81.0. Previously a tombstone could never be withdrawn: clearing it locally left
+        // the cloud's copy intact, the union brought it straight back, and the book was deleted
+        // again. That silently defeated "Restore from Backup" — a restore keeps each book's
+        // original `dateAdded`, which loses the `dateAdded > t` test every time. A retraction is
+        // now a first-class record that travels with the data and beats an older delete.
+        // `cap` lets books use their own (larger) limit instead of the loans/borrows one.
+        function _mergeTombstones(a, b, cap) {
+            const lim = cap || _MAX_TOMBSTONES;
             const m = new Map();
             [].concat(Array.isArray(a) ? a : [], Array.isArray(b) ? b : []).forEach(x => {
                 if (!x || !x.k) return;
                 const prev = m.get(x.k);
                 if (!prev || String(x.t || '') > String(prev.t || '')) m.set(x.k, x);
             });
+            // Drop retractions once they've done their job — but only after they can no longer
+            // be outvoted, i.e. keep them so a THIRD device holding the old delete still loses.
             const out = Array.from(m.values());
-            return out.length > _MAX_TOMBSTONES ? out.slice(-_MAX_TOMBSTONES) : out;
+            return out.length > lim ? out.slice(-lim) : out;
         }
+        // True when the winning entry for a key is a real delete (not a retraction).
+        function _isLiveTomb(t) { return !!(t && t.k && !t.r); }
         // Drop tombstoned records from a merged blob. A record whose `updatedAt` is NEWER than
         // the tombstone survives — that means it was re-created after the delete.
         // ISO-8601 UTC strings compare lexicographically, so a string compare is a time compare.
         function _applyTombstones(target, tombs) {
             let removed = 0;
+            tombs = (Array.isArray(tombs) ? tombs : []).filter(_isLiveTomb);   // retractions never delete (v3.81.0)
             if (!target || !Array.isArray(tombs) || !tombs.length) return removed;
             const by = new Map();
             tombs.forEach(t => { if (t && t.k) by.set(t.k, String(t.t || '')); });
@@ -4994,7 +5099,7 @@
             // Same story for books (v3.79.0). Must run AFTER the books union above, or the
             // union would just re-add what this removes. Converges for the same reason the
             // record tombstones do: a second pass has nothing left to remove.
-            merged.deletedBooks = _mergeTombstones(local.deletedBooks, remote.deletedBooks);
+            merged.deletedBooks = _mergeTombstones(local.deletedBooks, remote.deletedBooks, _MAX_BOOK_TOMBSTONES);   // was capped at 2000, dropping 1000 (v3.81.0)
             if (_applyBookTombstones(merged, merged.deletedBooks) > 0) changed = true;
             // NOTE: do NOT set `changed` from a bookcases diff — the merged object can serialize
             // differently from local on every load (key order), which caused an infinite
@@ -5040,7 +5145,15 @@
             // Merge instead of clobber: union local + remote so books/XP from either side survive
             // a login (fresh device, re-login after offline edits, or profile switch).
             Cloud._uid = uid;
-            const remote = await Cloud.loadShelf(uid);
+            let remote = null;
+            try { remote = await Cloud.loadShelf(uid); }
+            catch (e) {
+                // (v3.81.0) Bail out rather than merge against a phantom empty shelf.
+                try { console.warn('Bookburrow: cloud read failed on account switch — aborting.', e); } catch (e2) {}
+                try { alert("Couldn't reach your cloud library just now.\n\nNothing has been changed. Check your connection and try signing in again."); } catch (e2) {}
+                _cloudSyncReady = false;
+                return;
+            }
             const localRaw = JSON.parse(localStorage.getItem(profileDataKey(pid)) || 'null');
             const merged = await _slimMergedForLocal(_mergeShelf(localRaw, remote).data);
             localStorage.setItem(profileDataKey(pid), JSON.stringify(merged));
@@ -5059,17 +5172,31 @@
                             if (getActiveProfileId() !== pid) { await _enterCloudAccount(sess.user); return; }
                             // Re-pull and union-merge so books added on another device aren't
                             // clobbered by this device's next push. Reload once if remote had new data.
-                            const remote = await Cloud.loadShelf(sess.user.id);
-                            if (remote) {
+                            // (v3.81.0) THREE outcomes, not two. A failed read must never look
+                            // like "brand-new empty account" — that path used to push this
+                            // device's blob over a full cloud library.
+                            let remote, readOk = true;
+                            try { remote = await Cloud.loadShelf(sess.user.id); }
+                            catch (e) {
+                                readOk = false;
+                                try { console.warn('Bookburrow: cloud shelf unreadable — staying local, no push.', e); } catch (e2) {}
+                                try { showNotification("Couldn't reach your cloud library — working offline", 'error'); } catch (e2) {}
+                            }
+                            if (!readOk) {
+                                _cloudSyncReady = false;          // hold ALL pushes this session
+                            } else if (remote) {
                                 const localRaw = JSON.parse(localStorage.getItem(profileDataKey()) || 'null');
                                 const res = _mergeShelf(localRaw, remote);
                                 const slimData = await _slimMergedForLocal(res.data);
                                 localStorage.setItem(profileDataKey(), JSON.stringify(slimData));
-                                try { await Cloud.saveShelf(sess.user.id, slimData); } catch (e) {}
+                                try { await Cloud.saveShelf(sess.user.id, slimData); }
+                                catch (e) { try { console.warn('Bookburrow: merge write-back failed.', e); } catch (e2) {} }
                                 await _cloudRefreshStamp();
                                 if (res.changed) { location.reload(); return; }
                             } else {
-                                cloudPush(); // first push for a brand-new cloud shelf
+                                // Genuinely no row for this account — safe to seed it.
+                                _cloudMarkReady();
+                                cloudPush();
                             }
                         } else { showLogin(); }
                     });
@@ -5568,11 +5695,35 @@
             // Most likely the localStorage quota was exceeded (large shelf-photo data URLs).
             // Don't let a failed write throw out of saveData and abort the caller's action.
             console.error('Bookburrow: save failed (storage full?).', e);
-            try { showNotification('Storage full — remove some photos', 'error'); } catch (e2) {}
+            // ⚠️ v3.81.0. This used to fall straight through to _snapshotRecords + cloudPush,
+            // which meant a failed write (a) became the new diff baseline, so the lost edits
+            // were never retried, and (b) re-pushed the STALE localStorage blob to the cloud,
+            // bumping updated_at so other devices treated the old copy as authoritative.
+            // An hour of edits could evaporate behind a 1.5s toast. Now it fails loudly and
+            // touches nothing else.
+            this._lastSaveOk = false;
+            try {
+                if (!_saveFailureAnnounced) {
+                    _saveFailureAnnounced = true;
+                    setTimeout(() => {
+                        try {
+                            alert('⚠️ Bookburrow could not save to this browser.\n\n'
+                                + 'This is usually storage being full — often large shelf photos.\n\n'
+                                + 'Your recent changes are NOT saved and cloud sync is paused so they '
+                                + 'cannot overwrite your good data. Export a backup, then remove some '
+                                + 'shelf photos to free space.');
+                        } catch (e3) {}
+                    }, 0);
+                }
+            } catch (e2) {}
+            return false;                      // caller can tell it failed
         }
+        this._lastSaveOk = true;
+        _saveFailureAnnounced = false;
         try { _snapshotRecords(this); } catch (e) {}
         try { syncActiveProfileMeta(); } catch (e) {}
         try { cloudPush(); } catch (e) {}
+        return true;
     }
 
     addXP(amount) {
@@ -7154,6 +7305,10 @@ function isImportDuplicate(existing, incoming) {
     const aa = _normAuthor(existing.author), ab = _normAuthor(incoming.author);
     const authorOk = !aa || !ab || aa === ab || _simRatio(aa, ab) >= 0.8 || _authorSubsetMatch(existing.author, incoming.author);
     if (!authorOk) return false;
+    // Series volumes are different books — "Wings of Fire: The Lost Heir" must not match
+    // "Wings of Fire: The Dragonet Prophecy" just because both reduce to "wings of fire". (v3.81.0)
+    if (_volumeMarker(existing.title) !== _volumeMarker(incoming.title)) return false;
+    if (_subtitlesConflict(existing.title, incoming.title)) return false;
     if (ta === tb) return true;                                      // same core title + compatible author
     return _simRatio(ta, tb) >= 0.92;                                // near-identical title (typo-level)
 }
@@ -7199,6 +7354,28 @@ function _simRatio(a, b) {
 // A volume/series marker — "Volume One", "Vol. 2", "Book 3", "Part Two", "#4".
 // If ONE title carries one and the other doesn't, they are different printings
 // of a series, not a book and its subtitle. (v3.80.0)
+// The part of a title AFTER its first colon / dash separator, normalised. Empty when there
+// isn't one. (v3.81.0)
+function _subtitleOf(t) {
+    const raw = (t || '').toString();
+    const m = raw.split(/:|–|—| - /);
+    if (m.length < 2) return '';
+    return m.slice(1).join(' ').toLowerCase().replace(/\([^)]*\)/g, ' ')
+        .replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// TWO DIFFERENT SUBTITLES under the same main title = two different books.
+// This is the rule that separates series entries — "Wings of Fire: The Lost Heir" vs
+// "Wings of Fire: The Dragonet Prophecy" — which the volume-marker check misses because
+// neither carries a number. A title with NO subtitle stays compatible with one that has a
+// subtitle, so "The Big Burn" / "The Big Burn: Teddy Roosevelt…" is still a match. (v3.81.0)
+function _subtitlesConflict(ta, tb) {
+    const sa = _subtitleOf(ta), sb = _subtitleOf(tb);
+    if (!sa || !sb) return false;
+    if (sa === sb) return false;
+    return !(sa.indexOf(sb) === 0 || sb.indexOf(sa) === 0);   // allow truncated OCR reads
+}
+
 function _volumeMarker(t) {
     const m = (t || '').toString().toLowerCase()
         .match(/\b(?:vol|volume|book|part|no)\b\.?\s*(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b|#\s*\d+/);
@@ -7218,6 +7395,8 @@ function booksSimilar(a, b) {
     //     "Nothing Special" vs "Nothing Special, Volume One".
     const va = _volumeMarker(a.title), vb = _volumeMarker(b.title);
     if (va !== vb) return false;
+    // (4) Two DIFFERENT subtitles under the same main title are two different books. (v3.81.0)
+    if (_subtitlesConflict(a.title, b.title)) return false;
     // (2) Two copies sitting on DIFFERENT physical shelves are two physical books,
     //     whatever their titles look like. Mary shelves what she owns.
     const sa = (a.shelfLocation || '').toString().trim().toLowerCase();
@@ -7394,6 +7573,11 @@ function _applyMergeReview() {
     });
     const ids = new Set();
     chosen.forEach(g => g.books.slice(1).forEach(b => ids.add(b.id)));
+    // (v3.81.0) A record can appear in two ticked groups — kept in one, removed in the other.
+    // The UI promised "✓ keep", so KEEP WINS: never delete anything labelled as the survivor.
+    const keepers = new Set();
+    chosen.forEach(g => { if (g.books[0]) keepers.add(g.books[0].id); });
+    keepers.forEach(id => ids.delete(id));
     closeModal('mergeReviewModal');
     const cb = _mergeReviewState.onApply;
     _mergeReviewState = null;
@@ -7437,9 +7621,9 @@ async function cleanUpLibrary(opts) {
     const removePreview = new Set(emptyIds);
     dup.toRemove.forEach(id => removePreview.add(id));
     dup.clusters.forEach(c => c.slice(1).forEach(b => removePreview.add(b.id)));
-    const needAuthor = app.books.filter(b => !removePreview.has(b.id) && _titleUsable(b) && _authorMissing(b));
+    let needAuthor = app.books.filter(b => !removePreview.has(b.id) && _titleUsable(b) && _authorMissing(b));
 
-    const nEmpty = emptyIds.length, nDup = dup.total, nAuthor = needAuthor.length;
+    const nEmpty = emptyIds.length, nDup = dup.total; let nAuthor = needAuthor.length;
     window.__cleanup = { phase: 'scan', nEmpty, nDup, nAuthor, done: 0, total: nAuthor, filled: 0, missed: 0 };
 
     if (!nEmpty && !nDup && !nAuthor) {
@@ -7456,15 +7640,19 @@ async function cleanUpLibrary(opts) {
     if (!auto && nDup) {
         const groups = _dupGroups(dup);
         const decided = await new Promise(resolve => {
-            const opened = openMergeReview(groups, ids => resolve(ids));
-            if (!opened) resolve(null);                       // modal missing → fall through
+            let settled = false;
+            const done = v => { if (!settled) { settled = true; resolve(v); } };
+            const opened = openMergeReview(groups, ids => done(ids));
+            if (!opened) { done(null); return; }              // modal missing → fall through
             const modal = document.getElementById('mergeReviewModal');
-            if (modal) {
-                const watch = setInterval(() => {
-                    if (!modal.classList.contains('active')) { clearInterval(watch); resolve(new Set()); }
-                }, 300);
-                setTimeout(() => clearInterval(watch), 10 * 60 * 1000);
-            }
+            if (!modal) { done(null); return; }
+            const watch = setInterval(() => {
+                if (!modal.classList.contains('active')) { clearInterval(watch); done(new Set()); }
+            }, 300);
+            // (v3.81.0) The old timeout cleared the interval WITHOUT resolving, so a review left
+            // open past 10 minutes hung the await forever — empty rows never removed, authors
+            // never looked up, no error shown. Now it resolves as "nothing chosen".
+            setTimeout(() => { clearInterval(watch); done(new Set()); }, 10 * 60 * 1000);
         });
         if (decided === null) { window.__cleanup.phase = 'cancelled'; return { cancelled: true }; }
         approvedDupIds = decided;
@@ -7485,6 +7673,13 @@ async function cleanUpLibrary(opts) {
     const toApply = new Set(emptyIds);
     approvedDupIds.forEach(id => toApply.add(id));
     if (toApply.size) { app.books = app.books.filter(b => !toApply.has(b.id)); app.saveData(); }
+
+    // (v3.81.0) `needAuthor` was built from the pre-review preview, so a book the user declined
+    // to merge stayed in the library but was skipped by that run's author lookup. Recompute
+    // against what actually survived the removals.
+    needAuthor = app.books.filter(b => _titleUsable(b) && _authorMissing(b));
+    nAuthor = needAuthor.length;
+    try { window.__cleanup.total = nAuthor; } catch (e) {}
 
     // 2) Look up missing authors — sequential + polite delay + progress.
     let filled = 0, missed = 0;
@@ -8056,6 +8251,7 @@ function deleteBook(bookId) {
 function closeModal(id) {
     document.getElementById(id).classList.remove('active');
     if (id === 'addFriendModal' && typeof stopQRScanner === 'function') stopQRScanner();
+    if (id === 'mergeReviewModal') _mergeReviewState = null;      // don't retain the book list (v3.81.0)
 }
 
 function setupSearch() {
@@ -10163,9 +10359,32 @@ function restoreFromBackup(input) {
                 showNotification('Invalid backup file format', 2000);
                 return;
             }
-            if (!confirm('This will replace ALL your current data (books, profile, achievements, etc.) with the backup. Are you sure?')) return;
+            const nB = (backup.data && Array.isArray(backup.data.books)) ? backup.data.books.length : 0;
+            if (!confirm('This will replace ALL your current data (books, profile, achievements, etc.) with the backup (' + nB + ' books). Are you sure?')) return;
+            // ⚠️ v3.81.0. A restore has to RETRACT every outstanding deletion, otherwise the
+            // books it brings back are tombstoned again on the very next cloud merge — a book
+            // only survives if its dateAdded is newer than the delete, and a real backup keeps
+            // the original dates. Before this, "Restore from Backup" silently un-restored
+            // everything that had been deleted since the backup was taken.
+            try {
+                const rNow = new Date().toISOString();
+                const liveKeys = new Set();
+                (backup.data.books || []).forEach(b => { const k = _shelfMergeKey(b); if (k) liveKeys.add(k); });
+                const prev = Array.isArray(backup.data.deletedBooks) ? backup.data.deletedBooks : [];
+                const seen = new Set(prev.map(t => t && t.k));
+                const retr = prev.map(t => (t && t.k && liveKeys.has(t.k) && !t.r) ? { k: t.k, t: rNow, r: 1 } : t).filter(Boolean);
+                // Also retract deletes this device knows about that the backup restores.
+                try {
+                    const cur = JSON.parse(localStorage.getItem(profileDataKey()) || 'null');
+                    (cur && Array.isArray(cur.deletedBooks) ? cur.deletedBooks : []).forEach(t => {
+                        if (t && t.k && liveKeys.has(t.k)) { if (!seen.has(t.k)) { retr.push({ k: t.k, t: rNow, r: 1 }); seen.add(t.k); } }
+                        else if (t && t.k && !seen.has(t.k)) { retr.push(t); seen.add(t.k); }
+                    });
+                } catch (e) {}
+                backup.data.deletedBooks = retr;
+            } catch (e) { try { console.warn('Bookburrow: could not retract tombstones on restore.', e); } catch (e2) {} }
             localStorage.setItem(profileDataKey(), JSON.stringify(backup.data));
-            showNotification('Restored! Reloading...', 1500);
+            showNotification('Restored ' + nB + ' books! Reloading...', 1500);
             setTimeout(() => location.reload(), 1500);
         } catch(err) {
             showNotification('Could not read backup file', 2000);
@@ -10184,9 +10403,26 @@ function clearBooksOnly() {
     app.books = [];
     app.loans = [];
     app.borrows = [];
+    // (v3.81.0) The reload used to fire at 800ms and kill cloudPush's 1200ms debounce, so the
+    // cloud never learned about the wipe and the next merge put every book back — while the
+    // loans/borrows tombstones (written locally before the reload) stuck. The user saw the
+    // books return and concluded nothing had happened, having actually lost their lending
+    // history. Push explicitly, wait for it, then reload.
+    _allowEmptyPush = true;
     app.saveData();
-    showNotification('All books cleared. 📚', 1500);
-    setTimeout(() => location.reload(), 800);
+    showNotification('Clearing…', 1200);
+    (async () => {
+        try {
+            if (Cloud.enabled() && Cloud._uid && _cloudSyncReady) {
+                const local = JSON.parse(localStorage.getItem(profileDataKey()) || '{}');
+                await Cloud.saveShelf(Cloud._uid, local);
+            }
+        } catch (e) {
+            try { console.warn('Bookburrow: could not sync the clear to the cloud.', e); } catch (e2) {}
+            try { alert('Books cleared on this device, but the change could not reach your cloud library.\n\nThey may come back when you next sync.'); } catch (e2) {}
+        }
+        location.reload();
+    })();
 }
 
 // Clear everything — downloads a backup first, then resets to an empty shelf
@@ -10199,6 +10435,7 @@ async function clearAllData() {
     const name = (app.profile && app.profile.name) || '';
     const avatar = (app.profile && app.profile.avatar) || '😊';
     const theme = (app.profile && app.profile.theme) || 'cozy';
+    _allowEmptyPush = true;   // (v3.81.0) deliberate wipe — let the empty shelf reach the cloud
     // Reset to a blank state (writing empty data avoids the sample-book re-seed)
     app.books = [];
     app.xp = 0;
@@ -11500,6 +11737,22 @@ function _renderReview() {
           '<button class="btn btn-secondary" onclick="closeModal(\'shelfScanModal\')">Cancel</button>' +
         '</div>', 'Review &amp; link');
 }
+// Is it safe to let a shelf scan MOVE this book? A book with no location, or already on this
+// same shelf, is always fine. A book currently placed on a DIFFERENT shelf is only moved on a
+// strong signal — shared ISBN, or identical normalised title — never on the loose subtitle
+// match that `isImportDuplicate` accepts. (v3.81.0)
+function _shelfMoveAllowed(existing, incoming, label) {
+    const cur = (existing.shelfLocation || '').toString().trim();
+    if (!cur || cur === label) return true;
+    const ia = _normISBN(existing.isbn), ib = _normISBN(incoming.isbn);
+    if (ia && ib) return ia === ib;
+    const na = _normLoose(existing.title), nb = _normLoose(incoming.title);
+    if (!na || !nb) return false;
+    if (na !== nb) return false;
+    if (_volumeMarker(existing.title) !== _volumeMarker(incoming.title)) return false;
+    return true;
+}
+
 function _saveShelfFromPieces(image, label, pieces, existingPhotoId) {
     let photo = existingPhotoId ? app.shelfPhotos.find(p => p.id === existingPhotoId) : null;
     const isNew = !photo;
@@ -11508,9 +11761,24 @@ function _saveShelfFromPieces(image, label, pieces, existingPhotoId) {
     if (image) { photo.data = image; _storePhotoBlob(photo); }
     photo.isPuzzle = true;
     let added = 0;
+    // ⚠️ v3.81.0. Two bugs lived in this loop.
+    // (1) NO CLAIM TRACKING: `find()` could return the SAME library record for several spine
+    //     reads, so a shelf of 5 Wings of Fire volumes rewrote one record's shelfLocation five
+    //     times and left the other four unplaced — silently moving a book that lives elsewhere.
+    // (2) `isImportDuplicate` truncates a title at its colon, so series volumes collapse.
+    // A record can now be claimed once per shelf save, and a book already placed on a DIFFERENT
+    // shelf is only moved on a strong match (exact normalised title, or a shared ISBN).
+    const _claimed = new Set();
+    const _relocated = [];
     photo.pieces = pieces.map((p, i) => {
-        let lib = app.books.find(b => isImportDuplicate(b, { title: p.title, author: p.author, isbn: '' }));
+        const incoming = { title: p.title, author: p.author, isbn: p.isbn || '' };
+        let lib = app.books.find(b => !_claimed.has(b.id)
+            && isImportDuplicate(b, incoming)
+            && _shelfMoveAllowed(b, incoming, label));
         if (lib) {
+            _claimed.add(lib.id);
+            const from = (lib.shelfLocation || '').trim();
+            if (from && from !== label) _relocated.push({ title: lib.title, from: from, to: label });
             lib.shelfLocation = label; lib.shelfPhotoId = photo.id; lib.shelfOrder = i;
         } else {
             lib = {
@@ -11524,6 +11792,17 @@ function _saveShelfFromPieces(image, label, pieces, existingPhotoId) {
         }
         return { title: p.title, author: p.author, box: p.box || null, img: p.img || null, order: i, row: (p.row != null ? p.row : null), libraryId: lib.id };
     });
+    // Tell her when a scan moved a book that was already shelved somewhere else — this used to
+    // happen silently and is how months of placement work could quietly drift. (v3.81.0)
+    if (_relocated.length) {
+        try {
+            const lines = _relocated.slice(0, 12).map(r => '• ' + r.title + '\n     ' + r.from + '  →  ' + r.to).join('\n');
+            const more = _relocated.length > 12 ? '\n…and ' + (_relocated.length - 12) + ' more.' : '';
+            setTimeout(() => { try { alert('Moved ' + _relocated.length + ' book' + (_relocated.length > 1 ? 's' : '')
+                + ' to "' + label + '" from another shelf:\n\n' + lines + more
+                + '\n\nIf that\'s wrong, edit the book and set its shelf back.'); } catch (e) {} }, 300);
+        } catch (e) {}
+    }
     photo.taggedBooks = photo.pieces.map(p => ({ title: p.title, author: p.author }));
     photo.isBookcase = photo.pieces.some(p => p.row != null);
     if (isNew) app.shelfPhotos.push(photo);
@@ -18366,7 +18645,8 @@ initializeApp();
     </script>
     <!-- App version badge — bump APP_VERSION on each release; keep in sync with PRD.md -->
     <script>
-      var APP_VERSION = '3.80.0';
+      var APP_VERSION = '3.81.0';
+      /* v3.81.0: six data-safety fixes found in an audit — one of which reproduced itself mid-audit when a reloaded tab silently reverted a library edit. (1) Cloud.loadShelf/saveShelf/shelfUpdatedAt now THROW on a failed request instead of returning null, so 'the read failed' can never be mistaken for 'this account is empty'. (2) cloudPush is gated behind _cloudSyncReady and aborts on any read failure, closing the boot window where a stale device overwrote the cloud unmerged; plus a hard block on pushing 0 books over a non-empty cloud. (3) Tombstones can now be RETRACTED, so Restore from Backup actually restores. (4) saveData returns false and alerts on a failed write instead of re-pushing the stale blob. (5) Shelf scans claim each record once and won't relocate an already-placed book on a weak match; series volumes no longer collapse. (6) clearBooksOnly syncs before reloading and no longer tombstones the whole loan history. */
       /* v3.80.0: Clean Up safety. It removed 8 books on 2026-08-03 behind a confirm() showing only a COUNT — 5 were genuinely different books swallowed by a bare `includes()` containment rule. Now: containment must be a PREFIX (a subtitle extends a title; a series tag trails it), a volume/series marker on one side only blocks the merge, two copies on different shelves are never merged, and every removal is listed in a review modal where SIMILAR matches start UNCHECKED. */
       /* v3.79.0: book deletion tombstones (`deletedBooks`) — books merged by union, so a delete only stuck if no other device still had the book; every library cleanup had to be re-applied. Same snapshot-diff + tombstone machinery as v3.76.0, keyed by _shelfMergeKey and applied after the books union. Guarded by dateAdded re-creation, a no-tombstones-on-wipe rule, and a 300-per-save stale-subset valve. */
       /* v3.78.0: removed the Kindle and Libby import sources (guide entries + Connected Apps tiles) at the operator's request — neither export path was reliable and the imported rows were a recurring source of wrong titles/authors. Books already imported from them are untouched by the code change; the library data was cleaned separately. */
