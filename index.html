@@ -4840,8 +4840,12 @@
             if (!b) return '';
             const isbn = _normISBN(b.isbn);            // was an inline regex that kept the float tail (v3.82.0)
             if (isbn) return 'i:' + isbn;
-            const t = (b.title || '').toLowerCase().replace(/\s+/g, ' ').trim();
-            const a = (b.author || '').toLowerCase().replace(/\s+/g, ' ').trim();
+            // (v3.87.0) `_s()` not `|| ''` — an import can write a NON-STRING author (a JSON export
+            // whose records use `"author": ["Neil Gaiman","Terry Pratchett"]` passes the truthy test and
+            // is stored as an array). `.toLowerCase` is then not a function and this throws inside
+            // saveData's snapshot — i.e. the save path itself, on every save, until a reload.
+            const t = _s(b.title).toLowerCase().replace(/\s+/g, ' ').trim();
+            const a = _s(b.author).toLowerCase().replace(/\s+/g, ' ').trim();
             return t ? 't:' + t + '|' + a : 'id:' + b.id;
         }
         // Rank a book by how far along it is, so cross-device merges keep the furthest copy.
@@ -6906,12 +6910,16 @@ function applyLibraryFilters() {
 
     // Search filter
     if (searchText) {
+        // (v3.87.0) Fold diacritics on BOTH sides so "emile" finds "Émile Zola",
+        // "bronte" finds "Brontë" and "garcia marquez" finds "García Márquez".
+        // Plain .toLowerCase() left every accented author unsearchable.
+        const q = _fold(searchText);
         books = books.filter(b =>
-            _s(b.title).toLowerCase().includes(searchText) ||
-            _s(b.author).toLowerCase().includes(searchText) ||
-            _s(b.genre).toLowerCase().includes(searchText) ||
-            _s(b.series).toLowerCase().includes(searchText) ||
-            _s(b.shelfLocation).toLowerCase().includes(searchText)
+            _fold(b.title).includes(q) ||
+            _fold(b.author).includes(q) ||
+            _fold(b.genre).includes(q) ||
+            _fold(b.series).includes(q) ||
+            _fold(b.shelfLocation).includes(q)
         );
     }
 
@@ -6960,7 +6968,11 @@ function applyLibraryFilters() {
     books = [...books].sort((a, b) => {
         let va, vb;
         if (sortField === 'title') { va = _s(a.title).toLowerCase(); vb = _s(b.title).toLowerCase(); }
-        else if (sortField === 'author') { va = _s(a.author).toLowerCase(); vb = _s(b.author).toLowerCase(); }
+        // (v3.87.0) Sort by SURNAME, fold diacritics, park blank/Unknown at the end.
+        // Was `_s(a.author).toLowerCase()` — the raw string — so "Andy Weir" filed under A,
+        // "Émile Zola" sorted BELOW "Zadie Smith" (é > z in code-unit order), and an A–Z
+        // author list opened with a block of authorless books.
+        else if (sortField === 'author') { va = _authorSortKey(a.author); vb = _authorSortKey(b.author); }
         else if (sortField === 'genre') { va = _s(a.genre).toLowerCase(); vb = _s(b.genre).toLowerCase(); }
         else if (sortField === 'rating') { va = a.rating || 0; vb = b.rating || 0; }
         else if (sortField === 'date') { va = _s(a.dateAdded); vb = _s(b.dateAdded); }
@@ -7137,7 +7149,7 @@ function dashReadingEditor(book) {
     return '<div onclick="event.stopPropagation()" style="margin-top:6px;padding:8px 10px;background:rgba(125,155,118,0.08);border-radius:8px;">'
         + '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' + progInput + '</div>'
         + '<div style="display:flex;gap:10px;margin-top:6px;flex-wrap:wrap;align-items:center;">'
-        + '<label style="font-size:10px;color:#6E635A;font-weight:700;" for="editBookAuthor">Started<input type="date" id="dashStart_' + book.id + '" value="' + toDateInputValue(book.dateStarted) + '" onclick="event.stopPropagation()" onchange="updateDashDates(' + book.id + ')" style="' + dateStyle + '"></label>'
+        + '<label style="font-size:10px;color:#6E635A;font-weight:700;" for="dashStart_' + book.id + '">Started<input type="date" id="dashStart_' + book.id + '" value="' + toDateInputValue(book.dateStarted) + '" onclick="event.stopPropagation()" onchange="updateDashDates(' + book.id + ')" style="' + dateStyle + '"></label>'
         + '<label style="font-size:10px;color:#6E635A;font-weight:700;">Read<input type="date" id="dashFinish_' + book.id + '" value="' + toDateInputValue(book.dateFinished) + '" onclick="event.stopPropagation()" onchange="updateDashDates(' + book.id + ')" style="' + dateStyle + '"></label>'
         + '<button onclick="event.stopPropagation();markBookFinishedFromDash(' + book.id + ')" style="margin-left:auto;padding:5px 12px;border:none;border-radius:8px;background:#7D9B76;color:#fff;font-family:Nunito,sans-serif;font-size:11px;font-weight:700;cursor:pointer;" title="Mark read and move to your shelf">✓ Read</button>'
         + '</div></div>';
@@ -7615,6 +7627,44 @@ function _normAuthor(s) {
     return _memoPut(_mcAuth, s, a.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean).sort().join(' '));
 }
 
+// ---- Author helpers (v3.87.0) --------------------------------------------
+// Diacritic-folding: strips combining marks so "Émile Zola" matches a search for
+// "emile" and sorts next to E, not after Z. Nothing in the app did this before,
+// so `'Émile Zola'.toLowerCase().includes('emile')` was false and every accented
+// author sat in a block below "Zadie Smith" in an A–Z list.
+function _fold(s) {
+    return _s(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+// "Unknown" is a PLACEHOLDER, not an author. `_authorMissing` and
+// `_bookRichnessScore` already knew that; the dedupe paths did not, so a repaired
+// row ("Educated" / Tara Westover) failed to match the damaged one
+// ("Educated" / Unknown) and imported as a second copy. One definition, used by all.
+function _authorReal(s) {
+    const a = _s(s).trim().toLowerCase();
+    return (!a || a === 'unknown' || a === 'unknown author' || a === 'n/a' || a === '?') ? '' : _s(s).trim();
+}
+
+// Split "Title by Author" at the LAST ' by ' (v3.87.0) — see the call sites for why.
+function _splitTitleBy(val) {
+    const v = _s(val).trim();
+    const i = v.toLowerCase().lastIndexOf(' by ');
+    if (i <= 0) return { title: v, author: '' };
+    return { title: v.slice(0, i).trim(), author: v.slice(i + 4).trim() };
+}
+
+// Sort key for "Author (A–Z)". Books are filed by SURNAME everywhere else in the
+// world — Goodreads, libraries, and the shelves this library was catalogued from —
+// but the comparator sorted the raw string, so "Andy Weir" filed under A. Handles
+// "Last, First" input as-is, folds diacritics, and sends blank/Unknown to the end.
+function _authorSortKey(s) {
+    const p = _fold(s).replace(/\s+/g, ' ').trim();
+    if (!p || !_authorReal(p)) return '\uffff';
+    if (p.indexOf(',') !== -1) return p.replace(/,\s*/g, ' ').trim();   // already surname-first
+    const i = p.lastIndexOf(' ');
+    return i < 0 ? p : p.slice(i + 1) + ' ' + p.slice(0, i);
+}
+
 // Strong title normalisation for import matching: drops parentheticals and
 // subtitles/edition info so "The Hobbit" == "The Hobbit: There and Back Again"
 // == "The Hobbit (Illustrated Edition)". Does NOT merge distinct works like
@@ -7664,7 +7714,11 @@ function isImportDuplicate(existing, incoming) {
     // This reorders work, never outcomes: verified identical over 1.18M pairs.
     const titleSame = (ta === tb);
     if (!titleSame && _simRatio(ta, tb) < 0.92) return false;
-    const aa = _normAuthor(existing.author), ab = _normAuthor(incoming.author);
+    // (v3.87.0) Run both through `_authorReal` first. `_normAuthor('Unknown')` is the truthy
+    // string 'unknown', so a row stamped Unknown by the pre-v3.84.0 Goodreads import counted as
+    // HAVING an author: re-importing a clean export to repair it scored 'unknown' vs
+    // 'tara westover' at 0.54, called it a different book, and added a second copy.
+    const aa = _normAuthor(_authorReal(existing.author)), ab = _normAuthor(_authorReal(incoming.author));
     // ⚠️ v3.84.0. `!aa || !ab` treated a MISSING author as compatible with ANY author, so a
     // title-only row (a plain list, an AI spine read, or a Goodreads import whose author column
     // was lost) merged into an unrelated book with the same title — "The Gift" by Edith Eger
@@ -7673,7 +7727,7 @@ function isImportDuplicate(existing, incoming) {
     // a positive author signal.
     const bothHaveAuthor = !!(aa && ab);
     const authorOk = bothHaveAuthor
-        ? (aa === ab || _simRatio(aa, ab) >= 0.8 || _authorSubsetMatch(existing.author, incoming.author))
+        ? (aa === ab || _simRatio(aa, ab) >= 0.8 || _authorSubsetMatch(_authorReal(existing.author), _authorReal(incoming.author)))
         : isbnSame;                          // no author on one side → only an ISBN match counts
     if (!authorOk) return false;
     // Series volumes are different books — "Wings of Fire: The Lost Heir" must not match
@@ -7796,9 +7850,25 @@ function booksSimilar(a, b) {
     // pairs in the library and a merge they obviously deserve. (v3.86.0)
     if (_isbnSame(a.isbn, b.isbn)) return true;
     // Authors should be compatible (or one is missing) — _normAuthor handles "Last, First"
-    const aa = _normAuthor(a.author), ab = _normAuthor(b.author);
-    const authorOk = !aa || !ab || aa === ab || _simRatio(aa, ab) >= 0.8;
-    if (!authorOk) return false;
+    // (v3.87.0) "Unknown" is a placeholder, not an author — treat it as absent here so a
+    // repaired row and the damaged row it repairs can still be recognised as one book.
+    const aa = _normAuthor(_authorReal(a.author)), ab = _normAuthor(_authorReal(b.author));
+    // (v3.87.0) `_authorSubsetMatch` was added in v3.68.0 and wired into isImportDuplicate,
+    // but never into THIS function — so Clean Up scored a bare-surname shelf scan ("Mandel")
+    // or a fuller credit ("Zaretta Lynn Hammond,Yvette Jackson" vs "Zaretta Hammond") too low
+    // to match, and offered only 1 of the 15 known real duplicate pairs in the library.
+    //
+    // ⚠️ But a SUBSET match is weaker evidence than an equal one: "Wolfgang Baur" is a subset of
+    // "Wolfgang Baur,Brian Suskind,Dan Dillon", and "Rob Thomas" of "Rob Thomas and Jennifer
+    // Graham" — those are co-author credits on DIFFERENT books, not two copies of one. Measured:
+    // licensing the loose prefix-containment title rule on a subset-only author match newly
+    // offered "Tome of Beasts" + "Tome of Beasts 2" and "Veronica Mars" + "…the Thousand Dollar
+    // Tan Line" — the same swallow-the-sequel shape as the 2026-08-03 incident. So a weaker
+    // author signal now demands a STRONGER title signal: subset-only requires real title
+    // similarity, never bare containment.
+    const authorStrong = !aa || !ab || aa === ab || _simRatio(aa, ab) >= 0.8;
+    const authorSubset = !authorStrong && _authorSubsetMatch(_authorReal(a.author), _authorReal(b.author));
+    if (!authorStrong && !authorSubset) return false;
     // Similar title, or one title contains the other (e.g. subtitle / edition).
     const titleSim = _simRatio(ta, tb) >= 0.85;
     // (3) Containment must be a PREFIX, not a suffix. A subtitle EXTENDS a title
@@ -7809,7 +7879,22 @@ function booksSimilar(a, b) {
     //     Outside Us into their own sequels.
     const shortT = ta.length <= tb.length ? ta : tb;
     const longT  = ta.length <= tb.length ? tb : ta;
-    const contains = shortT.length >= 6 && longT.startsWith(shortT);
+    let contains = shortT.length >= 6 && longT.startsWith(shortT);
+    // (v3.87.0) A title that is another title plus a trailing NUMBER is the next volume, not the
+    // same book: "Tome of Beasts" → "Tome of Beasts 2", "Creature Codex" → "Creature Codex 3".
+    // The existing endsDigit guard above only fires when BOTH titles end in a digit, so it never
+    // saw this shape. `_volumeMarker` misses it too — it needs a "vol"/"book"/"#" keyword.
+    if (contains && /^\s*\d{1,3}\s*$/.test(longT.slice(shortT.length))) return false;
+    // (v3.87.0) When the author match is only a SUBSET, containment must be a real SUBTITLE
+    // extension — the longer RAW title carries a ':' or a dash. That is the difference between
+    //   "Mona's Eyes"  ⊂ "Mona's Eyes: A Novel"                            → one book  ✅
+    //   "Veronica Mars" ⊂ "Veronica Mars the Thousand Dollar Tan Line"     → two books ❌
+    // where the extra words are part of the work's own name, not a subtitle. With a full author
+    // match the existing (v3.80.0) prefix rule stands unchanged.
+    if (authorSubset && contains) {
+        const longRaw = (_s(a.title).length >= _s(b.title).length) ? _s(a.title) : _s(b.title);
+        if (!_subtitleOf(longRaw)) contains = false;
+    }
     return titleSim || contains;
 }
 
@@ -7876,8 +7961,7 @@ function _titleUsable(b) {
 }
 // An author is "missing" when it's blank or the "Unknown" placeholder.
 function _authorMissing(b) {
-    const a = (b && b.author || '').toString().trim().toLowerCase();
-    return !a || a === 'unknown' || a === 'n/a' || a === '?';
+    return !_authorReal(b && b.author);      // (v3.87.0) one definition of "placeholder", shared with the dedupe paths
 }
 
 // Look up an author for a title (returns '' when there's no confident match).
@@ -7890,22 +7974,43 @@ async function _lookupAuthorForTitle(title, isbn) {
     }
     const want = _normTitleStrong(title);
     if (!want || want.length < 2) return '';
-    // Open Library: title search, take the first result whose title matches
+    // ⚠️ (v3.87.0) A matching TITLE is not a matching BOOK. The old code returned the FIRST
+    // doc whose normalised title matched — and `_normTitleStrong` deliberately drops articles,
+    // parentheticals and subtitles, so "The Gift" reduces to "gift" for BOTH Edith Eger's book
+    // and Cecelia Ahern's. Clean Up then wrote the wrong author onto Mary's book, silently,
+    // with no undo — the exact pairing isImportDuplicate already guards against (see v3.84.0).
+    // Now: gather every title-matching candidate and only accept an answer when the sources
+    // AGREE on one author. Two different authors for the same title means we don't know.
+    const decide = list => {
+        const seen = new Map();
+        list.forEach(a => { const k = _normAuthor(a); if (k && !seen.has(k)) seen.set(k, a); });
+        return seen.size === 1 ? seen.values().next().value : '';
+    };
+    // (v3.87.0) Count transport failures so the caller can tell "no confident match" (return '')
+    // apart from "the network is down" (return null) and stop early instead of grinding.
+    let netErr = 0;
+    // Open Library: title search
     try {
         const d = await (await fetch('https://openlibrary.org/search.json?title=' + encodeURIComponent(title) + '&limit=5&fields=title,author_name')).json();
+        const cands = [];
         for (const doc of ((d && d.docs) || [])) {
-            if (doc.author_name && doc.author_name.length && _normTitleStrong(doc.title) === want) return doc.author_name.slice(0, 2).join(', ');
+            if (doc.author_name && doc.author_name.length && _normTitleStrong(doc.title) === want) cands.push(doc.author_name.slice(0, 2).join(', '));
         }
-    } catch (e) {}
+        const pick = decide(cands);
+        if (pick) return pick;
+    } catch (e) { netErr++; }
     // Google Books fallback: intitle search
     try {
         const gj = await (await fetch('https://www.googleapis.com/books/v1/volumes?q=intitle:' + encodeURIComponent(title) + '&country=US&maxResults=5')).json();
+        const cands = [];
         for (const it of ((gj && gj.items) || [])) {
             const vi = it.volumeInfo || {};
-            if (vi.authors && vi.authors.length && _normTitleStrong(vi.title) === want) return vi.authors.slice(0, 2).join(', ');
+            if (vi.authors && vi.authors.length && _normTitleStrong(vi.title) === want) cands.push(vi.authors.slice(0, 2).join(', '));
         }
-    } catch (e) {}
-    return '';
+        const pick = decide(cands);
+        if (pick) return pick;
+    } catch (e) { netErr++; }
+    return netErr >= 2 ? null : '';      // null = couldn't reach the databases; '' = reached them, no confident answer
 }
 
 // ---- Remove duplicate books (standalone button — still available) ----
@@ -8079,15 +8184,26 @@ async function cleanUpLibrary(opts) {
     try { window.__cleanup.total = nAuthor; } catch (e) {}
 
     // 2) Look up missing authors — sequential + polite delay + progress.
-    let filled = 0, missed = 0;
+    let filled = 0, missed = 0, sinceSave = 0, netMiss = 0, aborted = false;
     if (nAuthor) {
         window.__cleanup.phase = 'authors';
         for (let i = 0; i < needAuthor.length; i++) {
             const b = app.books.find(x => x.id === needAuthor[i].id);
             if (!b) { window.__cleanup.done = i + 1; continue; }
-            let au = '';
-            try { au = await _lookupAuthorForTitle(b.title, b.isbn); } catch (e) {}
-            if (au) { b.author = au; filled++; } else { missed++; }
+            let au = '', netFail = false;
+            try { au = await _lookupAuthorForTitle(b.title, b.isbn); } catch (e) { netFail = true; }
+            if (au === null) { au = ''; netFail = true; }
+            if (au) { b.author = au; filled++; sinceSave++; netMiss = 0; }
+            else { missed++; if (netFail) netMiss++; }
+            // ⚠️ (v3.87.0) Save in CHUNKS. For a book with no ISBN, `_shelfMergeKey` is
+            // `t:<title>|<author>` — so filling an author RENAMES that book's sync identity, and
+            // saveData()'s snapshot diff reads it as a delete plus an add. Above 300 vanished keys
+            // in one save the tombstone valve (`_MAX_BOOK_TOMBS_PER_SAVE`) drops the WHOLE batch,
+            // and the old-key copies come back from the other device as duplicates. Repairing
+            // hundreds of authors in one save is exactly the shape that trips it.
+            if (sinceSave >= 100) { app.saveData(); sinceSave = 0; }
+            // Don't grind through 400 books with the network down — that's 400 × 140ms of nothing.
+            if (netMiss >= 8) { aborted = true; break; }
             window.__cleanup.done = i + 1; window.__cleanup.filled = filled; window.__cleanup.missed = missed;
             if (!auto && i % 15 === 14) showNotification(`Looking up authors… ${i + 1}/${nAuthor}`, 1100);
             await new Promise(r => setTimeout(r, 140));
@@ -8106,7 +8222,12 @@ async function cleanUpLibrary(opts) {
         if (nDupApplied) parts.push(`${nDupApplied} dup${nDupApplied > 1 ? 's' : ''}`);
         if (nEmpty) parts.push(`${nEmpty} empty`);
         if (filled) parts.push(`${filled} author${filled > 1 ? 's' : ''} added`);
-        showNotification('Cleaned: ' + (parts.join(' · ') || 'nothing') + ' 🧹', 2800);
+        // (v3.87.0) `missed` was counted, stored and returned — and never shown. Offline, or
+        // when a title is ambiguous, Mary waited a minute and got "Cleaned: nothing 🧹" with no
+        // hint anything had failed, so she ran it again. Say what didn't work.
+        if (missed) parts.push(`${missed} author${missed > 1 ? 's' : ''} not found`);
+        if (aborted) parts.push('stopped — can\'t reach the book databases');
+        showNotification('Cleaned: ' + (parts.join(' · ') || 'nothing') + ' 🧹', aborted ? 4200 : 2800);
     }
     return { emptyRemoved: nEmpty, dupsRemoved: approvedDupIds.size, authorsFilled: filled, authorsMissed: missed };
 }
@@ -8379,7 +8500,7 @@ function openBookModal(bookId) {
         ${(book.status==='reading'||book.status==='read'||book.status==='dnf') ? renderReadingBox(book) : ''}
         <div style="font-family:Quicksand,sans-serif;font-weight:700;color:#3D5A80;font-size:15px;margin-bottom:10px;">📚 Book Info</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-            <div><label style="font-size:12px;color:#6E635A;font-weight:700;">AUTHOR</label><input type="text" id="editBookAuthor" value="${(book.author||'').replace(/"/g,'&quot;')}" style="${iStyle}"></div>
+            <div><label style="font-size:12px;color:#6E635A;font-weight:700;" for="editBookAuthor">AUTHOR</label><input type="text" id="editBookAuthor" value="${(book.author||'').replace(/"/g,'&quot;')}" style="${iStyle}"></div>
             <div><label style="font-size:12px;color:#6E635A;font-weight:700;" for="editBookGenre">GENRE</label><input type="text" id="editBookGenre" value="${(book.genre||'').replace(/"/g,'&quot;')}" style="${iStyle}"></div>
             <div><label style="font-size:12px;color:#6E635A;font-weight:700;" for="editBookPages">PAGES</label><input type="number" id="editBookPages" value="${book.pages||''}" style="${iStyle}"></div>
             <div><label style="font-size:12px;color:#6E635A;font-weight:700;" for="editBookIsbn">ISBN</label><input type="text" id="editBookIsbn" value="${(book.isbn||'').replace(/"/g,'&quot;')}" style="${iStyle}"></div>
@@ -8584,7 +8705,11 @@ function saveBookChanges(bookId) {
     book.status = newStatus;
     book.rating = currentBookRating;
     book.notes = document.getElementById('editBookNotes')?.value ?? book.notes;
-    book.author = document.getElementById('editBookAuthor')?.value || book.author;
+    // (v3.87.0) Was `|| book.author` — the only text field in this block using `||`.
+    // An empty string is falsy, so CLEARING the author field silently restored the old
+    // value and the card never changed. `??` keeps "the input isn't in the DOM" as the
+    // only fallback; .trim() stops a pasted leading space from sorting the book first.
+    { const _newAuthor = document.getElementById('editBookAuthor')?.value; if (_newAuthor !== undefined) book.author = _newAuthor.trim(); }
     book.genre = document.getElementById('editBookGenre')?.value ?? book.genre;
     book.pages = parseInt(document.getElementById('editBookPages')?.value) || book.pages;
     book.isbn = document.getElementById('editBookIsbn')?.value ?? book.isbn;
@@ -9291,7 +9416,9 @@ function renderPersonalizedChallenges() {
     const readGenres = [...new Set(finishedBooks.map(b => b.genre).filter(g => g))];
     const targetGenres = favGenres.length > 0 ? favGenres : readGenres;
     const totalPages = finishedBooks.reduce((s, b) => s + (b.pages || 0), 0);
-    const uniqueAuthors = new Set(finishedBooks.map(b => b.author)).size;
+    // (v3.87.0) Was `new Set(map(b => b.author))` — undefined, '', 'Unknown', 'matt haig' and 'Matt Haig'
+    // each counted as a separate author, inflating the number shown in the Author Explorer suggestion.
+    const uniqueAuthors = new Set(finishedBooks.map(b => _normAuthor(_authorReal(b.author))).filter(Boolean)).size;
     const shortBooks = finishedBooks.filter(b => b.pages > 0 && b.pages < 200).length;
     const thisMonth = new Date().getMonth();
     const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -10196,7 +10323,7 @@ function doAppGuideImport(appId) {
         app.books.push({
             id: app.getNextId(),
             title: b.title || 'Unknown',
-            author: b.author || 'Unknown',
+            author: _s(b.author).trim() || 'Unknown',      // (v3.87.0) coerce: a non-string author poisons _shelfMergeKey and the sorts
             genre: b.genre || '',
             pages: parseInt(b.pages) || 0,
             isbn: b.isbn || '',
@@ -10493,9 +10620,9 @@ function parsePlaintextBookList(content, defaultFormat) {
         }
         // "Title by Author"
         else if (/\sby\s/i.test(trimmed)) {
-            const byIdx = trimmed.search(/\sby\s/i);
-            title = trimmed.substring(0, byIdx).trim();
-            author = trimmed.substring(byIdx + 4).trim();
+            const sp = _splitTitleBy(trimmed);    // (v3.87.0) last ' by ', not first
+            title = sp.title;
+            author = sp.author;
         }
         // "Title, Author" (if there's a comma)
         else if (trimmed.includes(',')) {
@@ -10742,7 +10869,7 @@ function addScannedBook(isbn) {
         <div style="text-align:center;padding:20px;color:#7D9B76;">
             <div style="font-size:24px;margin-bottom:8px;">✅</div>
             <div style="font-weight:700;margin-bottom:4px;">"${title}" added to your library!</div>
-            <div style="font-size:13px;color:#6E635A;margin-bottom:12px;">by ${author} · ${pages ? pages + ' pages' : 'pages unknown'}</div>
+            <div style="font-size:13px;color:#6E635A;margin-bottom:12px;">by ${escapeHtml(author)} · ${pages ? pages + ' pages' : 'pages unknown'}</div>
             <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
                 <button class="btn btn-primary" onclick="navigateTo('library')">📚 View in Library</button>
                 <button class="btn btn-secondary" onclick="document.getElementById('scanResult').innerHTML='';document.getElementById('scanStatus').innerHTML='Ready to scan another book!'">🔄 Scan Another</button>
@@ -11467,9 +11594,9 @@ function savePhotoTags(idx) {
 
     const photo = app.shelfPhotos[idx];
     lines.forEach(line => {
-        const match = line.match(/(.+?)\s+by\s+(.+)/i);
-        const title = match ? match[1].trim() : line.trim();
-        const author = match ? match[2].trim() : '';
+        const sp = _splitTitleBy(line);           // (v3.87.0) last ' by ', not first
+        const title = sp.title;
+        const author = sp.author;
         tagged.push({ title, author });
 
         // Add to library if not already there — strong dedup (same matcher as import)
@@ -12293,9 +12420,14 @@ async function _multiAiReadInner() {
 // ---- shared piece editing ----
 function _setPieceText(i, val) {
     const p = _shelfScan.pieces[i]; if (!p) return;
-    const m = val.match(/(.+?)\s+by\s+(.+)/i);
-    p.title = m ? m[1].trim() : val.trim();
-    p.author = m ? m[2].trim() : '';
+    // (v3.87.0) Split on the LAST ' by ', not the first. `(.+?)` is non-greedy, so
+    // "Death by Black Hole by Neil deGrasse Tyson" became title "Death" / author
+    // "Black Hole by Neil deGrasse Tyson", and "Taken by Storm by Jane Doe" lost its title
+    // outright. The shelf-scan editor pre-fills this field as `title + ' by ' + author`, so a
+    // correctly scanned book was destroyed the moment Mary touched it.
+    const sp = _splitTitleBy(val);
+    p.title = sp.title;
+    p.author = sp.author;
 }
 function _removePiece(i) {
     _shelfScan.pieces.splice(i, 1);
@@ -13245,7 +13377,7 @@ function doImport() {
         // gone in one round trip. Spread the incoming record first; only override what needs a
         // default or a fresh id.
         app.books.push(Object.assign({}, b, {
-            id: app.getNextId(), title: b.title || 'Unknown', author: b.author || 'Unknown',
+            id: app.getNextId(), title: _s(b.title).trim() || 'Unknown', author: _s(b.author).trim() || 'Unknown',   // (v3.87.0) coerce + trim
             genre: b.genre || '', pages: b.pages || 0, isbn: b.isbn || '',
             publisher: b.publisher || '', publicationYear: b.publicationYear || null,
             language: b.language || 'English', format: b.format || '',
@@ -14265,7 +14397,7 @@ function setupEventListeners() {
             const newBook = {
                 id: app.getNextId(),
                 title: document.getElementById('bookTitle')?.value || '',
-                author: document.getElementById('bookAuthor')?.value || '',
+                author: (document.getElementById('bookAuthor')?.value || '').trim(),   // (v3.87.0) trim: a pasted leading space sorted the book above every other book
                 isbn: document.getElementById('bookIsbn')?.value || '',
                 genre: document.getElementById('bookGenre')?.value || '',
                 pages: parseInt(document.getElementById('bookPages')?.value) || 0,
@@ -14283,6 +14415,10 @@ function setupEventListeners() {
                 ownershipFormat: [...document.querySelectorAll('.addOwnershipFmt:checked')].map(el => el.value)
             };
             if (!newBook.title) { showNotification('Please enter a title', 1500); return; }
+            // (v3.87.0) The form labels AUTHOR with a `*` and marks the input `required`, but Save is a
+            // plain click listener, not a form submit, so the browser never enforced it — books saved
+            // with a blank author, which is one of the ways the library grew rows Clean Up then had to guess at.
+            if (!newBook.author) { showNotification('Please enter an author', 1500); return; }
             app.books.push(newBook);
             app.addXP(10);
             app.saveData();
@@ -16354,7 +16490,7 @@ function enhancedLibrarySearch() {
 
     const matches = app.books.filter(b =>
         (b.title || '').toLowerCase().includes(searchText) ||
-        (b.author || '').toLowerCase().includes(searchText) ||
+        _fold(b.author).includes(_fold(searchText)) ||      // (v3.87.0) _fold: type-safe AND diacritic-insensitive
         (b.genre || '').toLowerCase().includes(searchText) ||
         (b.isbn || '').includes(searchText)
     );
@@ -16876,9 +17012,14 @@ function initTBRSpinner() {
     var facets = Object.keys(facetMap).sort();
     var html = '<button class="spinner-genre-chip' + (tbrSpinState.genre === 'all' ? ' active' : '') + '" data-spinner-genre="all" onclick="setSpinnerGenre(\'all\')">All (' + baseTBR.length + ')</button>';
     facets.forEach(function(g) {
-        var attr = g.replace(/"/g, '&quot;');
-        var js = g.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        html += '<button class="spinner-genre-chip' + (tbrSpinState.genre === g ? ' active' : '') + '" data-spinner-genre="' + attr + '" onclick="setSpinnerGenre(\'' + js + '\')">' + attr + ' (' + facetMap[g] + ')</button>';
+        // (v3.87.0) The old pair was unsafe in both directions: `attr` escaped only `"`, so an author
+        // containing < or > rendered as markup in the chip LABEL; and `js` escaped only \\ and ', so an
+        // author like Jane "JD" Doe terminated the double-quoted onclick attribute. This facet is fed by
+        // Google Books / Open Library / the AI scanner, so the value is not Mary's to trust.
+        // Correct layering: escape for the JS string FIRST (\\ and '), then HTML-escape the whole
+        // attribute — the browser decodes the entities back before the JS string is parsed.
+        var js = String(g).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        html += '<button class="spinner-genre-chip' + (tbrSpinState.genre === g ? ' active' : '') + '" data-spinner-genre="' + escapeHtml(g) + '" onclick="setSpinnerGenre(\'' + escapeHtml(js) + '\')">' + escapeHtml(g) + ' (' + facetMap[g] + ')</button>';
     });
     if (filterDiv) filterDiv.innerHTML = html;
 
@@ -17505,7 +17646,7 @@ function showChallengeSpinResult(idx) {
             booksHtml += '<div class="challenge-tbr-book">' +
                 '<div style="flex:1;">' +
                     '<div class="challenge-tbr-book-title">' + (book.title || 'Untitled') + '</div>' +
-                    '<div class="challenge-tbr-book-author">by ' + (book.author || 'Unknown') + '</div>' +
+                    '<div class="challenge-tbr-book-author">by ' + escapeHtml(book.author || 'Unknown') + '</div>' +   // (v3.87.0) was raw
                     (meta ? '<div class="challenge-tbr-book-meta">' + meta + '</div>' : '') +
                 '</div>' +
             '</div>';
@@ -17553,7 +17694,7 @@ function showFullTBRForChallenge() {
         html += '<div class="challenge-tbr-book">' +
             '<div style="flex:1;">' +
                 '<div class="challenge-tbr-book-title">' + (book.title || 'Untitled') + '</div>' +
-                '<div class="challenge-tbr-book-author">by ' + (book.author || 'Unknown') + '</div>' +
+                '<div class="challenge-tbr-book-author">by ' + escapeHtml(book.author || 'Unknown') + '</div>' +   // (v3.87.0) was raw
                 (meta ? '<div class="challenge-tbr-book-meta">' + meta + '</div>' : '') +
             '</div>' +
         '</div>';
@@ -19083,7 +19224,11 @@ function renderVirtualShelf() {
     } else {
         const books = all.slice();
         if (sort === 'genre') books.sort((a, b) => ((a.genre || 'zzz').toLowerCase()).localeCompare((b.genre || 'zzz').toLowerCase()) || (a.author || '').localeCompare(b.author || ''));
-        else if (sort === 'author') books.sort((a, b) => (a.author || 'zzz').localeCompare(b.author || 'zzz'));
+        // (v3.87.0) Was `(a.author||'zzz').localeCompare(...)` — a DIFFERENT order from the library's own
+        // author sort (first-name vs this one's raw-string), so the same shelf sorted "by author" in two
+        // places gave two answers. Share `_authorSortKey`. Also type-safe: a non-string author threw here,
+        // upstream of every per-card guard, and blanked the whole shelf.
+        else if (sort === 'author') books.sort((a, b) => _authorSortKey(a.author).localeCompare(_authorSortKey(b.author)));
         else if (sort === 'title') books.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
         else if (sort === 'status') { const o = { reading: 0, want: 1, read: 2, dnf: 3, buy: 4, loaned: 5 }; books.sort((a, b) => (o[a.status] != null ? o[a.status] : 9) - (o[b.status] != null ? o[b.status] : 9)); }
         // 'added' = natural app.books order
@@ -19515,7 +19660,7 @@ initializeApp();
     </script>
     <!-- App version badge — bump APP_VERSION on each release; keep in sync with PRD.md -->
     <script>
-      var APP_VERSION = '3.86.0';
+      var APP_VERSION = '3.87.0';
       /* v3.83.0: the startup path no longer deletes anything. A constructor throw used to REMOVE the stored library and reseed 8 sample books — its 'backup' was a setItem that fails under exactly the quota pressure most likely to have caused the corruption, and nothing ever surfaced __init_backup in the UI. Now: attempt a structural repair (_repairStoredData), back the original up and VERIFY the backup wrote before touching anything, roll back if the repair fails, and otherwise show a recovery screen with a Download-my-data button — never a wipe. Also: coverGradients no longer throws on a book with a missing/NaN id (that class of throw blanked whole sections); CSV export keeps a legitimate 0 instead of writing an empty cell; and the importer finally reads back the Ownership column export has always written, so a round trip stops dropping every Physical/Digital/Audio marking. */
       /* v3.82.0: ISBN float repair. 972 of 975 ISBNs arrived from a spreadsheet import as floats ("9780547394602.0"); stripping non-digits produced a 14-digit non-ISBN, so ISBN duplicate-matching silently stopped working (a rescan could re-add an owned book) and every ISBN-keyed lookup missed. Fixed in _normISBN (strip a trailing .0) rather than by rewriting 972 records — mutating them would move their _shelfMergeKey and duplicate the shelved library on the next merge. _shelfMergeKey now uses _normISBN instead of its own inline regex. Tombstone keys minted before the fix hold the FUSED digits, which no normaliser can undo, so _unfuseIsbn drops one trailing zero only when the shorter form has a valid ISBN-13/10 check digit. */
       /* v3.81.0: six data-safety fixes found in an audit — one of which reproduced itself mid-audit when a reloaded tab silently reverted a library edit. (1) Cloud.loadShelf/saveShelf/shelfUpdatedAt now THROW on a failed request instead of returning null, so 'the read failed' can never be mistaken for 'this account is empty'. (2) cloudPush is gated behind _cloudSyncReady and aborts on any read failure, closing the boot window where a stale device overwrote the cloud unmerged; plus a hard block on pushing 0 books over a non-empty cloud. (3) Tombstones can now be RETRACTED, so Restore from Backup actually restores. (4) saveData returns false and alerts on a failed write instead of re-pushing the stale blob. (5) Shelf scans claim each record once and won't relocate an already-placed book on a weak match; series volumes no longer collapse. (6) clearBooksOnly syncs before reloading and no longer tombstones the whole loan history. */

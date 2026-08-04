@@ -10,7 +10,7 @@
    The page also listens for `controllerchange` and reloads once, so someone
    already looking at the app picks up a new version instead of waiting. */
 
-const CACHE = 'bookburrow-v3.89.0';   // working-tree copy; the deploy script bumps this forward from the LIVE value on each publish
+const CACHE = 'bookburrow-v3.90.0';   // working-tree copy; the deploy script bumps this forward from the LIVE value on each publish
 // Scope-relative so it works under GitHub Pages' /bookburrow/ path.
 // './index.html' and './sw.js' were dropped: './' already covers the navigation,
 // a worker's own script never routes through its fetch handler, and locally
