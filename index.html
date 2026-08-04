@@ -7398,7 +7398,7 @@ function libBookCardHTML(book) {
         return `
         <div class="book-card" style="position:relative;border-top:4px solid ${statusColors[book.status] || '#6E635A'};">
             <span onclick="event.stopPropagation();toggleFavorite(${book.id})" style="position:absolute;top:6px;right:6px;font-size:18px;cursor:pointer;z-index:2;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.2));transition:transform 0.2s;" title="${book.favorite ? 'Remove from favorites' : 'Add to favorites'}">${book.favorite ? '❤️' : '🤍'}</span>
-            ${bulkMode ? `<label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:4px;"><input type="checkbox" class="book-select-cb" data-book-id="${book.id}" ${selectedBookIds.has(book.id)?'checked':''} onchange="toggleBookSelect(${book.id},this.checked)" style="width:20px;height:20px;accent-color:#7D9B76;flex-shrink:0;"> </label>` : ''}
+            ${bulkMode ? `<label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:4px;"><input type="checkbox" class="book-select-cb" data-book-id="${escapeHtml(_idKey(book.id))}" ${selectedBookIds.has(_idKey(book.id))?'checked':''} onchange="toggleBookSelect(this.dataset.bookId,this.checked)" style="width:20px;height:20px;accent-color:#7D9B76;flex-shrink:0;"> </label>` : ''}
             <div class="book-cover" role="button" tabindex="0" aria-label="Summary of ${escapeHtml(_s(book.title))}" style="background:linear-gradient(135deg,${c1},${c2});overflow:hidden;cursor:pointer;" onclick="event.stopPropagation();showBookSummary(event,${book.id})" title="Tap for summary">
                 ${bookCoverInner(book)}
             </div>
@@ -8076,10 +8076,27 @@ function _applyMergeReview() {
     const keepers = new Set();
     chosen.forEach(g => { if (g.books[0]) keepers.add(g.books[0].id); });
     keepers.forEach(id => ids.delete(id));
-    closeModal('mergeReviewModal');
+    // ⚠️ (v3.88.0) READ THE CALLBACK BEFORE CLOSING. closeModal('mergeReviewModal') sets
+    // `_mergeReviewState = null` (added in v3.81.0 so the modal doesn't retain the book list),
+    // so the old order — close, THEN read `.onApply` — threw
+    //     TypeError: Cannot read properties of null (reading 'onApply')
+    // on every single press of "Remove checked". closeModal had already removed `.active`, so
+    // the modal shut and it looked like it had worked; and cleanUpLibrary's watchdog interval
+    // saw `.active` drop and resolved its await as `new Set()` — "nothing chosen". Net effect:
+    // 🧹 Clean Up removed ZERO duplicates from v3.81.0 through v3.87.0, silently, and
+    // removeDuplicateBooks() did nothing at all.
     const cb = _mergeReviewState.onApply;
     _mergeReviewState = null;
-    if (cb) cb(ids);
+    closeModal('mergeReviewModal');
+    if (!cb) return;
+    try {
+        cb(ids);
+    } catch (e) {
+        // This handler's entire job is to delete books, and a throw here used to be
+        // indistinguishable from "you didn't tick anything". Say so instead.
+        try { console.error('Bookburrow: merge review apply failed', e); } catch (_e) {}
+        try { showNotification('Couldn\'t remove those — nothing was changed', 3200); } catch (_e) {}
+    }
 }
 
 // Turn a _computeDuplicateRemovals() result into review groups.
@@ -8380,7 +8397,7 @@ function renderLibraryBooks(filter) {
         return `
         <div class="book-card" style="position:relative;border-top:4px solid ${statusColors[book.status] || '#6E635A'};">
             <span onclick="event.stopPropagation();toggleFavorite(${book.id})" style="position:absolute;top:6px;right:6px;font-size:18px;cursor:pointer;z-index:2;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.2));transition:transform 0.2s;" title="${book.favorite ? 'Remove from favorites' : 'Add to favorites'}">${book.favorite ? '❤️' : '🤍'}</span>
-            ${bulkMode ? `<label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:4px;"><input type="checkbox" class="book-select-cb" data-book-id="${book.id}" ${selectedBookIds.has(book.id)?'checked':''} onchange="toggleBookSelect(${book.id},this.checked)" style="width:20px;height:20px;accent-color:#7D9B76;flex-shrink:0;"> </label>` : ''}
+            ${bulkMode ? `<label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:4px;"><input type="checkbox" class="book-select-cb" data-book-id="${escapeHtml(_idKey(book.id))}" ${selectedBookIds.has(_idKey(book.id))?'checked':''} onchange="toggleBookSelect(this.dataset.bookId,this.checked)" style="width:20px;height:20px;accent-color:#7D9B76;flex-shrink:0;"> </label>` : ''}
             <div class="book-cover" role="button" tabindex="0" aria-label="Summary of ${escapeHtml(_s(book.title))}" style="background:linear-gradient(135deg,${c1},${c2});overflow:hidden;cursor:pointer;" onclick="event.stopPropagation();showBookSummary(event,${book.id})" title="Tap for summary">
                 ${bookCoverInner(book)}
             </div>
@@ -11637,7 +11654,7 @@ function savePhotoTags(idx) {
             bulkMode = true;
             document.getElementById('bulkActions').style.display = 'flex';
             // Pre-select the newly added books
-            app.books.filter(b => b.notes && b.notes.includes(app.shelfPhotos[idx]?.label || '')).forEach(b => selectedBookIds.add(b.id));
+            app.books.filter(b => b.notes && b.notes.includes(app.shelfPhotos[idx]?.label || '')).forEach(b => selectedBookIds.add(_idKey(b.id)));   // (v3.88.0) string keys
             renderLibraryBooks('all');
             updateSelectedCount();
             showNotification('New books highlighted! ☑️', 1500);
@@ -15181,6 +15198,13 @@ function removeFriendRec(index) {
 // BULK SELECT / MARK OFF
 // ============================================
 let bulkMode = false;
+// ⚠️ (v3.88.0) selectedBookIds holds STRING keys, never raw ids.
+// 7 of Mary's books carry a string `id` ("1397", "1784909145709", … — re-added on 2026-08-03),
+// while the rest are numbers. `toggleSelectAll` built the set with Number(), so
+// `selectedBookIds.has(b.id)` was `has("1397")` against a Set holding 1397 — Set membership is
+// type-strict, so those books were silently skipped by EVERY bulk action: Delete left them on
+// the shelf, and ✅ Read / ownership changes passed them by. Normalise at the boundary.
+function _idKey(id) { return String(id == null ? '' : id); }
 let selectedBookIds = new Set();
 
 function toggleBulkMode() {
@@ -15203,8 +15227,11 @@ function toggleSelectAll(checked) {
     if (checked) {
         selectedBookIds = new Set();
         checkboxes.forEach(cb => {
-            const n = Number(cb.dataset ? cb.dataset.bookId : NaN);
-            if (isFinite(n)) selectedBookIds.add(n);
+            // (v3.88.0) Was Number(...) + isFinite, which both mistyped string ids and DROPPED
+            // any non-numeric one. Take the attribute verbatim — it was written from the book's
+            // own id, so it round-trips exactly.
+            const k = cb.dataset ? _idKey(cb.dataset.bookId) : '';
+            if (k) selectedBookIds.add(k);
         });
     } else {
         selectedBookIds.clear();
@@ -15213,8 +15240,9 @@ function toggleSelectAll(checked) {
 }
 
 function toggleBookSelect(bookId, checked) {
-    if (checked) selectedBookIds.add(bookId);
-    else selectedBookIds.delete(bookId);
+    const k = _idKey(bookId);
+    if (checked) selectedBookIds.add(k);
+    else selectedBookIds.delete(k);
     updateSelectedCount();
 }
 
@@ -15227,7 +15255,7 @@ function bulkMarkFinished() {
     if (selectedBookIds.size === 0) { showNotification('Select some books first!', 1500); return; }
     let newlyFinished = 0;
     selectedBookIds.forEach(id => {
-        const book = app.books.find(b => b.id === id);
+        const book = app.books.find(b => _idKey(b.id) === id);   // (v3.88.0) ids may be strings
         if (book && book.status !== 'read') {
             book.status = 'read';
             book.dateFinished = nowFinishISO();
@@ -15244,7 +15272,7 @@ function bulkMarkFinished() {
 function bulkMarkWant() {
     if (selectedBookIds.size === 0) { showNotification('Select some books first!', 1500); return; }
     selectedBookIds.forEach(id => {
-        const book = app.books.find(b => b.id === id);
+        const book = app.books.find(b => _idKey(b.id) === id);   // (v3.88.0) ids may be strings
         if (book) book.status = 'want';
     });
     app.saveData();
@@ -15261,7 +15289,7 @@ function bulkSetStatus(status) {
     const labels = { reading: 'Reading', dnf: 'DNF', buy: 'Want to Buy', want: 'To Be Read', read: 'Read' };
     let n = 0;
     selectedBookIds.forEach(id => {
-        const book = app.books.find(b => b.id === id);
+        const book = app.books.find(b => _idKey(b.id) === id);   // (v3.88.0) ids may be strings
         if (!book) return;
         book.status = status;
         if (status === 'reading' && !book.dateStarted) book.dateStarted = new Date().toISOString();
@@ -15278,7 +15306,7 @@ function bulkAddOwnership(fmt) {
     if (selectedBookIds.size === 0) { showNotification('Select some books first!', 1500); return; }
     let n = 0;
     selectedBookIds.forEach(id => {
-        const book = app.books.find(b => b.id === id);
+        const book = app.books.find(b => _idKey(b.id) === id);   // (v3.88.0) ids may be strings
         if (!book) return;
         let fmts = ownFmts(book).filter(f => f !== 'Do Not Own');
         if (fmts.indexOf(fmt) < 0) fmts.push(fmt);
@@ -15296,7 +15324,7 @@ function bulkSetNotOwned() {
     if (selectedBookIds.size === 0) { showNotification('Select some books first!', 1500); return; }
     let n = 0;
     selectedBookIds.forEach(id => {
-        const book = app.books.find(b => b.id === id);
+        const book = app.books.find(b => _idKey(b.id) === id);   // (v3.88.0) ids may be strings
         if (!book) return;
         book.ownershipFormat = ['Do Not Own'];
         n++;
@@ -15312,8 +15340,8 @@ function bulkDeleteBooks() {
     if (selectedBookIds.size === 0) { showNotification('Select some books first!', 1500); return; }
     const count = selectedBookIds.size;
     if (!confirm(`Delete ${count} book${count > 1 ? 's' : ''} from your library? This can't be undone.`)) return;
-    app.books.forEach(b => { if (selectedBookIds.has(b.id)) _tombstoneScan(b); });   // (v3.84.0) or they re-import
-    app.books = app.books.filter(b => !selectedBookIds.has(b.id));
+    app.books.forEach(b => { if (selectedBookIds.has(_idKey(b.id))) _tombstoneScan(b); });   // (v3.84.0) or they re-import
+    app.books = app.books.filter(b => !selectedBookIds.has(_idKey(b.id)));
     app.saveData();
     toggleBulkMode();
     applyLibraryFilters();
@@ -19660,7 +19688,8 @@ initializeApp();
     </script>
     <!-- App version badge — bump APP_VERSION on each release; keep in sync with PRD.md -->
     <script>
-      var APP_VERSION = '3.87.0';
+      var APP_VERSION = '3.88.0';
+      /* v3.88.0: 🧹 Clean Up's "Remove checked" had been dead since v3.81.0. _applyMergeReview called closeModal('mergeReviewModal') and THEN read _mergeReviewState.onApply — but closeModal sets that state to null (added in v3.81.0 so the modal doesn't retain the book list), so every press threw "Cannot read properties of null" after the modal had already closed. It looked like it worked; cleanUpLibrary's watchdog saw .active drop and resolved the await as "nothing chosen". Six releases of Clean Up removed zero duplicates, silently. The callback is now read before the close, and a throw inside it reports instead of passing for "you ticked nothing". Also: bulk select held NUMBER ids while 7 library records carry STRING ids, and Set membership is type-strict — Select All → Delete left those 7 on the shelf and ✅ Read / ownership changes skipped them. Selection is keyed through _idKey() (strings) at every boundary, and the card checkbox passes its own data-book-id instead of an interpolated literal. */
       /* v3.83.0: the startup path no longer deletes anything. A constructor throw used to REMOVE the stored library and reseed 8 sample books — its 'backup' was a setItem that fails under exactly the quota pressure most likely to have caused the corruption, and nothing ever surfaced __init_backup in the UI. Now: attempt a structural repair (_repairStoredData), back the original up and VERIFY the backup wrote before touching anything, roll back if the repair fails, and otherwise show a recovery screen with a Download-my-data button — never a wipe. Also: coverGradients no longer throws on a book with a missing/NaN id (that class of throw blanked whole sections); CSV export keeps a legitimate 0 instead of writing an empty cell; and the importer finally reads back the Ownership column export has always written, so a round trip stops dropping every Physical/Digital/Audio marking. */
       /* v3.82.0: ISBN float repair. 972 of 975 ISBNs arrived from a spreadsheet import as floats ("9780547394602.0"); stripping non-digits produced a 14-digit non-ISBN, so ISBN duplicate-matching silently stopped working (a rescan could re-add an owned book) and every ISBN-keyed lookup missed. Fixed in _normISBN (strip a trailing .0) rather than by rewriting 972 records — mutating them would move their _shelfMergeKey and duplicate the shelved library on the next merge. _shelfMergeKey now uses _normISBN instead of its own inline regex. Tombstone keys minted before the fix hold the FUSED digits, which no normaliser can undo, so _unfuseIsbn drops one trailing zero only when the shorter form has a valid ISBN-13/10 check digit. */
       /* v3.81.0: six data-safety fixes found in an audit — one of which reproduced itself mid-audit when a reloaded tab silently reverted a library edit. (1) Cloud.loadShelf/saveShelf/shelfUpdatedAt now THROW on a failed request instead of returning null, so 'the read failed' can never be mistaken for 'this account is empty'. (2) cloudPush is gated behind _cloudSyncReady and aborts on any read failure, closing the boot window where a stale device overwrote the cloud unmerged; plus a hard block on pushing 0 books over a non-empty cloud. (3) Tombstones can now be RETRACTED, so Restore from Backup actually restores. (4) saveData returns false and alerts on a failed write instead of re-pushing the stale blob. (5) Shelf scans claim each record once and won't relocate an already-placed book on a weak match; series volumes no longer collapse. (6) clearBooksOnly syncs before reloading and no longer tombstones the whole loan history. */
