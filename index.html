@@ -815,6 +815,66 @@
         .library-actions {
             display: flex;
             gap: 12px;
+            align-items: center;
+        }
+
+        /* (v3.89.0) Status filter is now one dropdown instead of six pills. */
+        .status-dropdown {
+            padding: 10px 18px;
+            border: 1px solid var(--bb-tan);
+            border-radius: 20px;
+            background-color: var(--bb-cream);
+            color: var(--bb-terracotta);
+            font-family: 'Nunito', sans-serif;
+            font-weight: 700;
+            font-size: 15px;
+            cursor: pointer;
+            max-width: 100%;
+        }
+        .status-dropdown:hover {
+            background-color: rgba(194, 112, 91, 0.08);
+        }
+
+        /* (v3.89.0) Library "Actions" menu — Bulk Edit / view toggle / Clean Up. */
+        .lib-menu {
+            position: relative;
+            display: inline-block;
+        }
+        .lib-menu-list {
+            position: absolute;
+            top: calc(100% + 6px);
+            right: 0;
+            min-width: 210px;
+            padding: 6px;
+            background: var(--bb-cream);
+            border: 1px solid var(--bb-tan);
+            border-radius: 14px;
+            box-shadow: 0 10px 28px rgba(61, 47, 38, 0.16);
+            z-index: 500;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .lib-menu-list[hidden] {
+            display: none;
+        }
+        .lib-menu-item {
+            width: 100%;
+            text-align: left;
+            padding: 10px 14px;
+            border: none;
+            background: transparent;
+            border-radius: 10px;
+            cursor: pointer;
+            font-family: 'Nunito', sans-serif;
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--bb-terracotta);
+            white-space: nowrap;
+        }
+        .lib-menu-item:hover,
+        .lib-menu-item:focus-visible {
+            background-color: rgba(194, 112, 91, 0.12);
         }
 
         .sort-dropdown {
@@ -3486,10 +3546,9 @@
                         </select>
                         <select id="libFilterFormat" onchange="applyLibraryFilters()" style="padding:8px 12px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;cursor:pointer;">
                             <option value="">All Formats</option>
-                            <option value="Paperback">Paperback</option>
-                            <option value="Hardcover">Hardcover</option>
-                            <option value="eBook">eBook</option>
-                            <option value="Audiobook">Audiobook</option>
+                            <option value="physical">Physical</option>
+                            <option value="ebook">eBook</option>
+                            <option value="audio">Audio</option>
                         </select>
                         <select id="libFilterLength" onchange="applyLibraryFilters()" style="padding:8px 12px;border:2px solid #E8DFD5;border-radius:10px;background:#FFF8F0;color:#3D5A80;font-family:Nunito,sans-serif;font-size:13px;cursor:pointer;">
                             <option value="">Any Length</option>
@@ -3546,18 +3605,26 @@
 
                     <div class="library-controls">
                         <div class="filter-tabs">
-                            <button class="filter-btn active" data-filter="all">All Books <span class="filter-count"></span></button>
-                            <button class="filter-btn" data-filter="reading">Reading <span class="filter-count"></span></button>
-                            <button class="filter-btn" data-filter="read">Read <span class="filter-count"></span></button>
-                            <button class="filter-btn" data-filter="want">To Be Read <span class="filter-count"></span></button>
-                            <button class="filter-btn" data-filter="dnf">DNF <span class="filter-count"></span></button>
-                            <button class="filter-btn" data-filter="buy">Want to Buy <span class="filter-count"></span></button>
+                            <label for="libStatusFilter" style="font-size:11px;font-weight:800;color:#6E635A;letter-spacing:.03em;">SHOW</label>
+                            <select id="libStatusFilter" class="status-dropdown" onchange="applyLibraryFilters()" aria-label="Filter library by reading status">
+                                <option value="all" data-label="All Books" selected>All Books</option>
+                                <option value="reading" data-label="Reading">Reading</option>
+                                <option value="read" data-label="Read">Read</option>
+                                <option value="want" data-label="To Be Read">To Be Read</option>
+                                <option value="dnf" data-label="DNF">DNF</option>
+                                <option value="buy" data-label="Want to Buy">Want to Buy</option>
+                            </select>
                         </div>
                         <div class="library-actions">
                             <button class="btn btn-primary" id="openAddBookBtn2">+ Add Book</button>
-                            <button class="btn btn-secondary" onclick="toggleBulkMode()">☑️ Bulk Edit</button>
-                            <button class="btn btn-secondary" id="viewToggleBtn" onclick="toggleLibraryView()" title="Switch between grid and list view">☰ List View</button>
-                            <button class="btn btn-secondary" onclick="cleanUpLibrary()" title="Remove duplicates & empty entries, and look up missing authors">🧹 Clean Up</button>
+                            <div class="lib-menu" id="libActionsMenu">
+                                <button type="button" class="btn btn-secondary" id="libActionsToggle" aria-haspopup="true" aria-expanded="false" aria-controls="libActionsList">⚙️ Actions ▾</button>
+                                <div class="lib-menu-list" id="libActionsList" role="menu" hidden>
+                                    <button type="button" role="menuitem" class="lib-menu-item" onclick="libMenuAction(toggleBulkMode)">☑️ Bulk Edit</button>
+                                    <button type="button" role="menuitem" class="lib-menu-item" id="viewToggleBtn" onclick="libMenuAction(toggleLibraryView)" title="Switch between grid and list view">☰ List View</button>
+                                    <button type="button" role="menuitem" class="lib-menu-item" onclick="libMenuAction(cleanUpLibrary)" title="Remove duplicates &amp; empty entries, and look up missing authors">🧹 Clean Up</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -6889,9 +6956,50 @@ function populateLibraryDropdowns() {
 
 let _libSearchTimer = null;
 function librarySearchInput() { clearTimeout(_libSearchTimer); _libSearchTimer = setTimeout(applyLibraryFilters, 200); }
+// --- Format buckets (v3.89.0) -------------------------------------------------
+// The Format filter used to be an exact string match against four hard-coded
+// options, which quietly matched far less than it looked like it did:
+//   • "eBook"     matched NOTHING — the library stores "ebook" and "Kindle Edition"
+//   • "Audiobook" missed every "Audible Audio"
+//   • "Paperback" missed "Mass Market Paperback"
+// and it ignored `ownershipFormat` entirely, so the 565 books that record only
+// Physical/Digital/Audio ownership (and no `format` string) matched no option at
+// all. Three buckets now — physical / ebook / audio — fed by BOTH fields, so a
+// book owned in two editions shows up under both.
+function _formatGroup(raw) {
+    const v = String(raw == null ? '' : raw).toLowerCase().trim();
+    if (!v) return '';
+    // audio first: "audiobook" contains "book", and "Audible Audio" contains neither
+    // of the print words below.
+    if (/audio|audible|spoken|cd\b/.test(v)) return 'audio';
+    if (/ebook|e-book|kindle|epub|mobi|digital|nook|kobo|electronic/.test(v)) return 'ebook';
+    if (/paperback|hardcover|hardback|hardbound|mass market|board book|library binding|bound|print|physical|trade/.test(v)) return 'physical';
+    return '';
+}
+
+// Every bucket a book belongs to, from its `format` string AND its
+// `ownershipFormat` array. Returns a Set so callers can just .has() a bucket.
+function _bookFormatGroups(book) {
+    const out = new Set();
+    if (!book) return out;
+    const g = _formatGroup(book.format);
+    if (g) out.add(g);
+    // ownFmts() is the v3.77.2 safety net — it always hands back a real array even
+    // when a legacy record stored ownershipFormat as a bare string.
+    for (const own of ownFmts(book)) {
+        const o = String(own || '').toLowerCase().trim();
+        if (o === 'do not own') continue;
+        if (o === 'physical') out.add('physical');
+        else if (o === 'digital') out.add('ebook');
+        else if (o === 'audio') out.add('audio');
+        else { const b = _formatGroup(o); if (b) out.add(b); }
+    }
+    return out;
+}
+
 function applyLibraryFilters() {
     _shelvedIds = null; // refresh shelf-membership set each pass (books may have moved cubbies)
-    const statusFilter = document.querySelector('.filter-btn[data-filter].active')?.dataset?.filter || 'all';
+    const statusFilter = document.getElementById('libStatusFilter')?.value || 'all';
     const searchText = (document.getElementById('librarySearch')?.value || '').toLowerCase().trim();
     const genreFilter = document.getElementById('libFilterGenre')?.value || '';
     const ratingFilter = document.getElementById('libFilterRating')?.value || '';
@@ -6933,8 +7041,8 @@ function applyLibraryFilters() {
         else books = books.filter(b => (b.rating || 0) >= r);
     }
 
-    // Format filter
-    if (formatFilter) books = books.filter(b => b.format === formatFilter);
+    // Format filter (v3.89.0 — matches a bucket, not a literal; see _bookFormatGroups)
+    if (formatFilter) books = books.filter(b => _bookFormatGroups(b).has(formatFilter));
 
     // Length filter (by page count)
     if (lengthFilter) books = books.filter(b => {
@@ -7011,11 +7119,17 @@ function applyLibraryFilters() {
 function updateLibraryTabCounts(baseBooks) {
     const counts = { all: baseBooks.length, reading: 0, read: 0, want: 0, dnf: 0, buy: 0 };
     for (const b of baseBooks) { if (counts[b.status] !== undefined) counts[b.status]++; }
-    document.querySelectorAll('.filter-btn[data-filter]').forEach(btn => {
-        const f = btn.dataset.filter;
-        const span = btn.querySelector('.filter-count');
-        if (span && counts[f] !== undefined) span.textContent = counts[f].toLocaleString();
-    });
+    // (v3.89.0) The six count badges became one dropdown, so the counts live in the
+    // option labels: "Read (137)". data-label holds the bare name so re-rendering
+    // never compounds "Read (137) (137)".
+    const sel = document.getElementById('libStatusFilter');
+    if (!sel) return;
+    for (const opt of sel.options) {
+        if (!opt.dataset.label) opt.dataset.label = opt.textContent;
+        const c = counts[opt.value];
+        opt.textContent = (c === undefined) ? opt.dataset.label
+                                            : opt.dataset.label + ' (' + c.toLocaleString() + ')';
+    }
 }
 
 function clearLibraryFilters() {
@@ -7494,6 +7608,39 @@ function toggleFavorite(bookId) {
     app.saveData();
     applyLibraryFilters();
     showNotification(book.favorite ? 'Favorited! ❤️' : 'Unfavorited', 1200);
+}
+
+// ---- Library "Actions" menu (v3.89.0) ----
+// The library action row collapsed into a menu; "+ Add Book" stays a button
+// because it is the primary action.
+function closeLibActionsMenu() {
+    const list = document.getElementById('libActionsList');
+    const toggle = document.getElementById('libActionsToggle');
+    if (list) list.hidden = true;
+    if (toggle) toggle.setAttribute('aria-expanded', 'false');
+}
+
+function toggleLibActionsMenu(e) {
+    if (e) e.stopPropagation();
+    const list = document.getElementById('libActionsList');
+    const toggle = document.getElementById('libActionsToggle');
+    if (!list || !toggle) return;
+    const opening = list.hidden;
+    list.hidden = !opening;
+    toggle.setAttribute('aria-expanded', opening ? 'true' : 'false');
+}
+
+// Runs a menu item's action and ALWAYS closes the menu — including when the
+// action throws. (v3.88.0's lesson: a handler that fails must not look like a
+// handler that succeeded, so the failure is logged rather than swallowed.)
+function libMenuAction(fn) {
+    closeLibActionsMenu();
+    try {
+        if (typeof fn === 'function') fn();
+    } catch (err) {
+        console.error('[Bookburrow] library action failed:', err);
+        try { showNotification('That action hit a snag — check the console.', 'error'); } catch (e2) {}
+    }
 }
 
 // ---- List / Grid view toggle ----
@@ -14574,13 +14721,18 @@ function setupEventListeners() {
     // Set Goal button
     // setYearlyGoal is already attached via inline onclick — no duplicate listener needed
 
-    // Library filter tabs
-    document.querySelectorAll('.filter-btn[data-filter]').forEach(tab => {
-        tab.addEventListener('click', () => {
-            document.querySelectorAll('.filter-btn[data-filter]').forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            applyLibraryFilters();
-        });
+    // Library status filter is a <select> as of v3.89.0 and calls applyLibraryFilters()
+    // from its own onchange — no listener wiring needed here.
+
+    // Library "Actions" menu (v3.89.0)
+    const libActionsToggle = document.getElementById('libActionsToggle');
+    if (libActionsToggle) libActionsToggle.addEventListener('click', toggleLibActionsMenu);
+    document.addEventListener('click', (e) => {
+        const wrap = document.getElementById('libActionsMenu');
+        if (wrap && !wrap.contains(e.target)) closeLibActionsMenu();
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeLibActionsMenu();
     });
 
     // Nav items
@@ -19688,7 +19840,7 @@ initializeApp();
     </script>
     <!-- App version badge — bump APP_VERSION on each release; keep in sync with PRD.md -->
     <script>
-      var APP_VERSION = '3.88.0';
+      var APP_VERSION = '3.89.0';
       /* v3.88.0: 🧹 Clean Up's "Remove checked" had been dead since v3.81.0. _applyMergeReview called closeModal('mergeReviewModal') and THEN read _mergeReviewState.onApply — but closeModal sets that state to null (added in v3.81.0 so the modal doesn't retain the book list), so every press threw "Cannot read properties of null" after the modal had already closed. It looked like it worked; cleanUpLibrary's watchdog saw .active drop and resolved the await as "nothing chosen". Six releases of Clean Up removed zero duplicates, silently. The callback is now read before the close, and a throw inside it reports instead of passing for "you ticked nothing". Also: bulk select held NUMBER ids while 7 library records carry STRING ids, and Set membership is type-strict — Select All → Delete left those 7 on the shelf and ✅ Read / ownership changes skipped them. Selection is keyed through _idKey() (strings) at every boundary, and the card checkbox passes its own data-book-id instead of an interpolated literal. */
       /* v3.83.0: the startup path no longer deletes anything. A constructor throw used to REMOVE the stored library and reseed 8 sample books — its 'backup' was a setItem that fails under exactly the quota pressure most likely to have caused the corruption, and nothing ever surfaced __init_backup in the UI. Now: attempt a structural repair (_repairStoredData), back the original up and VERIFY the backup wrote before touching anything, roll back if the repair fails, and otherwise show a recovery screen with a Download-my-data button — never a wipe. Also: coverGradients no longer throws on a book with a missing/NaN id (that class of throw blanked whole sections); CSV export keeps a legitimate 0 instead of writing an empty cell; and the importer finally reads back the Ownership column export has always written, so a round trip stops dropping every Physical/Digital/Audio marking. */
       /* v3.82.0: ISBN float repair. 972 of 975 ISBNs arrived from a spreadsheet import as floats ("9780547394602.0"); stripping non-digits produced a 14-digit non-ISBN, so ISBN duplicate-matching silently stopped working (a rescan could re-add an owned book) and every ISBN-keyed lookup missed. Fixed in _normISBN (strip a trailing .0) rather than by rewriting 972 records — mutating them would move their _shelfMergeKey and duplicate the shelved library on the next merge. _shelfMergeKey now uses _normISBN instead of its own inline regex. Tombstone keys minted before the fix hold the FUSED digits, which no normaliser can undo, so _unfuseIsbn drops one trailing zero only when the shorter form has a valid ISBN-13/10 check digit. */
