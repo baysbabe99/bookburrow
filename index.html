@@ -3647,6 +3647,7 @@
                         <button class="btn btn-secondary" style="font-size:13px;padding:6px 12px;" onclick="bulkAddOwnership('Physical')" title="Mark selected as owned — Physical">📖 Physical</button>
                         <button class="btn btn-secondary" style="font-size:13px;padding:6px 12px;" onclick="bulkAddOwnership('Digital')" title="Mark selected as owned — Digital">📱 Digital</button>
                         <button class="btn btn-secondary" style="font-size:13px;padding:6px 12px;" onclick="bulkAddOwnership('Audio')" title="Mark selected as owned — Audio">🎧 Audio</button>
+                        <button class="btn btn-secondary" style="font-size:13px;padding:6px 12px;" onclick="bulkSetBorrowed()" title="Mark selected as Borrowed — a library loan, Kindle Unlimited, or borrowed from a friend">📚 Borrowed</button>
                         <button class="btn btn-secondary" style="font-size:13px;padding:6px 12px;" onclick="bulkSetNotOwned()" title="Mark selected as Not Owned">🚫 Not Owned</button>
                         <span style="width:1px;height:22px;background:#E8DFD5;margin:0 2px;"></span>
                         <button class="btn btn-secondary" style="font-size:13px;padding:6px 12px;color:#F43F5E;border-color:#F43F5E;" onclick="bulkDeleteBooks()">🗑️ Delete</button>
@@ -4195,6 +4196,7 @@
                         <label style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;border:2px solid #E8DFD5;background:#FFF8F0;cursor:pointer;font-size:13px;color:#3D5A80;"><input type="checkbox" class="addOwnershipFmt" value="Physical" onchange="handleAddOwnership(this)" style="accent-color:#7D9B76;"> 📖 Physical</label>
                         <label style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;border:2px solid #E8DFD5;background:#FFF8F0;cursor:pointer;font-size:13px;color:#3D5A80;"><input type="checkbox" class="addOwnershipFmt" value="Digital" onchange="handleAddOwnership(this)" style="accent-color:#7D9B76;"> 📱 Digital</label>
                         <label style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;border:2px solid #E8DFD5;background:#FFF8F0;cursor:pointer;font-size:13px;color:#3D5A80;"><input type="checkbox" class="addOwnershipFmt" value="Audio" onchange="handleAddOwnership(this)" style="accent-color:#7D9B76;"> 🎧 Audio</label>
+                        <label style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;border:2px solid #E8DFD5;background:#FFF8F0;cursor:pointer;font-size:13px;color:#3D5A80;" title="Library loan (Libby/OverDrive), Kindle Unlimited, or borrowed from a friend"><input type="checkbox" class="addOwnershipFmt" value="Borrowed" onchange="handleAddBorrowed(this)" style="accent-color:#3D5A80;"> 📚 Borrowed</label>
                         <label style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;border:2px solid #E8DFD5;background:#FFF8F0;cursor:pointer;font-size:13px;color:#3D5A80;"><input type="checkbox" class="addOwnershipFmt" value="Do Not Own" onchange="handleAddDoNotOwn(this)" style="accent-color:#F43F5E;"> 🚫 Do Not Own</label>
                     </div>
                 </div>
@@ -6988,7 +6990,7 @@ function _bookFormatGroups(book) {
     // when a legacy record stored ownershipFormat as a bare string.
     for (const own of ownFmts(book)) {
         const o = String(own || '').toLowerCase().trim();
-        if (o === 'do not own') continue;
+        if (o === 'do not own' || o === 'borrowed') continue;   // (v3.90.0) neither is a format
         if (o === 'physical') out.add('physical');
         else if (o === 'digital') out.add('ebook');
         else if (o === 'audio') out.add('audio');
@@ -7395,7 +7397,11 @@ function bookOnShelf(book) {
 // ownFmts() always hands back a clean array; normalizeOwnershipFormats()
 // repairs the stored data once on load so it stops coming back.
 var _OWN_FMT_CANON = { physical: 'Physical', digital: 'Digital', ebook: 'Digital',
-                       audio: 'Audio', audiobook: 'Audio', 'do not own': 'Do Not Own' };
+                       audio: 'Audio', audiobook: 'Audio', 'do not own': 'Do Not Own',
+                       // (v3.90.0) Borrowed — a library loan (Libby/OverDrive), Kindle Unlimited,
+                       // or a book lent to you. NOT an owned format; see bookOwned().
+                       borrowed: 'Borrowed', libby: 'Borrowed', overdrive: 'Borrowed',
+                       'kindle unlimited': 'Borrowed', loaned: 'Borrowed', library: 'Borrowed' };
 function ownFmts(book) {
     var v = book && book.ownershipFormat;
     if (Array.isArray(v)) return v;
@@ -7458,6 +7464,10 @@ function bookOwned(book) {
     if (o.indexOf('Do Not Own') >= 0) return false;                 // explicitly not owned
     if (book && book.status === 'buy') return false;                // want to buy = not owned yet
     if (o.indexOf('Physical') >= 0 || o.indexOf('Digital') >= 0 || o.indexOf('Audio') >= 0) return true;
+    // (v3.90.0) Borrowed with no owned format alongside it is an EXPLICIT "not mine" and must
+    // beat the shelf inference below. Without this, one bad shelf scan on a library loan would
+    // silently file it under 📗 Owned — and the whole point of the marker is the opposite.
+    if (o.indexOf('Borrowed') >= 0) return false;
     if (bookOnShelf(book)) return true;                             // untagged but on a shelf → owned
     return false;                                                    // untagged & not on a shelf → leave untagged
 }
@@ -7524,7 +7534,7 @@ function libBookCardHTML(book) {
                 ${book.genre ? `<span style="background:rgba(125,155,118,0.15);color:#7D9B76;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${escapeHtml(book.genre)}</span>` : ''}
                 ${book.pages ? `<span style="background:rgba(61,90,128,0.1);color:#3D5A80;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">📄 ${book.pages}p</span>` : ''}
                 ${book.format ? `<span style="background:rgba(212,167,106,0.15);color:#855A18;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${book.format}</span>` : ''}
-                ${ownFmts(book).map(f => `<span style="background:${f==='Do Not Own'?'rgba(244,63,94,0.12)':'rgba(194,112,91,0.12)'};color:${f==='Do Not Own'?'#F43F5E':'#C2705B'};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${f==='Physical'?'📖':f==='Digital'?'📱':f==='Do Not Own'?'🚫':'🎧'} ${f}</span>`).join('')}
+                ${ownFmts(book).map(f => `<span style="background:${f==='Do Not Own'?'rgba(244,63,94,0.12)':f==='Borrowed'?'rgba(61,90,128,0.12)':'rgba(194,112,91,0.12)'};color:${f==='Do Not Own'?'#F43F5E':f==='Borrowed'?'#3D5A80':'#C2705B'};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${f==='Physical'?'📖':f==='Digital'?'📱':f==='Do Not Own'?'🚫':f==='Borrowed'?'📚':'🎧'} ${f}</span>`).join('')}
             </div>
             ${book.publisher || book.publicationYear ? `<div style="font-size:11px;color:#6E635A;margin-top:3px;">${book.publisher ? book.publisher : ''}${book.publisher && book.publicationYear ? ', ' : ''}${book.publicationYear || ''}</div>` : ''}
             ${book.releaseDate ? (() => { const d = daysUntilRelease(book.releaseDate); if (d === null || d < 0) return ''; const label = d === 0 ? '🎉 Releases TODAY' : (d === 1 ? '📅 Releases tomorrow' : `📅 Releases in ${d} days`); const color = d === 0 ? '#C2705B' : (d <= 7 ? '#D4A76A' : '#7D9B76'); return `<div style="display:inline-block;margin-top:6px;padding:3px 10px;background:${color};color:white;border-radius:12px;font-size:11px;font-weight:700;">${label}</div>`; })() : ''}
@@ -8556,7 +8566,7 @@ function renderLibraryBooks(filter) {
                 ${book.genre ? `<span style="background:rgba(125,155,118,0.15);color:#7D9B76;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${escapeHtml(book.genre)}</span>` : ''}
                 ${book.pages ? `<span style="background:rgba(61,90,128,0.1);color:#3D5A80;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">📄 ${book.pages}p</span>` : ''}
                 ${book.format ? `<span style="background:rgba(212,167,106,0.15);color:#855A18;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${book.format}</span>` : ''}
-                ${ownFmts(book).map(f => `<span style="background:${f==='Do Not Own'?'rgba(244,63,94,0.12)':'rgba(194,112,91,0.12)'};color:${f==='Do Not Own'?'#F43F5E':'#C2705B'};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${f==='Physical'?'📖':f==='Digital'?'📱':f==='Do Not Own'?'🚫':'🎧'} ${f}</span>`).join('')}
+                ${ownFmts(book).map(f => `<span style="background:${f==='Do Not Own'?'rgba(244,63,94,0.12)':f==='Borrowed'?'rgba(61,90,128,0.12)':'rgba(194,112,91,0.12)'};color:${f==='Do Not Own'?'#F43F5E':f==='Borrowed'?'#3D5A80':'#C2705B'};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${f==='Physical'?'📖':f==='Digital'?'📱':f==='Do Not Own'?'🚫':f==='Borrowed'?'📚':'🎧'} ${f}</span>`).join('')}
             </div>
             ${book.publisher || book.publicationYear ? `<div style="font-size:11px;color:#6E635A;margin-top:3px;">${book.publisher ? book.publisher : ''}${book.publisher && book.publicationYear ? ', ' : ''}${book.publicationYear || ''}</div>` : ''}
             ${book.releaseDate ? (() => { const d = daysUntilRelease(book.releaseDate); if (d === null || d < 0) return ''; const label = d === 0 ? '🎉 Releases TODAY' : (d === 1 ? '📅 Releases tomorrow' : `📅 Releases in ${d} days`); const color = d === 0 ? '#C2705B' : (d <= 7 ? '#D4A76A' : '#7D9B76'); return `<div style="display:inline-block;margin-top:6px;padding:3px 10px;background:${color};color:white;border-radius:12px;font-size:11px;font-weight:700;">${label}</div>`; })() : ''}
@@ -8683,6 +8693,7 @@ function openBookModal(bookId) {
         <div style="margin-top:10px;"><label style="font-size:12px;color:#6E635A;font-weight:700;">I OWN / WANT THIS AS</label>
         <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;">
             ${['Physical','Digital','Audio'].map(fmt => `<label style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;border:2px solid ${ownFmts(book).includes(fmt)?'#7D9B76':'#E8DFD5'};background:${ownFmts(book).includes(fmt)?'rgba(125,155,118,0.1)':'#FFF8F0'};cursor:pointer;font-size:13px;color:#3D5A80;"><input type="checkbox" class="ownershipFmt" value="${fmt}" ${ownFmts(book).includes(fmt)?'checked':''} onchange="handleOwnershipChange(this)" style="accent-color:#7D9B76;"> ${fmt === 'Physical' ? '📖' : fmt === 'Digital' ? '📱' : '🎧'} ${fmt}</label>`).join('')}
+            <label style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;border:2px solid ${ownFmts(book).includes('Borrowed')?'#3D5A80':'#E8DFD5'};background:${ownFmts(book).includes('Borrowed')?'rgba(61,90,128,0.1)':'#FFF8F0'};cursor:pointer;font-size:13px;color:#3D5A80;" title="Library loan (Libby/OverDrive), Kindle Unlimited, or borrowed from a friend"><input type="checkbox" class="ownershipFmt" value="Borrowed" ${ownFmts(book).includes('Borrowed')?'checked':''} onchange="handleBorrowedChange(this)" style="accent-color:#3D5A80;"> 📚 Borrowed</label>
             <label style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;border:2px solid ${ownFmts(book).includes('Do Not Own')?'#F43F5E':'#E8DFD5'};background:${ownFmts(book).includes('Do Not Own')?'rgba(244,63,94,0.1)':'#FFF8F0'};cursor:pointer;font-size:13px;color:${ownFmts(book).includes('Do Not Own')?'#F43F5E':'#3D5A80'};"><input type="checkbox" class="ownershipFmt" value="Do Not Own" ${ownFmts(book).includes('Do Not Own')?'checked':''} onchange="handleDoNotOwnChange(this)" style="accent-color:#F43F5E;"> 🚫 Do Not Own</label>
         </div></div>
         <div style="margin-top:10px;"><label style="font-size:12px;color:#6E635A;font-weight:700;">RATING</label><div id="editBookRating" style="font-size:24px;cursor:pointer;">${[1,2,3,4,5].map(i => `<span onclick="setBookRating(${i})" style="cursor:pointer;">${i <= (book.rating||0) ? '⭐' : '☆'}</span>`).join('')}</div></div>
@@ -8722,7 +8733,9 @@ function toggleDescription(bookId) {
 function handleDoNotOwnChange(checkbox) {
     if (checkbox.checked) {
         document.querySelectorAll('.ownershipFmt').forEach(cb => {
-            if (cb.value !== 'Do Not Own') { cb.checked = false; cb.closest('label').style.borderColor = '#E8DFD5'; cb.closest('label').style.background = '#FFF8F0'; }
+            // (v3.90.0) Borrowed survives — "I don't own this, I borrowed it" is the commonest
+            // pairing there is, not a contradiction.
+            if (cb.value !== 'Do Not Own' && cb.value !== 'Borrowed') { cb.checked = false; cb.closest('label').style.borderColor = '#E8DFD5'; cb.closest('label').style.background = '#FFF8F0'; }
         });
         checkbox.closest('label').style.borderColor = '#F43F5E';
         checkbox.closest('label').style.background = 'rgba(244,63,94,0.1)';
@@ -8747,11 +8760,22 @@ function handleOwnershipChange(checkbox) {
     }
 }
 
+// (v3.90.0) Borrowed is orthogonal to the owned formats and to Do Not Own — ticking it
+// clears nothing. A book can be owned in paperback AND borrowed on audio.
+function handleBorrowedChange(checkbox) {
+    var lab = checkbox.closest('label');
+    if (!lab) return;
+    lab.style.borderColor = checkbox.checked ? '#3D5A80' : '#E8DFD5';
+    lab.style.background = checkbox.checked ? 'rgba(61,90,128,0.1)' : '#FFF8F0';
+}
+function handleAddBorrowed(checkbox) { handleBorrowedChange(checkbox); }
+
 // Add Book modal ownership handlers (separate class: addOwnershipFmt)
 function handleAddDoNotOwn(checkbox) {
     if (checkbox.checked) {
         document.querySelectorAll('.addOwnershipFmt').forEach(cb => {
-            if (cb.value !== 'Do Not Own') { cb.checked = false; cb.closest('label').style.borderColor = '#E8DFD5'; cb.closest('label').style.background = '#FFF8F0'; }
+            // (v3.90.0) Borrowed survives — see handleDoNotOwnChange.
+            if (cb.value !== 'Do Not Own' && cb.value !== 'Borrowed') { cb.checked = false; cb.closest('label').style.borderColor = '#E8DFD5'; cb.closest('label').style.background = '#FFF8F0'; }
         });
         checkbox.closest('label').style.borderColor = '#F43F5E';
         checkbox.closest('label').style.background = 'rgba(244,63,94,0.1)';
@@ -15471,6 +15495,26 @@ function bulkAddOwnership(fmt) {
     showNotification(`${n} marked Owned · ${fmt} 📗`, 1500);
 }
 
+// Bulk: mark all selected as BORROWED (adds the marker, leaves every other tag alone).
+// Deliberately additive, unlike bulkSetNotOwned: borrowing an audiobook says nothing about
+// whether you also own the paperback, so nothing else may be cleared here.
+function bulkSetBorrowed() {
+    if (selectedBookIds.size === 0) { showNotification('Select some books first!', 1500); return; }
+    let n = 0;
+    selectedBookIds.forEach(id => {
+        const book = app.books.find(b => _idKey(b.id) === id);   // (v3.88.0) ids may be strings
+        if (!book) return;
+        let fmts = ownFmts(book);
+        if (fmts.indexOf('Borrowed') < 0) fmts.push('Borrowed');
+        book.ownershipFormat = fmts;
+        n++;
+    });
+    app.saveData();
+    toggleBulkMode();
+    applyLibraryFilters();
+    showNotification(`${n} marked Borrowed 📚`, 1500);
+}
+
 // Bulk: mark all selected as NOT OWNED (explicit "Do Not Own", clears owned formats).
 function bulkSetNotOwned() {
     if (selectedBookIds.size === 0) { showNotification('Select some books first!', 1500); return; }
@@ -19840,7 +19884,7 @@ initializeApp();
     </script>
     <!-- App version badge — bump APP_VERSION on each release; keep in sync with PRD.md -->
     <script>
-      var APP_VERSION = '3.89.0';
+      var APP_VERSION = '3.90.0';
       /* v3.88.0: 🧹 Clean Up's "Remove checked" had been dead since v3.81.0. _applyMergeReview called closeModal('mergeReviewModal') and THEN read _mergeReviewState.onApply — but closeModal sets that state to null (added in v3.81.0 so the modal doesn't retain the book list), so every press threw "Cannot read properties of null" after the modal had already closed. It looked like it worked; cleanUpLibrary's watchdog saw .active drop and resolved the await as "nothing chosen". Six releases of Clean Up removed zero duplicates, silently. The callback is now read before the close, and a throw inside it reports instead of passing for "you ticked nothing". Also: bulk select held NUMBER ids while 7 library records carry STRING ids, and Set membership is type-strict — Select All → Delete left those 7 on the shelf and ✅ Read / ownership changes skipped them. Selection is keyed through _idKey() (strings) at every boundary, and the card checkbox passes its own data-book-id instead of an interpolated literal. */
       /* v3.83.0: the startup path no longer deletes anything. A constructor throw used to REMOVE the stored library and reseed 8 sample books — its 'backup' was a setItem that fails under exactly the quota pressure most likely to have caused the corruption, and nothing ever surfaced __init_backup in the UI. Now: attempt a structural repair (_repairStoredData), back the original up and VERIFY the backup wrote before touching anything, roll back if the repair fails, and otherwise show a recovery screen with a Download-my-data button — never a wipe. Also: coverGradients no longer throws on a book with a missing/NaN id (that class of throw blanked whole sections); CSV export keeps a legitimate 0 instead of writing an empty cell; and the importer finally reads back the Ownership column export has always written, so a round trip stops dropping every Physical/Digital/Audio marking. */
       /* v3.82.0: ISBN float repair. 972 of 975 ISBNs arrived from a spreadsheet import as floats ("9780547394602.0"); stripping non-digits produced a 14-digit non-ISBN, so ISBN duplicate-matching silently stopped working (a rescan could re-add an owned book) and every ISBN-keyed lookup missed. Fixed in _normISBN (strip a trailing .0) rather than by rewriting 972 records — mutating them would move their _shelfMergeKey and duplicate the shelved library on the next merge. _shelfMergeKey now uses _normISBN instead of its own inline regex. Tombstone keys minted before the fix hold the FUSED digits, which no normaliser can undo, so _unfuseIsbn drops one trailing zero only when the shorter form has a valid ISBN-13/10 check digit. */
