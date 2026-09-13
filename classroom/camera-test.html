@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#C2705B">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@500;600;700&family=Nunito:wght@400;600;700&display=swap" rel="stylesheet">
+<title>Camera Test — Bookburrow Classroom</title>
+<style>
+:root{
+  --paper:#FFF8F0; --card:#fff; --ink:#3D5A80; --ink-soft:#6E635A;
+  --line:#E8DFD5; --green:#C2705B; --green-dk:#A85C48; --sage-dk:#4F6B49;
+  --red:#9E3B2E; --amber:#855A18;
+  --font:"Quicksand","Avenir Next",Avenir,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{
+  margin:0; background:var(--paper); color:var(--ink); line-height:1.45;
+  font:16px/1.45 "Nunito",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  padding:calc(24px + env(safe-area-inset-top)) max(16px,env(safe-area-inset-left))
+          calc(40px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-right));
+}
+.wrap{max-width:520px;margin:0 auto}
+h1{font-family:var(--font);font-weight:700;font-size:31px;margin:0 0 2px;text-align:center;letter-spacing:-.2px}
+.kicker{text-align:center;font-family:var(--font);font-weight:600;font-size:12.5px;
+        letter-spacing:3px;text-transform:uppercase;color:var(--green);margin:0 0 8px}
+.sub{text-align:center;color:var(--ink-soft);margin:0 0 24px;font-size:14.5px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;
+      box-shadow:0 1px 3px rgba(61,90,128,.10),0 6px 18px rgba(61,90,128,.06);margin-bottom:14px}
+button{font:inherit;cursor:pointer;border:none}
+.btn{display:block;width:100%;background:var(--green);color:#fff;border-radius:11px;
+     padding:15px 18px;font-weight:650;font-size:16.5px;min-height:52px}
+.btn:active{background:var(--green-dk)}
+.btn.ghost{background:transparent;color:var(--green);border:1.5px solid var(--line);margin-top:10px}
+#reader{width:100%;border-radius:12px;overflow:hidden;background:#2A2522;min-height:240px}
+#reader video{width:100%!important;display:block}
+.muted{color:var(--ink-soft);font-size:13.5px}
+.ok{color:var(--sage-dk);font-weight:700}
+.bad{color:var(--red);font-weight:700}
+.hit{border-left:4px solid var(--sage-dk);padding:12px 14px;background:#fff;border-radius:0 10px 10px 0;
+     margin-bottom:10px;border-top:1px solid var(--line);border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+.hit .t{font-weight:650}
+.hit .c{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;color:var(--ink-soft);margin-top:3px}
+code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;
+     background:#FEF3E2;padding:2px 6px;border-radius:5px;word-break:break-all}
+h2{font-family:var(--font);font-weight:700;font-size:19px;margin:0 0 8px}
+ol{margin:8px 0 0;padding-left:22px} li{margin-bottom:6px}
+.spinner{width:18px;height:18px;border:2.5px solid rgba(0,0,0,.15);border-top-color:var(--green);
+         border-radius:50%;animation:spin .7s linear infinite;display:inline-block;vertical-align:-3px;margin-right:8px}
+@keyframes spin{to{transform:rotate(360deg)}}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="kicker">Bookburrow Classroom</p>
+  <h1>Camera Test</h1>
+  <p class="sub">Just the scanner. No account, nothing saved, nothing to set up.</p>
+
+  <div class="card" id="startCard">
+    <button class="btn" id="go">Open the camera</button>
+    <p class="muted" style="margin:12px 0 0;text-align:center">
+      Then point it at the barcode on the back of any book.
+    </p>
+  </div>
+
+  <div id="reader" hidden></div>
+  <div class="card" id="status" hidden></div>
+
+  <div class="card" id="hitsCard" hidden>
+    <h2>Barcodes read</h2>
+    <div id="hits"></div>
+    <p class="muted" id="hitNote"></p>
+  </div>
+
+  <div class="card">
+    <h2>What this page checks</h2>
+    <div id="env" class="muted">Checking&hellip;</div>
+  </div>
+
+  <div class="card">
+    <h2>If the camera will not open</h2>
+    <ol class="muted">
+      <li>Open this page in <b>Safari itself</b>, not from a home-screen icon.</li>
+      <li>Tap <b>Open the camera</b> and then <b>Allow</b> when iPhone asks.</li>
+      <li>If it never asks: tap <b>aA</b> in the address bar &rarr; Website Settings &rarr; Camera &rarr; Allow, then reload.</li>
+      <li>Still stuck? Send Mary the line marked <b>Technical detail</b>.</li>
+    </ol>
+  </div>
+
+  <p class="muted" style="text-align:center;margin-top:22px">
+    <a href="./" style="color:var(--green)">&larr; Back to Bookburrow Classroom</a>
+  </p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+let scanner = null, seen = [], last = '', lastAt = 0;
+
+function standalone() {
+  return window.navigator.standalone === true ||
+         (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+}
+
+/* Environment readout — tells you what is true before you even tap */
+(function showEnv() {
+  const rows = [
+    ['Secure connection (https)', window.isSecureContext],
+    ['Camera API available', !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)],
+    ['Barcode reader loaded', typeof Html5Qrcode === 'function'],
+    ['Opened from home screen', standalone(), 'warn'],
+  ];
+  $('#env').innerHTML = rows.map(([label, val, kind]) => {
+    const good = kind === 'warn' ? !val : val;
+    const mark = val ? 'yes' : 'no';
+    return `<div style="display:flex;justify-content:space-between;gap:12px;padding:4px 0">
+      <span>${label}</span><span class="${good ? 'ok' : 'bad'}">${mark}</span></div>`;
+  }).join('') +
+  (standalone() ? `<p class="bad" style="margin:10px 0 0;font-size:13px">
+    This is running as a home-screen app. iPhone often refuses the camera here until you have
+    allowed it once in Safari. Open this same link in Safari first.</p>` : '');
+})();
+
+function setStatus(html, bad) {
+  const el = $('#status');
+  el.hidden = false;
+  el.style.borderColor = bad ? 'var(--red)' : 'var(--line)';
+  el.innerHTML = html;
+}
+
+function failed(err) {
+  const name = (err && (err.name || err.message)) || 'Unknown problem';
+  $('#reader').hidden = true;
+  $('#startCard').hidden = false;
+
+  let advice;
+  if (/NotAllowedError|Permission|denied/i.test(name)) {
+    advice = standalone()
+      ? 'Your iPhone will not give the camera to a home-screen app until you allow it once in Safari. Open this link in Safari and try there.'
+      : 'Camera access was blocked. Tap <b>aA</b> in the address bar, then Website Settings, then Camera, then Allow. Reload and try again.';
+  } else if (/NotFoundError|device not found/i.test(name)) {
+    advice = 'No camera was found on this device.';
+  } else if (/NotReadableError|TrackStartError|in use/i.test(name)) {
+    advice = 'Another app is using the camera. Close it and try again.';
+  } else if (/secure|https/i.test(name)) {
+    advice = 'The camera only works over a secure (https) link.';
+  } else {
+    advice = 'The camera did not start.';
+  }
+
+  setStatus(`<div class="bad" style="font-size:17px;margin-bottom:6px">Camera trouble</div>
+    <div class="muted">${advice}</div>
+    <p class="muted" style="margin:12px 0 0">Technical detail: <code>${String(name)}</code></p>`, true);
+}
+
+async function start() {
+  setStatus('<span class="spinner"></span><span class="muted">Starting the camera&hellip;</span>');
+  $('#startCard').hidden = true;
+
+  try {
+    const probe = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+    probe.getTracks().forEach(t => t.stop());
+  } catch (e) { return failed(e); }
+
+  $('#reader').hidden = false;
+
+  const config  = { fps: 10, qrbox: { width: 260, height: 150 }, aspectRatio: 1.4 };
+  const formats = { formatsToSupport: [
+    Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
+    Html5QrcodeSupportedFormats.UPC_A,  Html5QrcodeSupportedFormats.UPC_E,
+    Html5QrcodeSupportedFormats.CODE_128 ], verbose: false };
+
+  const attempts = [
+    () => scanner.start({ facingMode: 'environment' }, config, onRead, () => {}),
+    async () => {
+      const cams = await Html5Qrcode.getCameras();
+      if (!cams || !cams.length) throw new Error('NotFoundError');
+      const back = cams.find(c => /back|rear|environment/i.test(c.label)) || cams[cams.length - 1];
+      return scanner.start(back.id, config, onRead, () => {});
+    },
+    () => scanner.start({ facingMode: 'user' }, config, onRead, () => {}),
+  ];
+
+  let lastErr;
+  for (const attempt of attempts) {
+    try {
+      scanner = new Html5Qrcode('reader', formats);
+      await attempt();
+      setStatus(`<div class="ok" style="font-size:17px;margin-bottom:6px">Camera is running</div>
+        <div class="muted">Point at a barcode. Your phone buzzes when it reads one.</div>
+        <button class="btn ghost" id="stop" style="margin-top:12px">Stop</button>`);
+      $('#stop').addEventListener('click', stop);
+      return;
+    } catch (e) {
+      lastErr = e;
+      try { scanner && scanner.clear(); } catch (x) {}
+      scanner = null;
+    }
+  }
+  failed(lastErr);
+}
+
+async function stop() {
+  try { await scanner.stop(); scanner.clear(); } catch (e) {}
+  scanner = null;
+  $('#reader').hidden = true;
+  $('#startCard').hidden = false;
+  setStatus('<div class="muted">Camera stopped.</div>');
+}
+
+function clean(raw) {
+  let s = String(raw || '').replace(/[^0-9Xx]/g, '').toUpperCase();
+  if (s.length === 18) s = s.slice(0, 13);
+  if (s.length === 15) s = s.slice(0, 10);
+  return s;
+}
+
+async function onRead(text) {
+  const now = Date.now();
+  if (text === last && now - lastAt < 3000) return;
+  last = text; lastAt = now;
+  try { navigator.vibrate && navigator.vibrate(60); } catch (e) {}
+
+  const isbn = clean(text);
+  seen.unshift({ isbn, title: 'Looking it up…' });
+  draw();
+
+  let title = 'No match found online (the scan still worked)';
+  try {
+    const r = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`);
+    const j = await r.json();
+    const d = j['ISBN:' + isbn];
+    if (d && d.title) title = d.title + (d.authors ? ' — ' + d.authors.map(a => a.name).join(', ') : '');
+    else {
+      const g = await (await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`)).json();
+      const v = g.items && g.items[0] && g.items[0].volumeInfo;
+      if (v && v.title) title = v.title + (v.authors ? ' — ' + v.authors.join(', ') : '');
+    }
+  } catch (e) { title = 'Scan worked, but the internet lookup failed'; }
+
+  const row = seen.find(x => x.isbn === isbn);
+  if (row) row.title = title;
+  draw();
+}
+
+function draw() {
+  $('#hitsCard').hidden = false;
+  $('#hits').innerHTML = seen.slice(0, 10).map(h =>
+    `<div class="hit"><div class="t">${h.title}</div><div class="c">${h.isbn}</div></div>`).join('');
+  $('#hitNote').textContent = seen.length === 1
+    ? 'That is the whole trick. Nothing here was saved.'
+    : `${seen.length} barcodes read. Nothing here was saved.`;
+}
+
+$('#go').addEventListener('click', start);
+</script>
+</body>
+</html>
