@@ -22,7 +22,7 @@ body{
   padding:calc(24px + env(safe-area-inset-top)) max(16px,env(safe-area-inset-left))
           calc(40px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-right));
 }
-.wrap{max-width:520px;margin:0 auto}
+.wrap{max-width:560px;margin:0 auto}
 h1{font-family:var(--font);font-weight:700;font-size:31px;margin:0 0 2px;text-align:center;letter-spacing:-.2px}
 .kicker{text-align:center;font-family:var(--font);font-weight:600;font-size:12.5px;
         letter-spacing:3px;text-transform:uppercase;color:var(--green);margin:0 0 8px}
@@ -34,8 +34,8 @@ button{font:inherit;cursor:pointer;border:none}
      padding:15px 18px;font-weight:650;font-size:16.5px;min-height:52px}
 .btn:active{background:var(--green-dk)}
 .btn.ghost{background:transparent;color:var(--green);border:1.5px solid var(--line);margin-top:10px}
-#reader{width:100%;border-radius:12px;overflow:hidden;background:#2A2522;min-height:240px}
-#reader video{width:100%!important;display:block}
+#readerBox{width:100%;border-radius:12px;overflow:hidden;background:#2A2522;min-height:240px}
+#camVideo{width:100%;display:block;background:#2A2522}
 .muted{color:var(--ink-soft);font-size:13.5px}
 .ok{color:var(--sage-dk);font-weight:700}
 .bad{color:var(--red);font-weight:700}
@@ -66,7 +66,7 @@ ol{margin:8px 0 0;padding-left:22px} li{margin-bottom:6px}
     </p>
   </div>
 
-  <div id="reader" hidden></div>
+  <div id="readerBox" hidden><video id="camVideo" playsinline muted></video></div>
   <div class="card" id="status" hidden></div>
 
   <div class="card" id="hitsCard" hidden>
@@ -84,7 +84,7 @@ ol{margin:8px 0 0;padding-left:22px} li{margin-bottom:6px}
     <h2>If the camera will not open</h2>
     <ol class="muted">
       <li>On an iPhone or iPad, open this page in <b>Safari itself</b>, not from a home-screen icon.</li>
-      <li>Tap <b>Open the camera</b> and then <b>Allow</b> when iPhone asks.</li>
+      <li>Tap <b>Open the camera</b> and then <b>Allow</b> when it asks.</li>
       <li>If it never asks: tap <b>aA</b> in the address bar &rarr; Website Settings &rarr; Camera &rarr; Allow, then reload.</li>
       <li>Still stuck? Send Mary the line marked <b>Technical detail</b>.</li>
     </ol>
@@ -95,14 +95,70 @@ ol{margin:8px 0 0;padding-left:22px} li{margin-bottom:6px}
   </p>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
+/* Same engine as the app: the browser's own BarcodeDetector where it exists,
+   ZXing reading straight from the video device everywhere else. Both decode the
+   video frame whole, so nothing about how big the picture looks on screen
+   affects what can be read. */
 const $ = s => document.querySelector(s);
-let scanner = null, seen = [], last = '', lastAt = 0;
+let camStream = null, nativeTimer = null, zx = null, scanning = false;
+let seen = [], last = '', lastAt = 0;
 
 function standalone() {
   return window.navigator.standalone === true ||
          (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+}
+function isIPad() {
+  const ua = navigator.userAgent || '';
+  return /iPad/.test(ua) || (/Macintosh/.test(ua) && (navigator.maxTouchPoints || 0) > 1);
+}
+
+/* Several lenses answer to "the back camera" on an iPad and the wrong one cannot
+   focus on a book at reading distance. Rank them by name. */
+function scoreCamera(label) {
+  const l = String(label || '').toLowerCase().trim();
+  let s = 0;
+  if (/back|rear|environment|arri|trasera|hinten/.test(l)) s += 100;
+  if (/front|face|user|selfie|center stage|centre stage/.test(l)) s -= 100;
+  if (/ultra|0\.5/.test(l)) s -= 60;
+  if (/desk/.test(l)) s -= 80;
+  if (/tele|telephoto/.test(l)) s -= 25;
+  if (/dual|triple/.test(l)) s -= 5;
+  if (/^(back|rear) camera$/.test(l)) s += 30;
+  return s;
+}
+
+async function pickBackCamera() {
+  const probe = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+  probe.getTracks().forEach(t => t.stop());
+  let cams = [];
+  try {
+    cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+  } catch (e) { return null; }
+  if (!cams.length) return null;
+  const ranked = cams.map(c => ({ c, s: scoreCamera(c.label) })).sort((a, b) => b.s - a.s);
+  return ranked[0].s > -50 ? ranked[0].c : cams[cams.length - 1];
+}
+
+const BOOK_FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e'];
+
+async function nativeDetectorReady() {
+  if (!('BarcodeDetector' in window)) return false;
+  try {
+    const f = await BarcodeDetector.getSupportedFormats();
+    return !!(f && f.includes('ean_13'));
+  } catch (e) { return false; }
+}
+
+function ensureZXing() {
+  return new Promise((resolve, reject) => {
+    if (window.ZXing && window.ZXing.BrowserMultiFormatReader) return resolve();
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js';
+    s.onload = () => (window.ZXing && window.ZXing.BrowserMultiFormatReader) ? resolve() : reject(new Error('Barcode reader did not load'));
+    s.onerror = () => reject(new Error('Barcode reader did not load'));
+    document.head.appendChild(s);
+  });
 }
 
 /* Environment readout — tells you what is true before you even tap */
@@ -110,17 +166,18 @@ function standalone() {
   const rows = [
     ['Secure connection (https)', window.isSecureContext],
     ['Camera API available', !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)],
-    ['Barcode reader loaded', typeof Html5Qrcode === 'function'],
+    ['Built-in barcode reader', 'BarcodeDetector' in window, 'info'],
+    ['Looks like an iPad', isIPad(), 'info'],
     ['Opened from home screen', standalone(), 'warn'],
   ];
   $('#env').innerHTML = rows.map(([label, val, kind]) => {
     const good = kind === 'warn' ? !val : val;
-    const mark = val ? 'yes' : 'no';
+    const cls  = kind === 'info' ? '' : (good ? 'ok' : 'bad');
     return `<div style="display:flex;justify-content:space-between;gap:12px;padding:4px 0">
-      <span>${label}</span><span class="${good ? 'ok' : 'bad'}">${mark}</span></div>`;
+      <span>${label}</span><span class="${cls}" style="${kind === 'info' ? 'font-weight:700' : ''}">${val ? 'yes' : 'no'}</span></div>`;
   }).join('') +
   (standalone() ? `<p class="bad" style="margin:10px 0 0;font-size:13px">
-    This is running as a home-screen app. iPhone often refuses the camera here until you have
+    This is running as a home-screen app. iOS often refuses the camera here until you have
     allowed it once in Safari. Open this same link in Safari first.</p>` : '');
 })();
 
@@ -131,15 +188,18 @@ function setStatus(html, bad) {
   el.innerHTML = html;
 }
 
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
 function failed(err) {
   const name = (err && (err.name || err.message)) || 'Unknown problem';
-  $('#reader').hidden = true;
+  $('#readerBox').hidden = true;
   $('#startCard').hidden = false;
+  scanning = false;
 
   let advice;
   if (/NotAllowedError|Permission|denied/i.test(name)) {
     advice = standalone()
-      ? 'Your iPhone will not give the camera to a home-screen app until you allow it once in Safari. Open this link in Safari and try there.'
+      ? 'iOS will not give the camera to a home-screen app until you allow it once in Safari. Open this link in Safari and try there.'
       : 'Camera access was blocked. Tap <b>aA</b> in the address bar, then Website Settings, then Camera, then Allow. Reload and try again.';
   } else if (/NotFoundError|device not found/i.test(name)) {
     advice = 'No camera was found on this device.';
@@ -153,63 +213,106 @@ function failed(err) {
 
   setStatus(`<div class="bad" style="font-size:17px;margin-bottom:6px">Camera trouble</div>
     <div class="muted">${advice}</div>
-    <p class="muted" style="margin:12px 0 0">Technical detail: <code>${String(name)}</code></p>`, true);
+    <p class="muted" style="margin:12px 0 0">Technical detail: <code>${esc(name)}</code></p>`, true);
 }
 
 async function start() {
   setStatus('<span class="spinner"></span><span class="muted">Starting the camera&hellip;</span>');
   $('#startCard').hidden = true;
 
-  try {
-    const probe = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
-    probe.getTracks().forEach(t => t.stop());
-  } catch (e) { return failed(e); }
-
-  $('#reader').hidden = false;
-
-  const config  = { fps: 10, qrbox: { width: 260, height: 150 }, aspectRatio: 1.4 };
-  const formats = { formatsToSupport: [
-    Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
-    Html5QrcodeSupportedFormats.UPC_A,  Html5QrcodeSupportedFormats.UPC_E,
-    Html5QrcodeSupportedFormats.CODE_128 ], verbose: false };
-
-  const attempts = [
-    () => scanner.start({ facingMode: 'environment' }, config, onRead, () => {}),
-    async () => {
-      const cams = await Html5Qrcode.getCameras();
-      if (!cams || !cams.length) throw new Error('NotFoundError');
-      const back = cams.find(c => /back|rear|environment/i.test(c.label)) || cams[cams.length - 1];
-      return scanner.start(back.id, config, onRead, () => {});
-    },
-    () => scanner.start({ facingMode: 'user' }, config, onRead, () => {}),
-  ];
-
-  let lastErr;
-  for (const attempt of attempts) {
-    try {
-      scanner = new Html5Qrcode('reader', formats);
-      await attempt();
-      setStatus(`<div class="ok" style="font-size:17px;margin-bottom:6px">Camera is running</div>
-        <div class="muted">Point at a barcode. Your phone buzzes when it reads one.</div>
-        <button class="btn ghost" id="stop" style="margin-top:12px">Stop</button>`);
-      $('#stop').addEventListener('click', stop);
-      return;
-    } catch (e) {
-      lastErr = e;
-      try { scanner && scanner.clear(); } catch (x) {}
-      scanner = null;
-    }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    return failed(new Error('No camera on this device'));
   }
-  failed(lastErr);
+
+  let cam = null;
+  try { cam = await pickBackCamera(); } catch (e) { return failed(e); }
+
+  $('#readerBox').hidden = false;
+  const video = $('#camVideo');
+  let engine = '';
+
+  try {
+    if (await nativeDetectorReady()) {
+      const v = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+      if (cam && cam.deviceId) v.deviceId = { exact: cam.deviceId };
+      else v.facingMode = 'environment';
+      camStream = await navigator.mediaDevices.getUserMedia({ video: v });
+      video.srcObject = camStream;
+      await video.play();
+      const det = new BarcodeDetector({ formats: BOOK_FORMATS });
+      nativeTimer = setInterval(async () => {
+        try {
+          const codes = await det.detect(video);
+          if (codes && codes.length) onRead(codes[0].rawValue);
+        } catch (e) {}
+      }, 400);
+      engine = 'built-in reader';
+    } else {
+      await ensureZXing();
+      // Tell it which barcodes a book can carry. Measured: that roughly halves
+      // the time to a read (415ms to 181ms at a foot away) because each frame
+      // costs less, so more frames get looked at.
+      //
+      // Do NOT add TRY_HARDER here. It sounds like exactly what a small barcode
+      // needs and it stops the reader decoding anything at all — tested, twice.
+      let hints = null;
+      try {
+        hints = new Map();
+        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+          ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
+          ZXing.BarcodeFormat.UPC_A,  ZXing.BarcodeFormat.UPC_E,
+        ]);
+      } catch (e) { hints = null; }
+      zx = hints ? new ZXing.BrowserMultiFormatReader(hints)
+                 : new ZXing.BrowserMultiFormatReader();
+      await zx.decodeFromVideoDevice(cam ? cam.deviceId : undefined, video, (result) => {
+        if (result) onRead(result.getText());
+      });
+      camStream = video.srcObject || null;
+      engine = 'ZXing';
+    }
+  } catch (e) {
+    try { await stop(); } catch (x) {}
+    return failed(e);
+  }
+
+  scanning = true;
+  showRunning(engine);
+  setTimeout(() => { if (scanning) showRunning(engine); }, 1400);
+}
+
+function showRunning(engine) {
+  const v = $('#camVideo');
+  let lens = '', res = '';
+  try {
+    const t = camStream && camStream.getVideoTracks && camStream.getVideoTracks()[0];
+    if (t && t.label) lens = t.label;
+  } catch (e) {}
+  if (v && v.videoWidth) res = v.videoWidth + ' × ' + v.videoHeight;
+
+  setStatus(`<div class="ok" style="font-size:17px;margin-bottom:6px">Camera is running</div>
+    <div class="muted">Point it at a barcode. You do not need to hold it close.</div>
+    <div class="muted" style="margin-top:10px;font-size:12.5px">
+      Reader: <code>${esc(engine)}</code><br>
+      ${lens ? `Lens: <code>${esc(lens)}</code><br>` : ''}
+      ${res  ? `Video: <code>${res}</code>` : ''}</div>
+    <button class="btn ghost" id="stop">Stop</button>`);
+  $('#stop').addEventListener('click', stop);
 }
 
 async function stop() {
-  try { await scanner.stop(); scanner.clear(); } catch (e) {}
-  scanner = null;
-  $('#reader').hidden = true;
+  if (nativeTimer) { clearInterval(nativeTimer); nativeTimer = null; }
+  if (zx) { try { zx.reset(); } catch (e) {} zx = null; }
+  if (camStream) { try { camStream.getTracks().forEach(t => t.stop()); } catch (e) {} camStream = null; }
+  const v = $('#camVideo');
+  if (v) { try { v.pause(); } catch (e) {} v.srcObject = null; }
+  scanning = false;
+  $('#readerBox').hidden = true;
   $('#startCard').hidden = false;
   setStatus('<div class="muted">Camera stopped.</div>');
 }
+
+window.addEventListener('pagehide', () => { try { stop(); } catch (e) {} });
 
 function clean(raw) {
   let s = String(raw || '').replace(/[^0-9Xx]/g, '').toUpperCase();
@@ -249,7 +352,7 @@ async function onRead(text) {
 function draw() {
   $('#hitsCard').hidden = false;
   $('#hits').innerHTML = seen.slice(0, 10).map(h =>
-    `<div class="hit"><div class="t">${h.title}</div><div class="c">${h.isbn}</div></div>`).join('');
+    `<div class="hit"><div class="t">${esc(h.title)}</div><div class="c">${esc(h.isbn)}</div></div>`).join('');
   $('#hitNote').textContent = seen.length === 1
     ? 'That is the whole trick. Nothing here was saved.'
     : `${seen.length} barcodes read. Nothing here was saved.`;
