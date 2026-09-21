@@ -804,59 +804,22 @@ async function saveSettings(fields) {
 }
 
 /* ---------------- the scan flow ----------------
-   This decodes the video frame directly, the same way Bookburrow's own scanner
-   does: the browser's native BarcodeDetector where it exists, ZXing reading
-   straight from the video device everywhere else.
+   Deliberately close to Bookburrow's own scanner (scan.html in the parent repo),
+   because that one demonstrably works on Mary's iPad and every deviation from it
+   so far has been a step backwards. One camera open. No device picking, no
+   decoder hints. Native BarcodeDetector if the browser has a working one,
+   ZXing otherwise.
 
-   The previous version ran the frame through html5-qrcode, which decodes a
-   canvas the size of the scan box in CSS pixels — so a 260x150 box threw the
-   camera's detail away and an ISBN's 95 bars landed on under two pixels each.
-   Handing the whole video frame to the decoder removes that bottleneck
-   entirely rather than working around it. */
+   The one thing added on purpose: it says out loud what it is doing. A scanner
+   that quietly looks at nothing is indistinguishable from a broken one. */
 
-let camStream = null, nativeTimer = null, zx = null, scanning = false;
-let lastCode = '', lastCodeAt = 0, nudgeTimer = null, camNote = '';
+let camStream = null, nativeTimer = null, nativeWatchdog = null, zx = null;
+let scanning = false, lastCode = '', lastCodeAt = 0;
+let scanEngine = '', scanFrames = 0, scanNote = '', everRead = false, tickTimer = null;
 
 function isStandalone() {
   return window.navigator.standalone === true ||
          (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
-}
-
-/* An iPad on iPadOS 13 and later tells every website it is a Mac. The number of
-   touch points is what gives it away. */
-function isIPad() {
-  const ua = navigator.userAgent || '';
-  return /iPad/.test(ua) || (/Macintosh/.test(ua) && (navigator.maxTouchPoints || 0) > 1);
-}
-
-/* Several lenses answer to "the back camera" on an iPad, and the wrong one
-   cannot focus on a book held at reading distance. Rank them by name. */
-function scoreCamera(label) {
-  const l = String(label || '').toLowerCase().trim();
-  let s = 0;
-  if (/back|rear|environment|arri|trasera|hinten/.test(l)) s += 100;
-  if (/front|face|user|selfie|center stage|centre stage/.test(l)) s -= 100;
-  if (/ultra|0\.5/.test(l)) s -= 60;          // ultra-wide: will not focus close
-  if (/desk/.test(l)) s -= 80;                // Desk View points at the table
-  if (/tele|telephoto/.test(l)) s -= 25;      // long lens: too tight, hunts for focus
-  if (/dual|triple/.test(l)) s -= 5;          // virtual combination devices
-  if (/^(back|rear) camera$/.test(l)) s += 30; // the plain one, which is the one we want
-  return s;
-}
-
-/* Asking for the camera outright does two jobs: it is what makes iPhone and iPad
-   show their permission prompt, and camera labels stay blank until it is granted,
-   so there is nothing to rank before this. Errors here are real and get reported. */
-async function pickBackCamera() {
-  const probe = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
-  probe.getTracks().forEach(t => t.stop());
-  let cams = [];
-  try {
-    cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
-  } catch (e) { return null; }
-  if (!cams.length) return null;
-  const ranked = cams.map(c => ({ c, s: scoreCamera(c.label) })).sort((a, b) => b.s - a.s);
-  return ranked[0].s > -50 ? ranked[0].c : cams[cams.length - 1];
 }
 
 function setScanStatus(html, kind) {
@@ -880,7 +843,7 @@ function scanFailed(err) {
   let advice;
   if (/NotAllowedError|Permission|denied/i.test(name)) {
     advice = isStandalone()
-      ? `Your iPad will not give the camera to an app opened from the home screen until you allow it once in Safari. <b>Open the link in Safari</b>, tap Open the camera there and tap Allow, then come back to this icon.`
+      ? `iOS will not give the camera to an app opened from the home screen until you allow it once in Safari. <b>Open the link in Safari</b>, tap Open the camera there and tap Allow, then come back to this icon.`
       : `Camera access was blocked. On iPhone or iPad: tap the <b>aA</b> button in the address bar &rarr; Website Settings &rarr; Camera &rarr; Allow. Then reload.`;
   } else if (/NotFoundError|no camera|Requested device not found/i.test(name)) {
     advice = `No camera was found on this device.`;
@@ -888,6 +851,8 @@ function scanFailed(err) {
     advice = `Another app is using the camera. Close it and try again.`;
   } else if (/secure|https/i.test(name)) {
     advice = `The camera only works over a secure (https) link.`;
+  } else if (/reader did not load/i.test(name)) {
+    advice = `The barcode reader could not be downloaded. Check the connection and try again.`;
   } else {
     advice = `The camera did not start.`;
   }
@@ -898,14 +863,15 @@ function scanFailed(err) {
     <div class="muted" style="margin-top:10px;font-size:11.5px">Technical detail: ${esc(String(name))}</div>`, 'bad');
 }
 
-/* The formats a book barcode can be in. Anything else on a back cover is noise. */
+/* Only formats a book barcode actually uses, and only ones the spec defines —
+   passing a name the browser does not know makes the constructor throw. */
 const BOOK_FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e'];
 
 async function nativeDetectorReady() {
   if (!('BarcodeDetector' in window)) return false;
   try {
-    const supported = await BarcodeDetector.getSupportedFormats();
-    return !!(supported && supported.includes('ean_13'));
+    const f = await BarcodeDetector.getSupportedFormats();
+    return !!(f && f.indexOf('ean_13') !== -1);
   } catch (e) { return false; }
 }
 
@@ -914,10 +880,57 @@ function ensureZXing() {
     if (window.ZXing && window.ZXing.BrowserMultiFormatReader) return resolve();
     const s = document.createElement('script');
     s.src = 'https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js';
-    s.onload = () => (window.ZXing && window.ZXing.BrowserMultiFormatReader) ? resolve() : reject(new Error('Barcode reader did not load'));
+    s.onload = () => (window.ZXing && window.ZXing.BrowserMultiFormatReader)
+      ? resolve() : reject(new Error('Barcode reader did not load'));
     s.onerror = () => reject(new Error('Barcode reader did not load'));
     document.head.appendChild(s);
   });
+}
+
+function releaseCamera(video) {
+  if (nativeTimer) { clearInterval(nativeTimer); nativeTimer = null; }
+  if (nativeWatchdog) { clearTimeout(nativeWatchdog); nativeWatchdog = null; }
+  if (zx) { try { zx.reset(); } catch (e) {} zx = null; }
+  if (camStream) { try { camStream.getTracks().forEach(t => t.stop()); } catch (e) {} camStream = null; }
+  if (video) { try { video.pause(); } catch (e) {} video.srcObject = null; }
+}
+
+async function startNative(video) {
+  camStream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+  });
+  video.srcObject = camStream;
+  await video.play();
+  const det = new BarcodeDetector({ formats: BOOK_FORMATS });
+  scanEngine = 'built-in reader';
+  nativeTimer = setInterval(async () => {
+    scanFrames++;
+    try {
+      const codes = await det.detect(video);
+      if (codes && codes.length) onScanned(codes[0].rawValue);
+    } catch (e) { scanNote = e.name || String(e); }
+  }, 350);
+
+  /* A built-in reader can be present and still never return anything. Rather
+     than sit there looking busy, hand over to ZXing after a few seconds of
+     nothing. Switching costs a moment; not switching costs the whole feature. */
+  nativeWatchdog = setTimeout(() => {
+    if (!scanning || everRead) return;
+    scanNote = 'built-in reader found nothing; switched';
+    startZXing(video, true).catch(e => scanFailed(e));
+  }, 7000);
+}
+
+async function startZXing(video, isFallback) {
+  await ensureZXing();
+  releaseCamera(video);          // ZXing opens the camera itself
+  zx = new ZXing.BrowserMultiFormatReader();
+  await zx.decodeFromVideoDevice(undefined, video, (result) => {
+    scanFrames++;
+    if (result) onScanned(result.getText());
+  });
+  camStream = video.srcObject || null;
+  scanEngine = isFallback ? 'ZXing (after the built-in reader found nothing)' : 'ZXing';
 }
 
 async function startScan() {
@@ -932,96 +945,40 @@ async function startScan() {
     return scanFailed(new Error('No camera on this device'));
   }
 
-  let cam = null;
-  try { cam = await pickBackCamera(); }
-  catch (e) { return scanFailed(e); }
-
   box.hidden = false;
   const idle = $('#scanIdle'); if (idle) idle.hidden = true;
   const video = $('#camVideo');
-  let engine = '';
+  scanEngine = ''; scanFrames = 0; scanNote = ''; everRead = false;
 
   try {
-    if (await nativeDetectorReady()) {
-      // The fast path. The detector reads the video element itself, at its own
-      // full resolution — nothing is scaled down on the way in.
-      const v = { width: { ideal: 1920 }, height: { ideal: 1080 } };
-      if (cam && cam.deviceId) v.deviceId = { exact: cam.deviceId };
-      else v.facingMode = 'environment';
-      camStream = await navigator.mediaDevices.getUserMedia({ video: v });
-      video.srcObject = camStream;
-      await video.play();
-      const det = new BarcodeDetector({ formats: BOOK_FORMATS });
-      nativeTimer = setInterval(async () => {
-        try {
-          const codes = await det.detect(video);
-          if (codes && codes.length) onScanned(codes[0].rawValue);
-        } catch (e) {}
-      }, 400);
-      engine = 'built-in reader';
-    } else {
-      // iOS Safari and anything else without a native detector. ZXing opens the
-      // camera itself and decodes each frame whole.
-      await ensureZXing();
-      // Tell it which barcodes a book can carry. Measured: that roughly halves
-      // the time to a read (415ms to 181ms at a foot away) because each frame
-      // costs less, so more frames get looked at.
-      //
-      // Do NOT add TRY_HARDER here. It sounds like exactly what a small barcode
-      // needs and it stops the reader decoding anything at all — tested, twice.
-      let hints = null;
-      try {
-        hints = new Map();
-        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-          ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
-          ZXing.BarcodeFormat.UPC_A,  ZXing.BarcodeFormat.UPC_E,
-        ]);
-      } catch (e) { hints = null; }
-      zx = hints ? new ZXing.BrowserMultiFormatReader(hints)
-                 : new ZXing.BrowserMultiFormatReader();
-      await zx.decodeFromVideoDevice(cam ? cam.deviceId : undefined, video, (result) => {
-        if (result) onScanned(result.getText());
-      });
-      camStream = video.srcObject || null;
-      engine = 'ZXing';
-    }
+    if (await nativeDetectorReady()) await startNative(video);
+    else                             await startZXing(video, false);
   } catch (e) {
-    try { await stopScan(); } catch (x) {}
+    releaseCamera(video);
     return scanFailed(e);
   }
 
   scanning = true;
   const stop = $('#scanStop'); if (stop) stop.hidden = false;
-  showScanningStatus(engine);
-  // The frame size is not known the instant the camera opens.
-  setTimeout(() => { if (scanning) showScanningStatus(engine); }, 1200);
+  showScanningStatus();
+  clearInterval(tickTimer);
+  tickTimer = setInterval(() => { if (scanning) showScanningStatus(); }, 1000);
 }
 
-function showScanningStatus(engine) {
+function showScanningStatus() {
   const v = $('#camVideo');
-  const bits = [];
-  if (engine) bits.push(engine);
-  try {
-    const t = camStream && camStream.getVideoTracks && camStream.getVideoTracks()[0];
-    const label = t && t.label;
-    if (label) bits.push(esc(label));
-  } catch (e) {}
-  if (v && v.videoWidth) bits.push(`${v.videoWidth}&times;${v.videoHeight}`);
-  camNote = bits.join(' &middot; ');
-
+  const res = (v && v.videoWidth) ? `${v.videoWidth}&times;${v.videoHeight}` : 'starting';
   setScanStatus(`<div class="muted">Point the camera at the barcode on the back of the book.
-      It chimes the moment it reads one &mdash; you do not need to hold it close.</div>
+      It chimes the moment it reads one.</div>
     <button class="btn ghost sm" style="width:100%;margin-top:10px" onclick="showManualISBN()">Type the ISBN instead</button>
-    ${camNote ? `<div class="muted" style="margin-top:10px;font-size:11.5px">Camera: ${camNote}</div>` : ''}`);
+    <div class="muted" style="margin-top:10px;font-size:11.5px">
+      Reader: ${esc(scanEngine || 'starting')} &middot; ${res} &middot; looked at ${scanFrames} frames
+      ${scanNote ? `<br>${esc(scanNote)}` : ''}</div>`);
 }
 
 async function stopScan() {
-  clearTimeout(nudgeTimer);
-  if (nativeTimer) { clearInterval(nativeTimer); nativeTimer = null; }
-  if (zx) { try { zx.reset(); } catch (e) {} zx = null; }
-  if (camStream) { try { camStream.getTracks().forEach(t => t.stop()); } catch (e) {} camStream = null; }
-  const v = $('#camVideo');
-  if (v) { try { v.pause(); } catch (e) {} v.srcObject = null; }
+  clearInterval(tickTimer); tickTimer = null;
+  releaseCamera($('#camVideo'));
   if (!scanning) return;
   scanning = false;
   const box = $('#readerBox');
@@ -1031,14 +988,14 @@ async function stopScan() {
   setScanStatus('');
 }
 
-/* Leaving the page with the camera still on is how a device ends up with a hot
-   lens and a flat battery. */
+/* Leaving the page with the camera still on is how an iPad ends up warm and flat. */
 window.addEventListener('pagehide', () => { try { stopScan(); } catch (e) {} });
 
 function onScanned(text) {
   const now = Date.now();
   if (text === lastCode && now - lastCodeAt < 3000) return;  // ignore rapid repeats
   lastCode = text; lastCodeAt = now;
+  everRead = true;
   buzz(60, 'read');
   handleCode(cleanISBN(text));
 }
