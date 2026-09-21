@@ -334,7 +334,9 @@ textarea{min-height:130px; resize:vertical; line-height:1.5}
 </div>
 <div id="toast"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<!-- Served from this folder, not a CDN: a content filter that blocks an
+     unfamiliar domain would otherwise take the whole app down. See PRD 6.2. -->
+<script src="./lib/supabase.js"></script>
 <script>
 /* ============================================================
    Bookburrow Classroom  —  classroom library check-in / check-out
@@ -879,7 +881,9 @@ function ensureZXing() {
   return new Promise((resolve, reject) => {
     if (window.ZXing && window.ZXing.BrowserMultiFormatReader) return resolve();
     const s = document.createElement('script');
-    s.src = 'https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js';
+    // Local copy, for the same reason as supabase.js above — and it means the
+    // first scan of a session no longer pauses on a download.
+    s.src = './lib/zxing.min.js';
     s.onload = () => (window.ZXing && window.ZXing.BrowserMultiFormatReader)
       ? resolve() : reject(new Error('Barcode reader did not load'));
     s.onerror = () => reject(new Error('Barcode reader did not load'));

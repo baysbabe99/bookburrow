@@ -183,7 +183,7 @@ function ensureZXing() {
   return new Promise(function (resolve, reject) {
     if (window.ZXing && window.ZXing.BrowserMultiFormatReader) return resolve();
     var s = document.createElement('script');
-    s.src = 'https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js';
+    s.src = './lib/zxing.min.js';   // local copy; no CDN to be blocked or waited on
     s.onload = function () {
       (window.ZXing && window.ZXing.BrowserMultiFormatReader)
         ? resolve() : reject(new Error('Barcode reader did not load'));
