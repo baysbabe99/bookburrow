@@ -49,6 +49,11 @@ button{font:inherit;cursor:pointer;border:none}
 code{font-family:var(--mono);font-size:12.5px;background:#FEF3E2;padding:2px 6px;border-radius:5px;word-break:break-all}
 h2{font-family:var(--font);font-weight:700;font-size:19px;margin:0 0 8px}
 ol{margin:8px 0 0;padding-left:22px} li{margin-bottom:6px}
+#flash{background:var(--sage-dk);color:#fff;border-radius:12px;padding:15px 18px;margin-bottom:14px;
+  display:flex;align-items:center;gap:12px;font-family:var(--font);font-weight:700;font-size:17px}
+#flash .tick{width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,.22);
+  display:flex;align-items:center;justify-content:center;font-size:17px;flex:0 0 30px}
+#flash .code{font-family:var(--mono);font-size:15.5px;letter-spacing:.5px}
 .spinner{width:18px;height:18px;border:2.5px solid rgba(0,0,0,.15);border-top-color:var(--green);
          border-radius:50%;animation:spin .7s linear infinite;display:inline-block;vertical-align:-3px;margin-right:8px}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -68,6 +73,7 @@ ol{margin:8px 0 0;padding-left:22px} li{margin-bottom:6px}
     </p>
   </div>
 
+  <div id="flash" hidden></div>
   <div id="readerBox" hidden><video id="camVideo" playsinline muted></video></div>
   <div class="card" id="status" hidden></div>
 
@@ -106,6 +112,45 @@ var $ = function (s) { return document.querySelector(s); };
 var camStream = null, nativeTimer = null, nativeWatchdog = null, zx = null, tickTimer = null;
 var scanning = false, seen = [], last = '', lastAt = 0;
 var scanEngine = '', scanFrames = 0, scanNote = '', everRead = false;
+
+/* Sound. iPhone and iPad ignore navigator.vibrate entirely, so a tone is the
+   only confirmation that reaches you without staring at the screen. Web Audio
+   stays mute until a user gesture has happened, so it is built on the tap that
+   starts the camera. */
+var audio = null, flashTimer = null;
+
+function initAudio() {
+  try {
+    if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.state === 'suspended') audio.resume();
+  } catch (e) {}
+}
+
+function chime() {
+  if (!audio) return;
+  try {
+    [[880, 0], [1320, 0.09]].forEach(function (n) {
+      var o = audio.createOscillator(), g = audio.createGain();
+      var t = audio.currentTime + n[1];
+      o.type = 'sine';
+      o.frequency.value = n[0];
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.35, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.13);
+      o.connect(g); g.connect(audio.destination);
+      o.start(t); o.stop(t + 0.15);
+    });
+  } catch (e) {}
+}
+
+function showFlash(code) {
+  var f = $('#flash');
+  f.innerHTML = '<span class="tick">&#10003;</span>' +
+                '<span>Read it &mdash; <span class="code">' + esc(code) + '</span></span>';
+  f.hidden = false;
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(function () { f.hidden = true; }, 6000);
+}
 
 function isStandalone() {
   return window.navigator.standalone === true ||
@@ -199,6 +244,7 @@ async function startZXing(video, isFallback) {
 
 async function start() {
   if (scanning) return;
+  initAudio();                      // must happen on the tap, not later
   setStatus('<span class="spinner"></span><span class="muted">Starting the camera&hellip;</span>');
   $('#startCard').hidden = true;
 
@@ -279,6 +325,7 @@ function failed(err) {
 
 function stop() {
   clearInterval(tickTimer); tickTimer = null;
+  clearTimeout(flashTimer); $('#flash').hidden = true;
   releaseCamera();
   scanning = false;
   $('#readerBox').hidden = true;
@@ -300,8 +347,11 @@ function onRead(text) {
   if (text === last && now - lastAt < 3000) return;
   last = text; lastAt = now;
   everRead = true;
+  var code = clean(text);
+  chime();
+  showFlash(code);
   try { navigator.vibrate && navigator.vibrate(60); } catch (e) {}
-  seen.unshift({ isbn: clean(text), at: new Date(), via: scanEngine });
+  seen.unshift({ isbn: code, at: new Date(), via: scanEngine });
   draw();
 }
 
